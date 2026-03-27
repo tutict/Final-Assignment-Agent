@@ -1,6 +1,7 @@
 import 'package:final_assignment_front/features/api/chat_controller_api.dart';
 import 'package:final_assignment_front/features/model/agent_skill_info.dart';
 import 'package:final_assignment_front/features/model/agent_stream_event.dart';
+import 'package:final_assignment_front/features/model/agent_context_info.dart';
 import 'package:final_assignment_front/features/model/chat_action.dart';
 import 'package:final_assignment_front/i18n/api_error_localizers.dart';
 import 'package:flutter/material.dart';
@@ -50,6 +51,7 @@ class ChatController extends GetxController {
   final messages = <ChatMessage>[].obs;
   final searchResults = <String>[].obs;
   final availableSkills = <AgentSkillInfo>[].obs;
+  final agentContext = Rxn<AgentContextInfo>();
   final textController = TextEditingController();
   final chatApi = ChatControllerApi();
 
@@ -103,6 +105,7 @@ class ChatController extends GetxController {
     if (text.isEmpty || isSending.value) return;
 
     searchResults.clear();
+    agentContext.value = null;
     messages.add(ChatMessage.user(text));
     textController.clear();
     isSending.value = true;
@@ -117,12 +120,19 @@ class ChatController extends GetxController {
           case 'status':
             _showStatus(event.content ?? 'chat.status.processing'.tr);
             break;
+          case 'complete':
+            break;
+          case 'error':
+            throw Exception(event.content ?? 'chat.error.requestBody'.tr);
           case 'search':
             for (final result in event.searchResults) {
               if (!searchResults.contains(result)) {
                 searchResults.add(result);
               }
             }
+            break;
+          case 'context':
+            agentContext.value = event.agentContext;
             break;
           case 'actions':
             if (assistantIndex != null) {
@@ -177,6 +187,7 @@ class ChatController extends GetxController {
   void clearMessages() {
     messages.clear();
     searchResults.clear();
+    agentContext.value = null;
     textController.clear();
   }
 

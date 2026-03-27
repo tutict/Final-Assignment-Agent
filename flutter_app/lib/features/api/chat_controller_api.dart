@@ -8,7 +8,7 @@ import 'package:final_assignment_front/i18n/api_error_localizers.dart';
 import 'package:final_assignment_front/utils/helpers/api_exception.dart';
 import 'package:final_assignment_front/utils/services/api_client.dart';
 import 'package:final_assignment_front/utils/services/auth_token_store.dart';
-import 'package:http/http.dart' as http;
+import 'package:web_socket_channel/io.dart';
 
 final ApiClient defaultApiClient = ApiClient();
 
@@ -96,98 +96,72 @@ class ChatControllerApi {
     final base = apiClient.basePath.endsWith('/')
         ? apiClient.basePath.substring(0, apiClient.basePath.length - 1)
         : apiClient.basePath;
-
-    final uri = Uri.parse(
-      '$base/api/ai/chat?message=${Uri.encodeQueryComponent(message)}'
-      '&webSearch=$webSearch',
+    final wsScheme = base.startsWith('https://') ? 'wss://' : 'ws://';
+    final wsBase = base.replaceFirst(RegExp(r'^https?://'), '');
+    final token = await AuthTokenStore.instance.getJwtToken();
+    final channel = IOWebSocketChannel.connect(
+      Uri.parse('$wsScheme$wsBase/eventbus/ai-chat'),
+      headers: {
+        ...await _authHeaders(),
+      },
     );
 
-    final request = http.Request('GET', uri)
-      ..headers.addAll({
-        'Accept': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        ...await _authHeaders(),
-      });
-
-    final client = http.Client();
     try {
-      final response = await client.send(request);
-      if (response.statusCode >= 400) {
-        throw ApiException(
-          response.statusCode,
-          localizeHttpStatusError(response.statusCode),
-        );
-      }
+      channel.sink.add(
+        jsonEncode({
+          'token': token ?? '',
+          'service': 'ChatAgent',
+          'action': 'chatStream',
+          'idempotencyKey': 'ai-chat-${DateTime.now().microsecondsSinceEpoch}',
+          'args': [message, webSearch],
+        }),
+      );
 
-      final buffer = StringBuffer();
-      await for (final chunk in response.stream.transform(utf8.decoder)) {
-        buffer.write(chunk);
-        var normalized = buffer.toString().replaceAll('\r\n', '\n');
-        int separatorIndex = normalized.indexOf('\n\n');
-
-        while (separatorIndex >= 0) {
-          final rawEvent = normalized.substring(0, separatorIndex).trim();
-          if (rawEvent.isNotEmpty) {
-            final parsed = _parseEventBlock(rawEvent);
-            if (parsed != null) {
-              yield parsed;
-            }
-          }
-          normalized = normalized.substring(separatorIndex + 2);
-          separatorIndex = normalized.indexOf('\n\n');
+      await for (final raw in channel.stream) {
+        if (raw is! String || raw.trim().isEmpty) {
+          continue;
         }
 
-        buffer
-          ..clear()
-          ..write(normalized);
-      }
-
-      final trailing = buffer.toString().trim();
-      if (trailing.isNotEmpty) {
-        final parsed = _parseEventBlock(trailing);
+        final parsed = _parseWebSocketMessage(raw);
         if (parsed != null) {
+          if (parsed.type == 'complete') {
+            break;
+          }
+          if (parsed.type == 'error') {
+            throw ApiException(
+              500,
+              parsed.content ?? 'chat.error.requestBody',
+            );
+          }
           yield parsed;
         }
       }
     } finally {
-      client.close();
+      await channel.sink.close();
     }
   }
 
-  AgentStreamEvent? _parseEventBlock(String block) {
-    String eventName = 'message';
-    final dataLines = <String>[];
-
-    for (final rawLine in block.split('\n')) {
-      final line = rawLine.trim();
-      if (line.startsWith('event:')) {
-        eventName = line.substring(6).trim();
-      } else if (line.startsWith('data:')) {
-        dataLines.add(line.substring(5).trim());
-      }
-    }
-
-    if (dataLines.isEmpty) {
-      return null;
-    }
-
-    final joinedData = dataLines.join('\n');
+  AgentStreamEvent? _parseWebSocketMessage(String raw) {
     try {
-      final raw = jsonDecode(joinedData);
-      if (raw is Map<String, dynamic>) {
-        final parsed = AgentStreamEvent.fromJson(raw);
-        return parsed.type.isEmpty
-            ? AgentStreamEvent(
-                type: eventName,
-                content: parsed.content,
-                searchResults: parsed.searchResults,
-                actions: parsed.actions,
-              )
-            : parsed;
+      final decoded = jsonDecode(raw);
+      if (decoded is Map<String, dynamic>) {
+        if (decoded['error'] != null) {
+          return AgentStreamEvent(
+            type: 'error',
+            content: decoded['error'].toString(),
+          );
+        }
+
+        final payload = decoded['result'];
+        if (payload is Map<String, dynamic>) {
+          return AgentStreamEvent.fromJson(payload);
+        }
+
+        return AgentStreamEvent.fromJson(decoded);
       }
     } catch (error) {
       developer.log(
-        'Failed to parse SSE block: $joinedData, error: $error',
+        'Failed to parse WebSocket message: $raw, error: $error',
         name: 'ChatControllerApi',
       );
     }

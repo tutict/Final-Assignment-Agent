@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
 import 'package:final_assignment_front/features/dashboard/controllers/chat_controller.dart';
+import 'package:final_assignment_front/features/model/agent_context_info.dart';
 import 'package:final_assignment_front/features/model/chat_action.dart';
 
 class AiChat extends StatefulWidget {
@@ -62,6 +63,9 @@ class _AiChatState extends State<AiChat> {
                   controller: _scrollController,
                   padding: const EdgeInsets.fromLTRB(18, 10, 18, 18),
                   children: [
+                    if (controller.agentContext.value != null)
+                      _ContextPanel(
+                          contextInfo: controller.agentContext.value!),
                     if (controller.searchResults.isNotEmpty)
                       _SearchPanel(results: controller.searchResults),
                     ...controller.messages.map(
@@ -77,6 +81,87 @@ class _AiChatState extends State<AiChat> {
             _Composer(controller: controller),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _ContextPanel extends StatelessWidget {
+  const _ContextPanel({required this.contextInfo});
+
+  final AgentContextInfo contextInfo;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 14),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: contextInfo.privilegedOperator
+            ? const Color(0xFF183124)
+            : _AiChatState._surface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: contextInfo.privilegedOperator
+              ? const Color(0xFF2E7D57)
+              : _AiChatState._outline,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Agent Context',
+            style: TextStyle(
+              color: _AiChatState._muted,
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 10),
+          _ContextLine(
+            label: '当前身份',
+            value: contextInfo.operatorLabel ?? '未知',
+          ),
+          const SizedBox(height: 8),
+          _ContextLine(
+            label: '访问范围',
+            value: contextInfo.accessScopeLabel ?? '未知',
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ContextLine extends StatelessWidget {
+  const _ContextLine({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return RichText(
+      text: TextSpan(
+        children: [
+          TextSpan(
+            text: '$label: ',
+            style: const TextStyle(
+              color: _AiChatState._muted,
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          TextSpan(
+            text: value,
+            style: const TextStyle(
+              color: _AiChatState._text,
+              fontSize: 13,
+              height: 1.45,
+            ),
+          ),
+        ],
       ),
     );
   }

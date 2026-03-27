@@ -1,14 +1,17 @@
 import 'package:final_assignment_front/features/model/chat_action.dart';
+import 'package:final_assignment_front/features/model/agent_context_info.dart';
 
 class ChatActionResponse {
   final String? answer;
   final List<ChatAction> actions;
   final bool needConfirm;
+  final AgentContextInfo? agentContext;
 
   ChatActionResponse({
     this.answer,
     List<ChatAction>? actions,
     this.needConfirm = false,
+    this.agentContext,
   }) : actions = actions ?? const [];
 
   factory ChatActionResponse.fromJson(Map<String, dynamic> json) {
@@ -24,6 +27,11 @@ class ChatActionResponse {
       answer: json['answer'] as String?,
       actions: actions,
       needConfirm: json['needConfirm'] == true,
+      agentContext: json['agentContext'] is Map<String, dynamic>
+          ? AgentContextInfo.fromJson(
+              json['agentContext'] as Map<String, dynamic>,
+            )
+          : null,
     );
   }
 
@@ -32,11 +40,12 @@ class ChatActionResponse {
       'answer': answer,
       'actions': actions.map((action) => action.toJson()).toList(),
       'needConfirm': needConfirm,
+      'agentContext': agentContext?.toJson(),
     };
   }
 
   @override
   String toString() {
-    return 'ChatActionResponse{ answer: $answer, actions: $actions, needConfirm: $needConfirm }';
+    return 'ChatActionResponse{ answer: $answer, actions: $actions, needConfirm: $needConfirm, agentContext: $agentContext }';
   }
 }
