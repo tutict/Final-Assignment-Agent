@@ -310,6 +310,13 @@ public class CurrentUserTrafficSupportService {
 
     @Transactional
     public AppealRecord triggerCurrentUserAppealAcceptanceEvent(Long appealId, AppealAcceptanceEvent event) {
+        return triggerCurrentUserAppealAcceptanceEvent(appealId, event, null);
+    }
+
+    @Transactional
+    public AppealRecord triggerCurrentUserAppealAcceptanceEvent(Long appealId,
+                                                                AppealAcceptanceEvent event,
+                                                                AppealRecord supplementDraft) {
         if (appealId == null || appealId <= 0) {
             throw new IllegalArgumentException("Appeal ID must be greater than zero");
         }
@@ -318,6 +325,10 @@ public class CurrentUserTrafficSupportService {
         }
         ensureCurrentUserCanTriggerAcceptanceEvent(event);
         AppealRecord appeal = requireCurrentUserAppeal(appealId);
+        ensureCurrentUserEventMatchesAppealState(appeal, event);
+        if (hasSupplementPayload(supplementDraft)) {
+            appeal = appealRecordService.updateSupplementFieldsSystemManaged(appealId, supplementDraft);
+        }
         AppealAcceptanceState currentState = resolveAppealAcceptanceState(appeal.getAcceptanceStatus());
         AppealAcceptanceState newState =
                 stateMachineService.processAppealAcceptanceState(appealId, currentState, event);
@@ -351,6 +362,29 @@ public class CurrentUserTrafficSupportService {
                 && event != AppealAcceptanceEvent.RESUBMIT) {
             throw new IllegalArgumentException("Current user can only complete supplements or resubmit appeals");
         }
+    }
+
+    private void ensureCurrentUserEventMatchesAppealState(AppealRecord appeal, AppealAcceptanceEvent event) {
+        AppealAcceptanceState currentState = resolveAppealAcceptanceState(appeal.getAcceptanceStatus());
+        if (currentState == AppealAcceptanceState.NEED_SUPPLEMENT
+                && event != AppealAcceptanceEvent.SUPPLEMENT_COMPLETE) {
+            throw new IllegalStateException("Appeal is waiting for supplemental materials");
+        }
+        if (currentState == AppealAcceptanceState.REJECTED
+                && event != AppealAcceptanceEvent.RESUBMIT) {
+            throw new IllegalStateException("Rejected appeal must be resubmitted");
+        }
+        if (currentState != AppealAcceptanceState.NEED_SUPPLEMENT
+                && currentState != AppealAcceptanceState.REJECTED) {
+            throw new IllegalStateException("Appeal is not waiting for current user action");
+        }
+    }
+
+    private boolean hasSupplementPayload(AppealRecord supplementDraft) {
+        return supplementDraft != null
+                && (supplementDraft.getAppealReason() != null
+                || supplementDraft.getEvidenceDescription() != null
+                || supplementDraft.getEvidenceUrls() != null);
     }
 
     private AppealAcceptanceState resolveAppealAcceptanceState(String code) {

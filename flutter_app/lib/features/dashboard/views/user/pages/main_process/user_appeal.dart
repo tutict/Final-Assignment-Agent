@@ -958,6 +958,11 @@ class _UserAppealDetailPageState extends State<UserAppealDetailPage> {
       Get.isRegistered<UserDashboardController>()
           ? Get.find<UserDashboardController>()
           : null;
+  final GlobalKey<FormState> _supplementFormKey = GlobalKey<FormState>();
+  final TextEditingController _reasonController = TextEditingController();
+  final TextEditingController _evidenceDescriptionController =
+      TextEditingController();
+  final TextEditingController _evidenceUrlsController = TextEditingController();
   late AppealRecordModel _appeal;
   bool _isSubmittingAction = false;
 
@@ -965,7 +970,16 @@ class _UserAppealDetailPageState extends State<UserAppealDetailPage> {
   void initState() {
     super.initState();
     _appeal = widget.appeal;
+    _syncSupplementDraft(_appeal);
     _initializeApi();
+  }
+
+  @override
+  void dispose() {
+    _reasonController.dispose();
+    _evidenceDescriptionController.dispose();
+    _evidenceUrlsController.dispose();
+    super.dispose();
   }
 
   Future<void> _initializeApi() async {
@@ -1013,6 +1027,56 @@ class _UserAppealDetailPageState extends State<UserAppealDetailPage> {
         'Need_Supplement';
   }
 
+  bool _isAwaitingUserAction() {
+    return _isAcceptanceNeedSupplement() || _isAcceptanceRejected();
+  }
+
+  void _syncSupplementDraft(AppealRecordModel appeal) {
+    _reasonController.text = appeal.appealReason ?? '';
+    _evidenceDescriptionController.text = appeal.evidenceDescription ?? '';
+    _evidenceUrlsController.text = appeal.evidenceUrls ?? '';
+  }
+
+  String? _normalizeOptionalText(String value) {
+    final trimmed = value.trim();
+    return trimmed.isEmpty ? null : trimmed;
+  }
+
+  AppealRecordModel _buildSupplementPayload() {
+    return AppealRecordModel(
+      appealReason: _normalizeOptionalText(_reasonController.text),
+      evidenceDescription:
+          _normalizeOptionalText(_evidenceDescriptionController.text),
+      evidenceUrls: _normalizeOptionalText(_evidenceUrlsController.text),
+    );
+  }
+
+  Widget _buildSupplementField({
+    required ThemeData themeData,
+    required TextEditingController controller,
+    required String label,
+    String? hint,
+    int maxLines = 1,
+    String? Function(String?)? validator,
+  }) {
+    return TextFormField(
+      controller: controller,
+      enabled: !_isSubmittingAction,
+      maxLines: maxLines,
+      validator: validator,
+      decoration: InputDecoration(
+        labelText: label,
+        hintText: hint,
+        alignLabelWithHint: maxLines > 1,
+        filled: true,
+        fillColor: themeData.colorScheme.surfaceContainerLowest,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+        ),
+      ),
+    );
+  }
+
   Future<bool?> _showActionConfirmDialog(
       ThemeData themeData, String title, String confirmLabel) {
     return showDialog<bool>(
@@ -1046,6 +1110,11 @@ class _UserAppealDetailPageState extends State<UserAppealDetailPage> {
           isError: true);
       return;
     }
+    final requiresSupplementPayload = _isAwaitingUserAction();
+    if (requiresSupplementPayload &&
+        !(_supplementFormKey.currentState?.validate() ?? false)) {
+      return;
+    }
     setState(() => _isSubmittingAction = true);
     try {
       await _appealApi.initializeWithJwt();
@@ -1053,10 +1122,15 @@ class _UserAppealDetailPageState extends State<UserAppealDetailPage> {
           .apiAppealsMeAppealIdAcceptanceEventsEventPost(
             appealId: appealId,
             event: event,
+            appealRecord:
+                requiresSupplementPayload ? _buildSupplementPayload() : null,
             idempotencyKey: generateIdempotencyKey(),
           )
           .timeout(const Duration(seconds: 5));
-      setState(() => _appeal = updated);
+      setState(() {
+        _appeal = updated;
+        _syncSupplementDraft(updated);
+      });
       _showSnackBar(successMessage);
     } catch (e) {
       _showSnackBar(
@@ -1138,6 +1212,14 @@ class _UserAppealDetailPageState extends State<UserAppealDetailPage> {
                             _appeal.appealReason ?? 'common.none'.tr,
                             themeData),
                         _buildDetailRow(
+                            'appeal.detail.evidenceDescription'.tr,
+                            _appeal.evidenceDescription ?? 'common.none'.tr,
+                            themeData),
+                        _buildDetailRow(
+                            'appeal.detail.evidenceUrls'.tr,
+                            _appeal.evidenceUrls ?? 'common.none'.tr,
+                            themeData),
+                        _buildDetailRow(
                             'appeal.detail.time'.tr,
                             formatAppealDateTime(_appeal.appealTime),
                             themeData),
@@ -1171,7 +1253,7 @@ class _UserAppealDetailPageState extends State<UserAppealDetailPage> {
                   ),
                 ),
                 const SizedBox(height: 20),
-                if (_isAcceptanceNeedSupplement() || _isAcceptanceRejected())
+                if (_isAwaitingUserAction())
                   Card(
                     elevation: 2,
                     color: themeData.colorScheme.surfaceContainer,
@@ -1179,60 +1261,102 @@ class _UserAppealDetailPageState extends State<UserAppealDetailPage> {
                         borderRadius: BorderRadius.circular(12)),
                     child: Padding(
                       padding: const EdgeInsets.all(16.0),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          Text(
-                            'appeal.note.awaitingUserAction'.tr,
-                            style: themeData.textTheme.bodyMedium?.copyWith(
-                              color: themeData.colorScheme.onSurfaceVariant,
+                      child: Form(
+                        key: _supplementFormKey,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Text(
+                              'appeal.form.supplementTitle'.tr,
+                              style: themeData.textTheme.titleMedium?.copyWith(
+                                color: themeData.colorScheme.onSurface,
+                                fontWeight: FontWeight.w600,
+                              ),
                             ),
-                          ),
-                          const SizedBox(height: 12),
-                          if (_isSubmittingAction)
-                            const Center(child: CupertinoActivityIndicator())
-                          else if (_isAcceptanceNeedSupplement())
-                            ElevatedButton.icon(
-                              onPressed: () async {
-                                final confirmed =
-                                    await _showActionConfirmDialog(
-                                  themeData,
-                                  'appeal.action.supplementComplete'.tr,
-                                  'appeal.action.supplementComplete'.tr,
-                                );
-                                if (confirmed == true) {
-                                  await _triggerCurrentUserAcceptanceEvent(
-                                    event: 'SUPPLEMENT_COMPLETE',
-                                    successMessage:
-                                        'appeal.success.supplementCompleted'.tr,
-                                  );
-                                }
-                              },
-                              icon: const Icon(CupertinoIcons.doc_text),
-                              label:
-                                  Text('appeal.action.supplementComplete'.tr),
-                            )
-                          else
-                            ElevatedButton.icon(
-                              onPressed: () async {
-                                final confirmed =
-                                    await _showActionConfirmDialog(
-                                  themeData,
-                                  'appeal.action.resubmit'.tr,
-                                  'appeal.action.resubmit'.tr,
-                                );
-                                if (confirmed == true) {
-                                  await _triggerCurrentUserAcceptanceEvent(
-                                    event: 'RESUBMIT',
-                                    successMessage:
-                                        'appeal.success.resubmitted'.tr,
-                                  );
-                                }
-                              },
-                              icon: const Icon(CupertinoIcons.refresh),
-                              label: Text('appeal.action.resubmit'.tr),
+                            const SizedBox(height: 8),
+                            Text(
+                              'appeal.form.supplementHint'.tr,
+                              style: themeData.textTheme.bodyMedium?.copyWith(
+                                color: themeData.colorScheme.onSurfaceVariant,
+                              ),
                             ),
-                        ],
+                            const SizedBox(height: 12),
+                            _buildSupplementField(
+                              themeData: themeData,
+                              controller: _reasonController,
+                              label: 'appeal.form.reason'.tr,
+                              maxLines: 3,
+                              validator: (value) {
+                                if ((value ?? '').trim().isEmpty) {
+                                  return 'appeal.validation.required'.trParams({
+                                    'field': 'appeal.form.reason'.tr,
+                                  });
+                                }
+                                return null;
+                              },
+                            ),
+                            const SizedBox(height: 12),
+                            _buildSupplementField(
+                              themeData: themeData,
+                              controller: _evidenceDescriptionController,
+                              label: 'appeal.form.evidenceDescription'.tr,
+                              maxLines: 3,
+                            ),
+                            const SizedBox(height: 12),
+                            _buildSupplementField(
+                              themeData: themeData,
+                              controller: _evidenceUrlsController,
+                              label: 'appeal.form.evidenceUrls'.tr,
+                              hint: 'appeal.form.evidenceUrlsHint'.tr,
+                              maxLines: 3,
+                            ),
+                            const SizedBox(height: 12),
+                            if (_isSubmittingAction)
+                              const Center(child: CupertinoActivityIndicator())
+                            else if (_isAcceptanceNeedSupplement())
+                              ElevatedButton.icon(
+                                onPressed: () async {
+                                  final confirmed =
+                                      await _showActionConfirmDialog(
+                                    themeData,
+                                    'appeal.action.supplementComplete'.tr,
+                                    'appeal.action.supplementComplete'.tr,
+                                  );
+                                  if (confirmed == true) {
+                                    await _triggerCurrentUserAcceptanceEvent(
+                                      event: 'SUPPLEMENT_COMPLETE',
+                                      successMessage:
+                                          'appeal.success.supplementCompleted'
+                                              .tr,
+                                    );
+                                  }
+                                },
+                                icon: const Icon(CupertinoIcons.doc_text),
+                                label:
+                                    Text('appeal.action.supplementComplete'.tr),
+                              )
+                            else
+                              ElevatedButton.icon(
+                                onPressed: () async {
+                                  final confirmed =
+                                      await _showActionConfirmDialog(
+                                    themeData,
+                                    'appeal.action.resubmit'.tr,
+                                    'appeal.action.resubmit'.tr,
+                                  );
+                                  if (confirmed == true) {
+                                    await _triggerCurrentUserAcceptanceEvent(
+                                      event: 'RESUBMIT',
+                                      successMessage:
+                                          'appeal.success.resubmitted'.tr,
+                                    );
+                                  }
+                                },
+                                icon: const Icon(CupertinoIcons.refresh),
+                                label: Text('appeal.action.resubmit'.tr),
+                              ),
+                          ],
+                        ),
                       ),
                     ),
                   ),
@@ -1269,12 +1393,11 @@ class _UserAppealDetailPageState extends State<UserAppealDetailPage> {
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16.0),
                   child: Text(
-                    (_isAcceptanceNeedSupplement() || _isAcceptanceRejected())
+                    _isAwaitingUserAction()
                         ? 'appeal.note.awaitingUserAction'.tr
                         : 'appeal.note.readonly'.tr,
                     style: themeData.textTheme.bodyMedium?.copyWith(
-                      color: (_isAcceptanceNeedSupplement() ||
-                              _isAcceptanceRejected())
+                      color: _isAwaitingUserAction()
                           ? themeData.colorScheme.primary
                           : themeData.colorScheme.error,
                       fontStyle: FontStyle.italic,

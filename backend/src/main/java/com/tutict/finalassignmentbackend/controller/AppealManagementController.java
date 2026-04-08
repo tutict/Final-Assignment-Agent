@@ -102,10 +102,15 @@ public class AppealManagementController {
     @RolesAllowed({"SUPER_ADMIN", "ADMIN", "APPEAL_REVIEWER", "USER"})
     @Operation(summary = "Current user triggers a self-service appeal acceptance event")
     public ResponseEntity<AppealRecord> triggerCurrentUserAppealAcceptanceEvent(@PathVariable Long appealId,
-                                                                                @PathVariable AppealAcceptanceEvent event) {
+                                                                                @PathVariable AppealAcceptanceEvent event,
+                                                                                @RequestBody(required = false)
+                                                                                CurrentUserAppealSubmissionRequest request) {
         try {
             return ResponseEntity.ok(
-                    currentUserTrafficSupportService.triggerCurrentUserAppealAcceptanceEvent(appealId, event));
+                    currentUserTrafficSupportService.triggerCurrentUserAppealAcceptanceEvent(
+                            appealId,
+                            event,
+                            request == null ? null : request.toAppealRecord()));
         } catch (IllegalArgumentException ex) {
             LOG.log(Level.WARNING, "Current user appeal acceptance event rejected", ex);
             return ResponseEntity.badRequest().build();
@@ -383,5 +388,43 @@ public class AppealManagementController {
         return (ex instanceof IllegalArgumentException || ex instanceof IllegalStateException)
                 ? HttpStatus.BAD_REQUEST
                 : HttpStatus.INTERNAL_SERVER_ERROR;
+    }
+
+    public static class CurrentUserAppealSubmissionRequest {
+        private String appealReason;
+        private String evidenceDescription;
+        private String evidenceUrls;
+
+        public String getAppealReason() {
+            return appealReason;
+        }
+
+        public void setAppealReason(String appealReason) {
+            this.appealReason = appealReason;
+        }
+
+        public String getEvidenceDescription() {
+            return evidenceDescription;
+        }
+
+        public void setEvidenceDescription(String evidenceDescription) {
+            this.evidenceDescription = evidenceDescription;
+        }
+
+        public String getEvidenceUrls() {
+            return evidenceUrls;
+        }
+
+        public void setEvidenceUrls(String evidenceUrls) {
+            this.evidenceUrls = evidenceUrls;
+        }
+
+        public AppealRecord toAppealRecord() {
+            AppealRecord appealRecord = new AppealRecord();
+            appealRecord.setAppealReason(appealReason);
+            appealRecord.setEvidenceDescription(evidenceDescription);
+            appealRecord.setEvidenceUrls(evidenceUrls);
+            return appealRecord;
+        }
     }
 }

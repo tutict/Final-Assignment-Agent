@@ -192,13 +192,14 @@ class AppealManagementControllerApi {
   Future<AppealRecordModel> apiAppealsMeAppealIdAcceptanceEventsEventPost({
     required int appealId,
     required String event,
+    AppealRecordModel? appealRecord,
     String? idempotencyKey,
   }) async {
     final response = await apiClient.invokeAPI(
       '/api/appeals/me/$appealId/acceptance-events/$event',
       'POST',
       const [],
-      null,
+      appealRecord?.toJson(),
       await _getHeaders(idempotencyKey: idempotencyKey),
       const {},
       'application/json',

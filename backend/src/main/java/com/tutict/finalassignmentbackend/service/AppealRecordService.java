@@ -120,6 +120,42 @@ public class AppealRecordService {
 
     @Transactional
     @CacheEvict(cacheNames = CACHE, allEntries = true)
+    public AppealRecord updateSupplementFieldsSystemManaged(Long appealId, AppealRecord supplementDraft) {
+        validateAppealId(appealId);
+        if (supplementDraft == null) {
+            throw new IllegalArgumentException("Appeal supplement draft cannot be null");
+        }
+        AppealRecord existing = appealRecordMapper.selectById(appealId);
+        if (existing == null) {
+            throw new IllegalStateException("Appeal not found: " + appealId);
+        }
+        ensureSupplementUpdateAllowed(existing);
+
+        String normalizedAppealReason = normalizeReason(supplementDraft.getAppealReason());
+        if (normalizedAppealReason != null) {
+            existing.setAppealReason(normalizedAppealReason);
+        }
+        if (supplementDraft.getAppealReason() != null && normalizedAppealReason == null) {
+            throw new IllegalArgumentException("Appeal reason is required");
+        }
+        if (supplementDraft.getEvidenceDescription() != null) {
+            existing.setEvidenceDescription(normalizeSupplementField(supplementDraft.getEvidenceDescription()));
+        }
+        if (supplementDraft.getEvidenceUrls() != null) {
+            existing.setEvidenceUrls(normalizeSupplementField(supplementDraft.getEvidenceUrls()));
+        }
+
+        existing.setUpdatedAt(LocalDateTime.now());
+        int rows = appealRecordMapper.updateById(existing);
+        if (rows == 0) {
+            throw new IllegalStateException("Appeal not found: " + appealId);
+        }
+        syncIndexAfterCommit(existing);
+        return existing;
+    }
+
+    @Transactional
+    @CacheEvict(cacheNames = CACHE, allEntries = true)
     public AppealRecord updateAppealSystemManaged(AppealRecord appealRecord) {
         AppealRecord existing = appealRecordMapper.selectById(appealRecord.getAppealId());
         if (existing == null) {
@@ -963,6 +999,23 @@ public class AppealRecordService {
         if (appealRecord == null || isBlank(appealRecord.getRejectionReason())) {
             throw new IllegalArgumentException("Rejection reason is required for rejected or supplement-needed appeals");
         }
+    }
+
+    private void ensureSupplementUpdateAllowed(AppealRecord appealRecord) {
+        AppealAcceptanceState acceptanceState =
+                AppealAcceptanceState.fromCode(trimToEmpty(appealRecord.getAcceptanceStatus()));
+        if (acceptanceState != AppealAcceptanceState.NEED_SUPPLEMENT
+                && acceptanceState != AppealAcceptanceState.REJECTED) {
+            throw new IllegalStateException("Appeal supplement content can only be updated while awaiting user action");
+        }
+    }
+
+    private String normalizeSupplementField(String value) {
+        if (value == null) {
+            return null;
+        }
+        String normalized = value.trim();
+        return normalized.isEmpty() ? null : normalized;
     }
 
     private void syncOffenseAfterAppealDeletion(Long offenseId) {

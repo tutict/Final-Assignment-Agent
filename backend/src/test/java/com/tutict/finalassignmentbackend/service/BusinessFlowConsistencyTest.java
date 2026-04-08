@@ -468,6 +468,93 @@ class BusinessFlowConsistencyTest {
     }
 
     @Test
+    void updateAppealSupplementFieldsShouldAllowOnlyEditableEvidenceFields() {
+        AppealRecordMapper appealRecordMapper = Mockito.mock(AppealRecordMapper.class);
+        AppealReviewMapper appealReviewMapper = Mockito.mock(AppealReviewMapper.class);
+        SysRequestHistoryMapper requestHistoryMapper = Mockito.mock(SysRequestHistoryMapper.class);
+        @SuppressWarnings("unchecked")
+        KafkaTemplate<String, String> kafkaTemplate = Mockito.mock(KafkaTemplate.class);
+        AppealRecordSearchRepository searchRepository = Mockito.mock(AppealRecordSearchRepository.class);
+        OffenseRecordService offenseRecordService = Mockito.mock(OffenseRecordService.class);
+        SysUserService sysUserService = Mockito.mock(SysUserService.class);
+        StateMachineService stateMachineService = Mockito.mock(StateMachineService.class);
+
+        AppealRecordService service = new AppealRecordService(
+                appealRecordMapper,
+                appealReviewMapper,
+                requestHistoryMapper,
+                kafkaTemplate,
+                searchRepository,
+                offenseRecordService,
+                sysUserService,
+                stateMachineService,
+                new ObjectMapper());
+
+        AppealRecord existing = new AppealRecord();
+        existing.setAppealId(30L);
+        existing.setOffenseId(20L);
+        existing.setAppealReason("Old reason");
+        existing.setEvidenceDescription("Old evidence");
+        existing.setEvidenceUrls("[\"old\"]");
+        existing.setAcceptanceStatus(AppealAcceptanceState.NEED_SUPPLEMENT.getCode());
+        existing.setProcessStatus(AppealProcessState.UNPROCESSED.getCode());
+        when(appealRecordMapper.selectById(30L)).thenReturn(existing);
+        when(appealRecordMapper.updateById(any(AppealRecord.class))).thenReturn(1);
+
+        AppealRecord draft = new AppealRecord();
+        draft.setAppealReason("Updated reason");
+        draft.setEvidenceDescription("Updated evidence");
+        draft.setEvidenceUrls("[\"new\"]");
+        draft.setAcceptanceStatus(AppealAcceptanceState.ACCEPTED.getCode());
+        draft.setProcessStatus(AppealProcessState.APPROVED.getCode());
+
+        AppealRecord result = service.updateSupplementFieldsSystemManaged(30L, draft);
+
+        assertEquals("Updated reason", result.getAppealReason());
+        assertEquals("Updated evidence", result.getEvidenceDescription());
+        assertEquals("[\"new\"]", result.getEvidenceUrls());
+        assertEquals(AppealAcceptanceState.NEED_SUPPLEMENT.getCode(), result.getAcceptanceStatus());
+        assertEquals(AppealProcessState.UNPROCESSED.getCode(), result.getProcessStatus());
+        verify(appealRecordMapper).updateById(existing);
+    }
+
+    @Test
+    void updateAppealSupplementFieldsShouldRejectNonAwaitingAppeal() {
+        AppealRecordMapper appealRecordMapper = Mockito.mock(AppealRecordMapper.class);
+        AppealReviewMapper appealReviewMapper = Mockito.mock(AppealReviewMapper.class);
+        SysRequestHistoryMapper requestHistoryMapper = Mockito.mock(SysRequestHistoryMapper.class);
+        @SuppressWarnings("unchecked")
+        KafkaTemplate<String, String> kafkaTemplate = Mockito.mock(KafkaTemplate.class);
+        AppealRecordSearchRepository searchRepository = Mockito.mock(AppealRecordSearchRepository.class);
+        OffenseRecordService offenseRecordService = Mockito.mock(OffenseRecordService.class);
+        SysUserService sysUserService = Mockito.mock(SysUserService.class);
+        StateMachineService stateMachineService = Mockito.mock(StateMachineService.class);
+
+        AppealRecordService service = new AppealRecordService(
+                appealRecordMapper,
+                appealReviewMapper,
+                requestHistoryMapper,
+                kafkaTemplate,
+                searchRepository,
+                offenseRecordService,
+                sysUserService,
+                stateMachineService,
+                new ObjectMapper());
+
+        AppealRecord existing = new AppealRecord();
+        existing.setAppealId(30L);
+        existing.setAcceptanceStatus(AppealAcceptanceState.ACCEPTED.getCode());
+        when(appealRecordMapper.selectById(30L)).thenReturn(existing);
+
+        AppealRecord draft = new AppealRecord();
+        draft.setAppealReason("Updated reason");
+
+        assertThrows(IllegalStateException.class,
+                () -> service.updateSupplementFieldsSystemManaged(30L, draft));
+        verify(appealRecordMapper, never()).updateById(any(AppealRecord.class));
+    }
+
+    @Test
     void searchAppealByAppellantIdCardShouldUseExactMatchInDatabaseFallback() {
         AppealRecordMapper appealRecordMapper = Mockito.mock(AppealRecordMapper.class);
         AppealReviewMapper appealReviewMapper = Mockito.mock(AppealReviewMapper.class);
@@ -2976,6 +3063,131 @@ class BusinessFlowConsistencyTest {
     }
 
     @Test
+    void currentUserAppealAcceptanceEventShouldPersistSupplementFieldsBeforeCompleting() {
+        SysUserService sysUserService = Mockito.mock(SysUserService.class);
+        DriverInformationService driverInformationService = Mockito.mock(DriverInformationService.class);
+        OffenseRecordService offenseRecordService = Mockito.mock(OffenseRecordService.class);
+        FineRecordService fineRecordService = Mockito.mock(FineRecordService.class);
+        DeductionRecordService deductionRecordService = Mockito.mock(DeductionRecordService.class);
+        VehicleInformationService vehicleInformationService = Mockito.mock(VehicleInformationService.class);
+        AppealRecordService appealRecordService = Mockito.mock(AppealRecordService.class);
+        PaymentRecordService paymentRecordService = Mockito.mock(PaymentRecordService.class);
+        StateMachineService stateMachineService = Mockito.mock(StateMachineService.class);
+
+        CurrentUserTrafficSupportService service = new CurrentUserTrafficSupportService(
+                sysUserService,
+                driverInformationService,
+                offenseRecordService,
+                fineRecordService,
+                deductionRecordService,
+                vehicleInformationService,
+                appealRecordService,
+                paymentRecordService,
+                stateMachineService);
+
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken("carol", "n/a", Collections.emptyList()));
+
+        SysUser user = new SysUser();
+        user.setUserId(200L);
+        user.setUsername("carol");
+        when(sysUserService.findByUsername("carol")).thenReturn(user);
+
+        DriverInformation driver = new DriverInformation();
+        driver.setDriverId(200L);
+        when(driverInformationService.findLinkedDriverForUser(any())).thenReturn(driver);
+        when(offenseRecordService.findIdsByDriverIds(List.of(200L))).thenReturn(List.of(500L));
+
+        AppealRecord existing = new AppealRecord();
+        existing.setAppealId(501L);
+        existing.setOffenseId(500L);
+        existing.setAcceptanceStatus(AppealAcceptanceState.NEED_SUPPLEMENT.getCode());
+        when(appealRecordService.getAppealById(501L)).thenReturn(existing);
+
+        AppealRecord supplementDraft = new AppealRecord();
+        supplementDraft.setAppealReason("Updated supplement reason");
+        supplementDraft.setEvidenceDescription("Uploaded additional explanation");
+        supplementDraft.setEvidenceUrls("[\"supplement-1\"]");
+
+        AppealRecord updatedSupplement = new AppealRecord();
+        updatedSupplement.setAppealId(501L);
+        updatedSupplement.setOffenseId(500L);
+        updatedSupplement.setAcceptanceStatus(AppealAcceptanceState.NEED_SUPPLEMENT.getCode());
+        updatedSupplement.setAppealReason("Updated supplement reason");
+        when(appealRecordService.updateSupplementFieldsSystemManaged(501L, supplementDraft))
+                .thenReturn(updatedSupplement);
+        when(stateMachineService.processAppealAcceptanceState(
+                501L,
+                AppealAcceptanceState.NEED_SUPPLEMENT,
+                AppealAcceptanceEvent.SUPPLEMENT_COMPLETE)).thenReturn(AppealAcceptanceState.PENDING);
+
+        AppealRecord finalRecord = new AppealRecord();
+        finalRecord.setAppealId(501L);
+        finalRecord.setAcceptanceStatus(AppealAcceptanceState.PENDING.getCode());
+        when(appealRecordService.updateAcceptanceStatus(501L, AppealAcceptanceState.PENDING)).thenReturn(finalRecord);
+
+        AppealRecord result = service.triggerCurrentUserAppealAcceptanceEvent(
+                501L,
+                AppealAcceptanceEvent.SUPPLEMENT_COMPLETE,
+                supplementDraft);
+
+        assertEquals(AppealAcceptanceState.PENDING.getCode(), result.getAcceptanceStatus());
+        verify(appealRecordService).updateSupplementFieldsSystemManaged(501L, supplementDraft);
+        verify(appealRecordService).updateAcceptanceStatus(501L, AppealAcceptanceState.PENDING);
+    }
+
+    @Test
+    void currentUserAppealAcceptanceEventShouldRejectAppealOutsideUserActionStates() {
+        SysUserService sysUserService = Mockito.mock(SysUserService.class);
+        DriverInformationService driverInformationService = Mockito.mock(DriverInformationService.class);
+        OffenseRecordService offenseRecordService = Mockito.mock(OffenseRecordService.class);
+        FineRecordService fineRecordService = Mockito.mock(FineRecordService.class);
+        DeductionRecordService deductionRecordService = Mockito.mock(DeductionRecordService.class);
+        VehicleInformationService vehicleInformationService = Mockito.mock(VehicleInformationService.class);
+        AppealRecordService appealRecordService = Mockito.mock(AppealRecordService.class);
+        PaymentRecordService paymentRecordService = Mockito.mock(PaymentRecordService.class);
+        StateMachineService stateMachineService = Mockito.mock(StateMachineService.class);
+
+        CurrentUserTrafficSupportService service = new CurrentUserTrafficSupportService(
+                sysUserService,
+                driverInformationService,
+                offenseRecordService,
+                fineRecordService,
+                deductionRecordService,
+                vehicleInformationService,
+                appealRecordService,
+                paymentRecordService,
+                stateMachineService);
+
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken("carol", "n/a", Collections.emptyList()));
+
+        SysUser user = new SysUser();
+        user.setUserId(200L);
+        user.setUsername("carol");
+        when(sysUserService.findByUsername("carol")).thenReturn(user);
+
+        DriverInformation driver = new DriverInformation();
+        driver.setDriverId(200L);
+        when(driverInformationService.findLinkedDriverForUser(any())).thenReturn(driver);
+        when(offenseRecordService.findIdsByDriverIds(List.of(200L))).thenReturn(List.of(500L));
+
+        AppealRecord existing = new AppealRecord();
+        existing.setAppealId(501L);
+        existing.setOffenseId(500L);
+        existing.setAcceptanceStatus(AppealAcceptanceState.ACCEPTED.getCode());
+        when(appealRecordService.getAppealById(501L)).thenReturn(existing);
+
+        assertThrows(IllegalStateException.class,
+                () -> service.triggerCurrentUserAppealAcceptanceEvent(
+                        501L,
+                        AppealAcceptanceEvent.SUPPLEMENT_COMPLETE,
+                        new AppealRecord()));
+        verify(appealRecordService, never()).updateSupplementFieldsSystemManaged(any(), any());
+        verify(stateMachineService, never()).processAppealAcceptanceState(any(), any(), any());
+    }
+
+    @Test
     void createCurrentUserPaymentShouldPopulatePayerFieldsWithinCurrentUserScope() {
         SysUserService sysUserService = Mockito.mock(SysUserService.class);
         DriverInformationService driverInformationService = Mockito.mock(DriverInformationService.class);
@@ -3086,13 +3298,57 @@ class BusinessFlowConsistencyTest {
 
         when(currentUserTrafficSupportService.triggerCurrentUserAppealAcceptanceEvent(
                 501L,
-                AppealAcceptanceEvent.RESUBMIT)).thenThrow(new IllegalStateException("Appeal acceptance state does not allow this event"));
+                AppealAcceptanceEvent.RESUBMIT,
+                null)).thenThrow(new IllegalStateException("Appeal acceptance state does not allow this event"));
 
         ResponseEntity<AppealRecord> response = controller.triggerCurrentUserAppealAcceptanceEvent(
                 501L,
-                AppealAcceptanceEvent.RESUBMIT);
+                AppealAcceptanceEvent.RESUBMIT,
+                null);
 
         assertEquals(HttpStatus.CONFLICT, response.getStatusCode());
+    }
+
+    @Test
+    void currentUserAppealAcceptanceEndpointShouldForwardSupplementPayload() {
+        AppealRecordService appealRecordService = Mockito.mock(AppealRecordService.class);
+        AppealReviewService appealReviewService = Mockito.mock(AppealReviewService.class);
+        CurrentUserTrafficSupportService currentUserTrafficSupportService =
+                Mockito.mock(CurrentUserTrafficSupportService.class);
+
+        AppealManagementController controller = new AppealManagementController(
+                appealRecordService,
+                appealReviewService,
+                currentUserTrafficSupportService);
+
+        AppealManagementController.CurrentUserAppealSubmissionRequest request =
+                new AppealManagementController.CurrentUserAppealSubmissionRequest();
+        request.setAppealReason("Need to add more detail");
+        request.setEvidenceDescription("Uploaded dashboard screenshots");
+        request.setEvidenceUrls("[\"https://example.com/evidence.png\"]");
+
+        AppealRecord updated = new AppealRecord();
+        updated.setAppealId(501L);
+        updated.setAcceptanceStatus(AppealAcceptanceState.PENDING.getCode());
+        when(currentUserTrafficSupportService.triggerCurrentUserAppealAcceptanceEvent(
+                eq(501L),
+                eq(AppealAcceptanceEvent.SUPPLEMENT_COMPLETE),
+                any(AppealRecord.class))).thenReturn(updated);
+
+        ResponseEntity<AppealRecord> response = controller.triggerCurrentUserAppealAcceptanceEvent(
+                501L,
+                AppealAcceptanceEvent.SUPPLEMENT_COMPLETE,
+                request);
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        ArgumentCaptor<AppealRecord> captor = ArgumentCaptor.forClass(AppealRecord.class);
+        verify(currentUserTrafficSupportService).triggerCurrentUserAppealAcceptanceEvent(
+                eq(501L),
+                eq(AppealAcceptanceEvent.SUPPLEMENT_COMPLETE),
+                captor.capture());
+        assertEquals("Need to add more detail", captor.getValue().getAppealReason());
+        assertEquals("Uploaded dashboard screenshots", captor.getValue().getEvidenceDescription());
+        assertEquals("[\"https://example.com/evidence.png\"]", captor.getValue().getEvidenceUrls());
     }
 
     @Test
