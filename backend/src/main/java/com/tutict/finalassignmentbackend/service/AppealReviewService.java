@@ -574,7 +574,10 @@ public class AppealReviewService {
         String reviewResult = trimToEmpty(appealReview.getReviewResult());
         if ("Approved".equalsIgnoreCase(reviewResult)) {
             if (processState == AppealProcessState.UNDER_REVIEW) {
-                appealRecord = appealRecordService.updateProcessStatus(appealRecord.getAppealId(), AppealProcessState.APPROVED);
+                appealRecord = appealRecordService.updateProcessStatus(
+                        appealRecord.getAppealId(),
+                        AppealProcessState.APPROVED,
+                        resolveProcessResult(appealReview, "Approved"));
             }
             applyApprovedReviewAction(appealReview, appealRecord);
             return;
@@ -582,7 +585,10 @@ public class AppealReviewService {
 
         if (("Rejected".equalsIgnoreCase(reviewResult) || "Need_Resubmit".equalsIgnoreCase(reviewResult))
                 && processState == AppealProcessState.UNDER_REVIEW) {
-            appealRecordService.updateProcessStatus(appealRecord.getAppealId(), AppealProcessState.REJECTED);
+            appealRecordService.updateProcessStatus(
+                    appealRecord.getAppealId(),
+                    AppealProcessState.REJECTED,
+                    resolveProcessResult(appealReview, reviewResult));
         }
     }
 
@@ -823,5 +829,20 @@ public class AppealReviewService {
             return PaymentState.OVERDUE.getCode();
         }
         return PaymentState.UNPAID.getCode();
+    }
+
+    private String resolveProcessResult(AppealReview appealReview, String fallback) {
+        if (appealReview == null) {
+            return fallback;
+        }
+        String normalizedOpinion = trimToEmpty(appealReview.getReviewOpinion());
+        if (!normalizedOpinion.isEmpty()) {
+            return truncate(normalizedOpinion);
+        }
+        String normalizedResult = trimToEmpty(appealReview.getReviewResult());
+        if (!normalizedResult.isEmpty()) {
+            return truncate(normalizedResult);
+        }
+        return isBlank(fallback) ? null : truncate(fallback.trim());
     }
 }

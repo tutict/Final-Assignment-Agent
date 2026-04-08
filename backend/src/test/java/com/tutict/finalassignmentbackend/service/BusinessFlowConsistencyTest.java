@@ -3226,6 +3226,56 @@ class BusinessFlowConsistencyTest {
     }
 
     @Test
+    void finalApprovedReviewShouldPersistProcessResultFromReviewOpinion() {
+        AppealReviewMapper appealReviewMapper = Mockito.mock(AppealReviewMapper.class);
+        SysRequestHistoryMapper requestHistoryMapper = Mockito.mock(SysRequestHistoryMapper.class);
+        AppealReviewSearchRepository searchRepository = Mockito.mock(AppealReviewSearchRepository.class);
+        AppealRecordService appealRecordService = Mockito.mock(AppealRecordService.class);
+        OffenseRecordService offenseRecordService = Mockito.mock(OffenseRecordService.class);
+        FineRecordService fineRecordService = Mockito.mock(FineRecordService.class);
+        DeductionRecordService deductionRecordService = Mockito.mock(DeductionRecordService.class);
+        PaymentRecordService paymentRecordService = Mockito.mock(PaymentRecordService.class);
+        SysUserService sysUserService = Mockito.mock(SysUserService.class);
+        @SuppressWarnings("unchecked")
+        KafkaTemplate<String, String> kafkaTemplate = Mockito.mock(KafkaTemplate.class);
+
+        AppealReviewService service = new AppealReviewService(
+                appealReviewMapper,
+                requestHistoryMapper,
+                searchRepository,
+                appealRecordService,
+                offenseRecordService,
+                fineRecordService,
+                deductionRecordService,
+                paymentRecordService,
+                sysUserService,
+                kafkaTemplate,
+                new ObjectMapper());
+
+        AppealRecord appealRecord = new AppealRecord();
+        appealRecord.setAppealId(309L);
+        appealRecord.setOffenseId(409L);
+        appealRecord.setAcceptanceStatus(AppealAcceptanceState.ACCEPTED.getCode());
+        appealRecord.setProcessStatus(AppealProcessState.UNDER_REVIEW.getCode());
+        when(appealRecordService.getAppealById(309L)).thenReturn(appealRecord);
+        when(appealReviewMapper.selectList(any())).thenReturn(List.of());
+        when(appealReviewMapper.insert(any(AppealReview.class))).thenReturn(1);
+
+        AppealReview review = new AppealReview();
+        review.setAppealId(309L);
+        review.setReviewLevel("Final");
+        review.setReviewResult("Approved");
+        review.setReviewOpinion("Evidence verified and appeal approved");
+
+        service.createReview(review);
+
+        verify(appealRecordService).updateProcessStatus(
+                309L,
+                AppealProcessState.APPROVED,
+                "Evidence verified and appeal approved");
+    }
+
+    @Test
     void finalApprovedReviewShouldSyncOffensePenaltySummaryAfterFineReduction() {
         AppealReviewMapper appealReviewMapper = Mockito.mock(AppealReviewMapper.class);
         SysRequestHistoryMapper requestHistoryMapper = Mockito.mock(SysRequestHistoryMapper.class);
@@ -3264,7 +3314,8 @@ class BusinessFlowConsistencyTest {
         approvedAppeal.setOffenseId(410L);
         approvedAppeal.setAcceptanceStatus(AppealAcceptanceState.ACCEPTED.getCode());
         approvedAppeal.setProcessStatus(AppealProcessState.APPROVED.getCode());
-        when(appealRecordService.updateProcessStatus(310L, AppealProcessState.APPROVED)).thenReturn(approvedAppeal);
+        when(appealRecordService.updateProcessStatus(310L, AppealProcessState.APPROVED, "Approved"))
+                .thenReturn(approvedAppeal);
 
         when(appealReviewMapper.selectList(any())).thenReturn(List.of());
         when(appealReviewMapper.insert(any(AppealReview.class))).thenReturn(1);
@@ -3287,6 +3338,121 @@ class BusinessFlowConsistencyTest {
 
         verify(offenseRecordService).updatePenaltySummary(410L, BigDecimal.valueOf(80), null, null);
         verify(fineRecordService).updateFineRecordSystemManaged(any(FineRecord.class));
+    }
+
+    @Test
+    void updateAcceptanceStatusShouldReturnOffenseToProcessedWhenAppealRejected() {
+        AppealRecordMapper appealRecordMapper = Mockito.mock(AppealRecordMapper.class);
+        AppealReviewMapper appealReviewMapper = Mockito.mock(AppealReviewMapper.class);
+        SysRequestHistoryMapper requestHistoryMapper = Mockito.mock(SysRequestHistoryMapper.class);
+        @SuppressWarnings("unchecked")
+        KafkaTemplate<String, String> kafkaTemplate = Mockito.mock(KafkaTemplate.class);
+        AppealRecordSearchRepository searchRepository = Mockito.mock(AppealRecordSearchRepository.class);
+        OffenseRecordService offenseRecordService = Mockito.mock(OffenseRecordService.class);
+        SysUserService sysUserService = Mockito.mock(SysUserService.class);
+        StateMachineService stateMachineService = Mockito.mock(StateMachineService.class);
+
+        AppealRecordService service = new AppealRecordService(
+                appealRecordMapper,
+                appealReviewMapper,
+                requestHistoryMapper,
+                kafkaTemplate,
+                searchRepository,
+                offenseRecordService,
+                sysUserService,
+                stateMachineService,
+                new ObjectMapper());
+
+        AppealRecord existing = new AppealRecord();
+        existing.setAppealId(320L);
+        existing.setOffenseId(420L);
+        existing.setAcceptanceStatus(AppealAcceptanceState.PENDING.getCode());
+        existing.setProcessStatus(AppealProcessState.UNDER_REVIEW.getCode());
+        existing.setProcessResult("Old result");
+        existing.setProcessHandler("reviewer-a");
+        existing.setProcessTime(LocalDateTime.now().minusDays(1));
+        when(appealRecordMapper.selectById(320L)).thenReturn(existing);
+        when(appealRecordMapper.updateById(any(AppealRecord.class))).thenReturn(1);
+
+        OffenseRecord offense = new OffenseRecord();
+        offense.setOffenseId(420L);
+        offense.setProcessStatus(OffenseProcessState.APPEALING.getCode());
+        when(offenseRecordService.findById(420L)).thenReturn(offense);
+        when(stateMachineService.canTransitionOffenseState(
+                OffenseProcessState.APPEALING,
+                OffenseProcessEvent.WITHDRAW_APPEAL)).thenReturn(true);
+        when(stateMachineService.processOffenseState(
+                420L,
+                OffenseProcessState.APPEALING,
+                OffenseProcessEvent.WITHDRAW_APPEAL)).thenReturn(OffenseProcessState.PROCESSED);
+
+        service.updateAcceptanceStatus(320L, AppealAcceptanceState.REJECTED, "Missing supporting evidence");
+
+        ArgumentCaptor<AppealRecord> captor = ArgumentCaptor.forClass(AppealRecord.class);
+        verify(appealRecordMapper).updateById(captor.capture());
+        assertEquals(AppealAcceptanceState.REJECTED.getCode(), captor.getValue().getAcceptanceStatus());
+        assertEquals(AppealProcessState.UNPROCESSED.getCode(), captor.getValue().getProcessStatus());
+        assertNull(captor.getValue().getProcessResult());
+        assertNull(captor.getValue().getProcessHandler());
+        assertNull(captor.getValue().getProcessTime());
+        assertEquals("Missing supporting evidence", captor.getValue().getRejectionReason());
+        verify(offenseRecordService).updateProcessStatus(420L, OffenseProcessState.PROCESSED);
+    }
+
+    @Test
+    void updateAcceptanceStatusShouldRestoreAppealingWhenRejectedAppealIsResubmitted() {
+        AppealRecordMapper appealRecordMapper = Mockito.mock(AppealRecordMapper.class);
+        AppealReviewMapper appealReviewMapper = Mockito.mock(AppealReviewMapper.class);
+        SysRequestHistoryMapper requestHistoryMapper = Mockito.mock(SysRequestHistoryMapper.class);
+        @SuppressWarnings("unchecked")
+        KafkaTemplate<String, String> kafkaTemplate = Mockito.mock(KafkaTemplate.class);
+        AppealRecordSearchRepository searchRepository = Mockito.mock(AppealRecordSearchRepository.class);
+        OffenseRecordService offenseRecordService = Mockito.mock(OffenseRecordService.class);
+        SysUserService sysUserService = Mockito.mock(SysUserService.class);
+        StateMachineService stateMachineService = Mockito.mock(StateMachineService.class);
+
+        AppealRecordService service = new AppealRecordService(
+                appealRecordMapper,
+                appealReviewMapper,
+                requestHistoryMapper,
+                kafkaTemplate,
+                searchRepository,
+                offenseRecordService,
+                sysUserService,
+                stateMachineService,
+                new ObjectMapper());
+
+        AppealRecord existing = new AppealRecord();
+        existing.setAppealId(321L);
+        existing.setOffenseId(421L);
+        existing.setAcceptanceStatus(AppealAcceptanceState.REJECTED.getCode());
+        existing.setRejectionReason("Please provide a clearer explanation");
+        existing.setProcessStatus(AppealProcessState.UNPROCESSED.getCode());
+        when(appealRecordMapper.selectById(321L)).thenReturn(existing);
+        when(appealRecordMapper.updateById(any(AppealRecord.class))).thenReturn(1);
+
+        OffenseRecord offense = new OffenseRecord();
+        offense.setOffenseId(421L);
+        offense.setProcessStatus(OffenseProcessState.PROCESSED.getCode());
+        when(offenseRecordService.findById(421L)).thenReturn(offense);
+        when(stateMachineService.canTransitionOffenseState(
+                OffenseProcessState.PROCESSED,
+                OffenseProcessEvent.SUBMIT_APPEAL)).thenReturn(true);
+        when(stateMachineService.processOffenseState(
+                421L,
+                OffenseProcessState.PROCESSED,
+                OffenseProcessEvent.SUBMIT_APPEAL)).thenReturn(OffenseProcessState.APPEALING);
+
+        service.updateAcceptanceStatus(321L, AppealAcceptanceState.PENDING);
+
+        ArgumentCaptor<AppealRecord> captor = ArgumentCaptor.forClass(AppealRecord.class);
+        verify(appealRecordMapper).updateById(captor.capture());
+        assertEquals(AppealAcceptanceState.PENDING.getCode(), captor.getValue().getAcceptanceStatus());
+        assertNull(captor.getValue().getAcceptanceTime());
+        assertNull(captor.getValue().getAcceptanceHandler());
+        assertNull(captor.getValue().getRejectionReason());
+        assertEquals(AppealProcessState.UNPROCESSED.getCode(), captor.getValue().getProcessStatus());
+        verify(offenseRecordService).updateProcessStatus(421L, OffenseProcessState.APPEALING);
     }
 
     @Test
