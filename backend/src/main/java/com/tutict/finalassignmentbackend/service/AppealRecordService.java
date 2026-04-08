@@ -229,7 +229,7 @@ public class AppealRecordService {
         } else {
             existing.setAcceptanceTime(LocalDateTime.now());
             existing.setAcceptanceHandler(resolveOperatorName(existing.getAcceptanceHandler()));
-            if (newState != AppealAcceptanceState.REJECTED) {
+            if (newState == AppealAcceptanceState.ACCEPTED) {
                 existing.setRejectionReason(null);
             }
         }

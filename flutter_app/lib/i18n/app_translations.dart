@@ -1342,6 +1342,10 @@ class AppTranslations extends Translations {
     'appealAdmin.success.resubmitted':
         'The appeal has been resubmitted for acceptance review.',
     'appealAdmin.success.finalRejected': 'The appeal review has been rejected.',
+    'appealAdmin.note.awaitingApplicantSupplement':
+        'Waiting for the appellant to submit supplementary materials.',
+    'appealAdmin.note.awaitingApplicantResubmission':
+        'Waiting for the appellant to resubmit the appeal.',
     'appealAdmin.dialog.rejectTitle': 'Reject appeal',
     'appealAdmin.dialog.requestSupplementTitle':
         'Request supplemental materials',
@@ -3302,6 +3306,10 @@ class AppTranslations extends Translations {
         '\u7533\u8bc9\u5df2\u91cd\u65b0\u63d0\u4ea4\u5f85\u53d7\u7406',
     'appealAdmin.success.finalRejected':
         '\u7533\u8bc9\u7ec8\u5ba1\u5df2\u9a73\u56de',
+    'appealAdmin.note.awaitingApplicantSupplement':
+        '\u7b49\u5f85\u7533\u8bc9\u4eba\u63d0\u4ea4\u8865\u5145\u6750\u6599',
+    'appealAdmin.note.awaitingApplicantResubmission':
+        '\u7b49\u5f85\u7533\u8bc9\u4eba\u91cd\u65b0\u63d0\u4ea4\u7533\u8bc9',
     'appealAdmin.dialog.rejectTitle': '\u9a73\u56de\u7533\u8bc9',
     'appealAdmin.dialog.requestSupplementTitle':
         '\u8981\u6c42\u8865\u5145\u6750\u6599',

@@ -3876,6 +3876,52 @@ class BusinessFlowConsistencyTest {
     }
 
     @Test
+    void updateAcceptanceStatusShouldKeepSupplementReasonWhenRequestingMaterials() {
+        AppealRecordMapper appealRecordMapper = Mockito.mock(AppealRecordMapper.class);
+        AppealReviewMapper appealReviewMapper = Mockito.mock(AppealReviewMapper.class);
+        SysRequestHistoryMapper requestHistoryMapper = Mockito.mock(SysRequestHistoryMapper.class);
+        @SuppressWarnings("unchecked")
+        KafkaTemplate<String, String> kafkaTemplate = Mockito.mock(KafkaTemplate.class);
+        AppealRecordSearchRepository searchRepository = Mockito.mock(AppealRecordSearchRepository.class);
+        OffenseRecordService offenseRecordService = Mockito.mock(OffenseRecordService.class);
+        SysUserService sysUserService = Mockito.mock(SysUserService.class);
+        StateMachineService stateMachineService = Mockito.mock(StateMachineService.class);
+
+        AppealRecordService service = new AppealRecordService(
+                appealRecordMapper,
+                appealReviewMapper,
+                requestHistoryMapper,
+                kafkaTemplate,
+                searchRepository,
+                offenseRecordService,
+                sysUserService,
+                stateMachineService,
+                new ObjectMapper());
+
+        AppealRecord existing = new AppealRecord();
+        existing.setAppealId(322L);
+        existing.setOffenseId(422L);
+        existing.setAcceptanceStatus(AppealAcceptanceState.PENDING.getCode());
+        existing.setProcessStatus(AppealProcessState.UNPROCESSED.getCode());
+        when(appealRecordMapper.selectById(322L)).thenReturn(existing);
+        when(appealRecordMapper.updateById(any(AppealRecord.class))).thenReturn(1);
+
+        OffenseRecord offense = new OffenseRecord();
+        offense.setOffenseId(422L);
+        offense.setProcessStatus(OffenseProcessState.APPEALING.getCode());
+        when(offenseRecordService.findById(422L)).thenReturn(offense);
+
+        service.updateAcceptanceStatus(322L,
+                AppealAcceptanceState.NEED_SUPPLEMENT,
+                "Please upload clearer evidence");
+
+        ArgumentCaptor<AppealRecord> captor = ArgumentCaptor.forClass(AppealRecord.class);
+        verify(appealRecordMapper).updateById(captor.capture());
+        assertEquals(AppealAcceptanceState.NEED_SUPPLEMENT.getCode(), captor.getValue().getAcceptanceStatus());
+        assertEquals("Please upload clearer evidence", captor.getValue().getRejectionReason());
+    }
+
+    @Test
     void createReviewShouldRejectFineIncreaseSuggestion() {
         AppealReviewMapper appealReviewMapper = Mockito.mock(AppealReviewMapper.class);
         SysRequestHistoryMapper requestHistoryMapper = Mockito.mock(SysRequestHistoryMapper.class);
@@ -4308,6 +4354,33 @@ class BusinessFlowConsistencyTest {
         verify(stateMachineService, never()).processPaymentState(any(), any(), any());
         verify(paymentRecordService, never()).transitionPaymentStatus(any(), any());
         verify(paymentRecordService, never()).updatePaymentStatus(any(), any());
+    }
+
+    @Test
+    void workflowControllerShouldRejectSelfServiceAppealAcceptanceEvents() {
+        StateMachineService stateMachineService = Mockito.mock(StateMachineService.class);
+        OffenseRecordService offenseRecordService = Mockito.mock(OffenseRecordService.class);
+        PaymentRecordService paymentRecordService = Mockito.mock(PaymentRecordService.class);
+        AppealRecordService appealRecordService = Mockito.mock(AppealRecordService.class);
+
+        WorkflowController controller = new WorkflowController(
+                stateMachineService,
+                offenseRecordService,
+                paymentRecordService,
+                appealRecordService);
+
+        AppealRecord appealRecord = new AppealRecord();
+        appealRecord.setAppealId(41L);
+        appealRecord.setAcceptanceStatus(AppealAcceptanceState.NEED_SUPPLEMENT.getCode());
+        when(appealRecordService.getAppealById(41L)).thenReturn(appealRecord);
+
+        ResponseEntity<AppealRecord> response =
+                controller.triggerAppealAcceptanceEvent(41L, AppealAcceptanceEvent.SUPPLEMENT_COMPLETE, null);
+
+        assertEquals(HttpStatus.CONFLICT, response.getStatusCode());
+        assertEquals(appealRecord, response.getBody());
+        verify(stateMachineService, never()).processAppealAcceptanceState(any(), any(), any());
+        verify(appealRecordService, never()).updateAcceptanceStatus(any(), any());
     }
 
     @Test

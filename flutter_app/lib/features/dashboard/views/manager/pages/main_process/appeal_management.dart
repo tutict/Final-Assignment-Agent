@@ -951,36 +951,6 @@ class _AppealDetailPageState extends State<AppealDetailPage> {
     );
   }
 
-  Future<void> _markSupplementComplete(int appealId) async {
-    final confirmed = await _showConfirmationDialog(
-      title: 'lookup.appealAcceptanceEventType.supplementComplete'.tr,
-      content: 'lookup.appealAcceptanceEventType.supplementComplete'.tr,
-      confirmLabel: 'lookup.appealAcceptanceEventType.supplementComplete'.tr,
-    );
-    if (confirmed == true) {
-      await _triggerAcceptanceEvent(
-        appealId: appealId,
-        event: 'SUPPLEMENT_COMPLETE',
-        successMessage: 'appealAdmin.success.supplementCompleted'.tr,
-      );
-    }
-  }
-
-  Future<void> _resubmitAppeal(int appealId) async {
-    final confirmed = await _showConfirmationDialog(
-      title: 'lookup.appealAcceptanceEventType.resubmit'.tr,
-      content: 'lookup.appealAcceptanceEventType.resubmit'.tr,
-      confirmLabel: 'lookup.appealAcceptanceEventType.resubmit'.tr,
-    );
-    if (confirmed == true) {
-      await _triggerAcceptanceEvent(
-        appealId: appealId,
-        event: 'RESUBMIT',
-        successMessage: 'appealAdmin.success.resubmitted'.tr,
-      );
-    }
-  }
-
   Future<void> _startReview(int appealId) async {
     await _triggerProcessEvent(
       appealId: appealId,
@@ -1610,38 +1580,25 @@ class _AppealDetailPageState extends State<AppealDetailPage> {
                             ] else if (_isAdmin &&
                                 _isAcceptanceNeedSupplement()) ...[
                               Center(
-                                child: ElevatedButton.icon(
-                                  onPressed: () => _markSupplementComplete(
-                                      widget.appeal.appealId ?? 0),
-                                  icon: const Icon(
-                                      CupertinoIcons.arrow_clockwise,
-                                      size: 20),
-                                  label: Text(
-                                      'lookup.appealAcceptanceEventType.supplementComplete'
-                                          .tr),
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor:
-                                        themeData.colorScheme.primary,
-                                    foregroundColor:
-                                        themeData.colorScheme.onPrimary,
+                                child: Text(
+                                  'appealAdmin.note.awaitingApplicantSupplement'
+                                      .tr,
+                                  style:
+                                      themeData.textTheme.bodyMedium?.copyWith(
+                                    color:
+                                        themeData.colorScheme.onSurfaceVariant,
                                   ),
                                 ),
                               ),
                             ] else if (_isAdmin && _isAcceptanceRejected()) ...[
                               Center(
-                                child: ElevatedButton.icon(
-                                  onPressed: () => _resubmitAppeal(
-                                      widget.appeal.appealId ?? 0),
-                                  icon: const Icon(CupertinoIcons.refresh,
-                                      size: 20),
-                                  label: Text(
-                                      'lookup.appealAcceptanceEventType.resubmit'
-                                          .tr),
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor:
-                                        themeData.colorScheme.primary,
-                                    foregroundColor:
-                                        themeData.colorScheme.onPrimary,
+                                child: Text(
+                                  'appealAdmin.note.awaitingApplicantResubmission'
+                                      .tr,
+                                  style:
+                                      themeData.textTheme.bodyMedium?.copyWith(
+                                    color:
+                                        themeData.colorScheme.onSurfaceVariant,
                                   ),
                                 ),
                               ),
