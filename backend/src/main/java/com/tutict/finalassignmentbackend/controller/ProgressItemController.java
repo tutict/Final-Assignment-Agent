@@ -1,5 +1,6 @@
 package com.tutict.finalassignmentbackend.controller;
 
+import com.tutict.finalassignmentbackend.entity.AppealRecord;
 import com.tutict.finalassignmentbackend.entity.SysRequestHistory;
 import com.tutict.finalassignmentbackend.service.CurrentUserTrafficSupportService;
 import com.tutict.finalassignmentbackend.service.PaymentRecordService;
@@ -100,77 +101,86 @@ public class ProgressItemController {
     }
 
     @GetMapping("/me")
-    @RolesAllowed({"SUPER_ADMIN", "ADMIN", "TRAFFIC_POLICE", "FINANCE", "APPEAL_REVIEWER", "USER"})
+    @RolesAllowed({"USER"})
     @Operation(summary = "鏌ヨ褰撳墠鐧诲綍鐢ㄦ埛杩涘害璁板綍")
     public ResponseEntity<List<SysRequestHistory>> listCurrentUserProgress(@RequestParam(defaultValue = "1") int page,
-                                                                           @RequestParam(defaultValue = "20") int size) {
+                                                                           @RequestParam(defaultValue = "20") int size,
+                                                                           @RequestParam(required = false) Long appealId) {
         try {
             Long userId = currentUserTrafficSupportService.requireCurrentUser().getUserId();
-            String currentUserIdCardNumber = tryResolveCurrentUserIdCardNumber();
             LinkedHashMap<Long, SysRequestHistory> merged = new LinkedHashMap<>();
             LinkedHashMap<String, LinkedHashSet<Long>> relatedBusinessIds = new LinkedHashMap<>();
             LinkedHashSet<Long> appealIds = new LinkedHashSet<>();
-            int relatedPageSize = Math.max(size * 5, 100);
-            int relatedHistoryPageSize = Math.max(size * 10, 200);
-            fetchAllPages(pageNumber -> sysRequestHistoryService.findByUserId(userId, pageNumber, relatedPageSize), relatedPageSize)
-                    .forEach(history -> putIfPresent(merged, history));
-
             LinkedHashSet<Long> businessIds = new LinkedHashSet<>();
             LinkedHashSet<Long> fineIds = new LinkedHashSet<>();
-            fetchAllPages(pageNumber -> currentUserTrafficSupportService.listCurrentUserAppeals(pageNumber, relatedPageSize), relatedPageSize).stream()
-                    .map(appeal -> appeal == null ? null : appeal.getAppealId())
-                    .filter(id -> id != null && id > 0)
-                    .forEach(id -> {
-                        appealIds.add(id);
-                        registerBusinessId(relatedBusinessIds, businessIds, id, "APPEAL_");
+            int relatedPageSize = Math.max(size * 5, 100);
+            int relatedHistoryPageSize = Math.max(size * 10, 200);
+
+            appealIds.addAll(resolveCurrentUserAppealIds(appealId, relatedPageSize));
+            appealIds.forEach(id -> registerBusinessId(relatedBusinessIds, businessIds, id, "APPEAL_"));
+
+            fetchAllPages(pageNumber -> sysRequestHistoryService.findByUserId(userId, pageNumber, relatedPageSize), relatedPageSize)
+                    .forEach(history -> {
+                        if (appealId == null) {
+                            putIfPresent(merged, history);
+                            return;
+                        }
+                        putIfAppealScopedHistory(merged, history, appealId, relatedBusinessIds);
                     });
-            fetchAllPages(pageNumber -> currentUserTrafficSupportService.listCurrentUserFines(pageNumber, relatedPageSize), relatedPageSize).stream()
-                    .map(fine -> fine == null ? null : fine.getFineId())
-                    .filter(id -> id != null && id > 0)
-                    .forEach(id -> registerBusinessId(relatedBusinessIds, businessIds, id, "FINE_"));
-            relatedBusinessIds.getOrDefault("FINE_", new LinkedHashSet<>()).forEach(fineIds::add);
-            fetchAllPages(pageNumber -> currentUserTrafficSupportService.listCurrentUserOffenses(pageNumber, relatedPageSize), relatedPageSize).stream()
-                    .map(offense -> offense == null ? null : offense.getOffenseId())
-                    .filter(id -> id != null && id > 0)
-                    .forEach(id -> registerBusinessId(relatedBusinessIds, businessIds, id, "OFFENSE_"));
-            fetchAllPages(pageNumber -> currentUserTrafficSupportService.listCurrentUserDeductions(pageNumber, relatedPageSize), relatedPageSize).stream()
-                    .map(deduction -> deduction == null ? null : deduction.getDeductionId())
-                    .filter(id -> id != null && id > 0)
-                    .forEach(id -> registerBusinessId(relatedBusinessIds, businessIds, id, "DEDUCTION_"));
-            if (currentUserIdCardNumber != null) {
-                currentUserTrafficSupportService.listCurrentUserVehicles().stream()
-                        .map(vehicle -> vehicle == null ? null : vehicle.getVehicleId())
+
+            if (appealId == null) {
+                String currentUserIdCardNumber = tryResolveCurrentUserIdCardNumber();
+                fetchAllPages(pageNumber -> currentUserTrafficSupportService.listCurrentUserFines(pageNumber, relatedPageSize), relatedPageSize).stream()
+                        .map(fine -> fine == null ? null : fine.getFineId())
                         .filter(id -> id != null && id > 0)
-                        .forEach(id -> registerBusinessId(relatedBusinessIds, businessIds, id, "VEHICLE_"));
-                fetchAllPages(pageNumber -> paymentRecordService.searchByPayerIdCard(currentUserIdCardNumber, pageNumber, relatedPageSize), relatedPageSize).stream()
-                        .filter(payment -> payment != null
-                                && payment.getFineId() != null
-                                && fineIds.contains(payment.getFineId()))
-                        .map(payment -> payment.getPaymentId())
+                        .forEach(id -> registerBusinessId(relatedBusinessIds, businessIds, id, "FINE_"));
+                relatedBusinessIds.getOrDefault("FINE_", new LinkedHashSet<>()).forEach(fineIds::add);
+                fetchAllPages(pageNumber -> currentUserTrafficSupportService.listCurrentUserOffenses(pageNumber, relatedPageSize), relatedPageSize).stream()
+                        .map(offense -> offense == null ? null : offense.getOffenseId())
                         .filter(id -> id != null && id > 0)
-                        .forEach(id -> registerBusinessId(
-                                relatedBusinessIds,
-                                businessIds,
-                                id,
-                                "PAYMENT_",
-                                "PARTIAL_REFUND",
-                                "WAIVE_AND_REFUND"));
+                        .forEach(id -> registerBusinessId(relatedBusinessIds, businessIds, id, "OFFENSE_"));
+                fetchAllPages(pageNumber -> currentUserTrafficSupportService.listCurrentUserDeductions(pageNumber, relatedPageSize), relatedPageSize).stream()
+                        .map(deduction -> deduction == null ? null : deduction.getDeductionId())
+                        .filter(id -> id != null && id > 0)
+                        .forEach(id -> registerBusinessId(relatedBusinessIds, businessIds, id, "DEDUCTION_"));
+                if (currentUserIdCardNumber != null) {
+                    currentUserTrafficSupportService.listCurrentUserVehicles().stream()
+                            .map(vehicle -> vehicle == null ? null : vehicle.getVehicleId())
+                            .filter(id -> id != null && id > 0)
+                            .forEach(id -> registerBusinessId(relatedBusinessIds, businessIds, id, "VEHICLE_"));
+                    fetchAllPages(pageNumber -> paymentRecordService.searchByPayerIdCard(currentUserIdCardNumber, pageNumber, relatedPageSize), relatedPageSize).stream()
+                            .filter(payment -> payment != null
+                                    && payment.getFineId() != null
+                                    && fineIds.contains(payment.getFineId()))
+                            .map(payment -> payment.getPaymentId())
+                            .filter(id -> id != null && id > 0)
+                            .forEach(id -> registerBusinessId(
+                                    relatedBusinessIds,
+                                    businessIds,
+                                    id,
+                                    "PAYMENT_",
+                                    "PARTIAL_REFUND",
+                                    "WAIVE_AND_REFUND"));
+                }
             }
+
             fineIds.forEach(fineId -> fetchAllPages(
                             pageNumber -> sysRequestHistoryService.findRefundAudits(null, fineId, null, pageNumber, relatedPageSize),
                             relatedPageSize)
                     .forEach(history -> putIfPresent(merged, history)));
-            appealIds.forEach(appealId -> fetchAllPages(
+            appealIds.forEach(currentAppealId -> fetchAllPages(
                             pageNumber -> sysRequestHistoryService.searchByRequestUrlPrefix(
-                                    "/api/appeals/" + appealId + "/reviews",
+                                    "/api/appeals/" + currentAppealId + "/reviews",
                                     pageNumber,
                                     relatedHistoryPageSize),
                             relatedHistoryPageSize)
-                    .forEach(history -> putIfAppealReviewHistory(merged, history, appealId)));
+                    .forEach(history -> putIfAppealReviewHistory(merged, history, currentAppealId)));
 
-            fetchAllPages(pageNumber -> sysRequestHistoryService.findByBusinessIds(businessIds, pageNumber, relatedHistoryPageSize),
-                    relatedHistoryPageSize)
-                    .forEach(history -> putIfRelatedBusinessHistory(merged, history, relatedBusinessIds));
+            if (!businessIds.isEmpty()) {
+                fetchAllPages(pageNumber -> sysRequestHistoryService.findByBusinessIds(businessIds, pageNumber, relatedHistoryPageSize),
+                        relatedHistoryPageSize)
+                        .forEach(history -> putIfRelatedBusinessHistory(merged, history, relatedBusinessIds));
+            }
 
             List<SysRequestHistory> ordered = merged.values().stream()
                     .sorted(Comparator.comparing(SysRequestHistory::getUpdatedAt,
@@ -283,6 +293,16 @@ public class ProgressItemController {
         putIfPresent(sink, history);
     }
 
+    private void putIfAppealScopedHistory(LinkedHashMap<Long, SysRequestHistory> sink,
+                                          SysRequestHistory history,
+                                          Long appealId,
+                                          LinkedHashMap<String, LinkedHashSet<Long>> relatedBusinessIds) {
+        if (!isAppealScopedHistory(history, appealId, relatedBusinessIds)) {
+            return;
+        }
+        putIfPresent(sink, history);
+    }
+
     private boolean isRelatedBusinessHistory(SysRequestHistory history,
                                              LinkedHashMap<String, LinkedHashSet<Long>> relatedBusinessIds) {
         if (history == null
@@ -302,6 +322,28 @@ public class ProgressItemController {
             }
         }
         return false;
+    }
+
+    private boolean isAppealScopedHistory(SysRequestHistory history,
+                                          Long appealId,
+                                          LinkedHashMap<String, LinkedHashSet<Long>> relatedBusinessIds) {
+        if (history == null || appealId == null || appealId <= 0) {
+            return false;
+        }
+        if (isAppealReviewHistoryForAppeal(history, appealId)) {
+            return true;
+        }
+        Long requestAppealId = parseRequestParamId(history.getRequestParams(), "appealId");
+        if (appealId.equals(requestAppealId)) {
+            return true;
+        }
+        if (isRelatedBusinessHistory(history, relatedBusinessIds)) {
+            return true;
+        }
+        String requestUrl = history.getRequestUrl();
+        return requestUrl != null
+                && (requestUrl.contains("/api/appeals/" + appealId)
+                || requestUrl.contains("/api/appeals/me/" + appealId));
     }
 
     private void putIfAppealReviewHistory(LinkedHashMap<Long, SysRequestHistory> sink,
@@ -354,6 +396,47 @@ public class ProgressItemController {
             }
         }
         return null;
+    }
+
+    private LinkedHashSet<Long> resolveCurrentUserAppealIds(Long appealId, int pageSize) {
+        LinkedHashSet<Long> appealIds = new LinkedHashSet<>();
+        if (appealId != null) {
+            if (appealId <= 0) {
+                throw new IllegalArgumentException("Appeal ID must be greater than zero");
+            }
+            if (!currentUserOwnsAppeal(appealId, pageSize)) {
+                throw new IllegalArgumentException("Appeal ID is outside the current user scope");
+            }
+            appealIds.add(appealId);
+            return appealIds;
+        }
+        fetchAllPages(pageNumber -> currentUserTrafficSupportService.listCurrentUserAppeals(pageNumber, pageSize), pageSize).stream()
+                .map(appeal -> appeal == null ? null : appeal.getAppealId())
+                .filter(id -> id != null && id > 0)
+                .forEach(appealIds::add);
+        return appealIds;
+    }
+
+    private boolean currentUserOwnsAppeal(Long appealId, int pageSize) {
+        if (appealId == null || appealId <= 0 || pageSize < 1) {
+            return false;
+        }
+        for (int pageNumber = 1; ; pageNumber++) {
+            List<AppealRecord> pageItems =
+                    currentUserTrafficSupportService.listCurrentUserAppeals(pageNumber, pageSize);
+            if (pageItems == null || pageItems.isEmpty()) {
+                return false;
+            }
+            boolean matched = pageItems.stream()
+                    .map(appeal -> appeal == null ? null : appeal.getAppealId())
+                    .anyMatch(appealId::equals);
+            if (matched) {
+                return true;
+            }
+            if (pageItems.size() < pageSize) {
+                return false;
+            }
+        }
     }
 
     private void registerBusinessId(LinkedHashMap<String, LinkedHashSet<Long>> relatedBusinessIds,

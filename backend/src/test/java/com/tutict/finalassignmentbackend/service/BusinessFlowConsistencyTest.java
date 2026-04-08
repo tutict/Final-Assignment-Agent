@@ -1205,7 +1205,7 @@ class BusinessFlowConsistencyTest {
         when(sysRequestHistoryService.findByBusinessIds(any(), eq(1), eq(200)))
                 .thenReturn(List.of(paymentHistory));
 
-        ResponseEntity<List<SysRequestHistory>> response = controller.listCurrentUserProgress(1, 20);
+        ResponseEntity<List<SysRequestHistory>> response = controller.listCurrentUserProgress(1, 20, null);
 
         verify(sysRequestHistoryService).findByBusinessIds(businessIdsCaptor.capture(), eq(1), eq(200));
         LinkedHashSet<Long> businessIds = new LinkedHashSet<>();
@@ -1436,7 +1436,7 @@ class BusinessFlowConsistencyTest {
         when(sysRequestHistoryService.findByBusinessIds(any(), eq(1), eq(200)))
                 .thenReturn(List.of(deductionHistory));
 
-        ResponseEntity<List<SysRequestHistory>> response = controller.listCurrentUserProgress(1, 20);
+        ResponseEntity<List<SysRequestHistory>> response = controller.listCurrentUserProgress(1, 20, null);
 
         verify(sysRequestHistoryService).findByBusinessIds(businessIdsCaptor.capture(), eq(1), eq(200));
         LinkedHashSet<Long> businessIds = new LinkedHashSet<>();
@@ -1483,7 +1483,7 @@ class BusinessFlowConsistencyTest {
         when(sysRequestHistoryService.findRefundAudits(null, 201L, null, 1, 100))
                 .thenReturn(List.of(refundAudit));
 
-        ResponseEntity<List<SysRequestHistory>> response = controller.listCurrentUserProgress(1, 20);
+        ResponseEntity<List<SysRequestHistory>> response = controller.listCurrentUserProgress(1, 20, null);
 
         verify(sysRequestHistoryService).findRefundAudits(null, 201L, null, 1, 100);
         assertEquals(HttpStatus.OK, response.getStatusCode());
@@ -1536,7 +1536,7 @@ class BusinessFlowConsistencyTest {
         when(sysRequestHistoryService.findByBusinessIds(any(), eq(1), eq(200)))
                 .thenReturn(List.of(fineHistory, leakedOffenseHistory));
 
-        ResponseEntity<List<SysRequestHistory>> response = controller.listCurrentUserProgress(1, 20);
+        ResponseEntity<List<SysRequestHistory>> response = controller.listCurrentUserProgress(1, 20, null);
 
         assertEquals(HttpStatus.OK, response.getStatusCode());
         assertEquals(1, response.getBody().size());
@@ -1585,7 +1585,7 @@ class BusinessFlowConsistencyTest {
                 .thenReturn(List.of(leakedPaymentHistory));
         when(sysRequestHistoryService.findRefundAudits(null, 202L, null, 1, 100)).thenReturn(List.of());
 
-        ResponseEntity<List<SysRequestHistory>> response = controller.listCurrentUserProgress(1, 20);
+        ResponseEntity<List<SysRequestHistory>> response = controller.listCurrentUserProgress(1, 20, null);
 
         assertEquals(HttpStatus.OK, response.getStatusCode());
         assertTrue(response.getBody().isEmpty());
@@ -4443,7 +4443,7 @@ class BusinessFlowConsistencyTest {
         when(sysRequestHistoryService.findByUserId(42L, 1, 100)).thenReturn(List.of(history));
         when(sysRequestHistoryService.findByBusinessIds(any(), eq(1), eq(200))).thenReturn(List.of());
 
-        ResponseEntity<List<SysRequestHistory>> response = controller.listCurrentUserProgress(1, 20);
+        ResponseEntity<List<SysRequestHistory>> response = controller.listCurrentUserProgress(1, 20, null);
 
         assertEquals(HttpStatus.OK, response.getStatusCode());
         assertEquals(List.of(history), response.getBody());
@@ -4491,11 +4491,103 @@ class BusinessFlowConsistencyTest {
         when(sysRequestHistoryService.searchByRequestUrlPrefix("/api/appeals/501/reviews", 2, 200))
                 .thenReturn(List.of());
 
-        ResponseEntity<List<SysRequestHistory>> response = controller.listCurrentUserProgress(1, 20);
+        ResponseEntity<List<SysRequestHistory>> response = controller.listCurrentUserProgress(1, 20, null);
 
         assertEquals(HttpStatus.OK, response.getStatusCode());
         assertEquals(1, response.getBody().size());
         assertEquals(9001L, response.getBody().get(0).getId());
+    }
+
+    @Test
+    void listCurrentUserProgressShouldFilterByAppealId() {
+        SysRequestHistoryService sysRequestHistoryService = Mockito.mock(SysRequestHistoryService.class);
+        CurrentUserTrafficSupportService currentUserTrafficSupportService = Mockito.mock(CurrentUserTrafficSupportService.class);
+        PaymentRecordService paymentRecordService = Mockito.mock(PaymentRecordService.class);
+
+        ProgressItemController controller = new ProgressItemController(
+                sysRequestHistoryService,
+                currentUserTrafficSupportService,
+                paymentRecordService);
+
+        SysUser currentUser = new SysUser();
+        currentUser.setUserId(42L);
+        when(currentUserTrafficSupportService.requireCurrentUser()).thenReturn(currentUser);
+
+        AppealRecord firstAppeal = new AppealRecord();
+        firstAppeal.setAppealId(501L);
+        AppealRecord secondAppeal = new AppealRecord();
+        secondAppeal.setAppealId(502L);
+        when(currentUserTrafficSupportService.listCurrentUserAppeals(1, 100)).thenReturn(List.of(firstAppeal, secondAppeal));
+        when(currentUserTrafficSupportService.listCurrentUserAppeals(2, 100)).thenReturn(List.of());
+
+        SysRequestHistory targetAppealHistory = new SysRequestHistory();
+        targetAppealHistory.setId(9101L);
+        targetAppealHistory.setBusinessType("APPEAL_CREATE");
+        targetAppealHistory.setBusinessId(501L);
+        targetAppealHistory.setUpdatedAt(LocalDateTime.of(2026, 1, 7, 10, 0));
+
+        SysRequestHistory otherAppealHistory = new SysRequestHistory();
+        otherAppealHistory.setId(9102L);
+        otherAppealHistory.setBusinessType("APPEAL_CREATE");
+        otherAppealHistory.setBusinessId(502L);
+        otherAppealHistory.setUpdatedAt(LocalDateTime.of(2026, 1, 8, 10, 0));
+
+        when(sysRequestHistoryService.findByUserId(42L, 1, 100))
+                .thenReturn(List.of(targetAppealHistory, otherAppealHistory));
+        when(sysRequestHistoryService.findByUserId(42L, 2, 100)).thenReturn(List.of());
+
+        SysRequestHistory managerHistory = new SysRequestHistory();
+        managerHistory.setId(9103L);
+        managerHistory.setBusinessType("APPEAL_ACCEPTANCE_TRANSITION");
+        managerHistory.setBusinessId(501L);
+        managerHistory.setUpdatedAt(LocalDateTime.of(2026, 1, 9, 10, 0));
+        when(sysRequestHistoryService.findByBusinessIds(any(), eq(1), eq(200))).thenReturn(List.of(managerHistory));
+
+        SysRequestHistory reviewHistory = new SysRequestHistory();
+        reviewHistory.setId(9104L);
+        reviewHistory.setBusinessType("APPEAL_REVIEW_CREATE");
+        reviewHistory.setBusinessId(7001L);
+        reviewHistory.setRequestUrl("/api/appeals/501/reviews");
+        reviewHistory.setRequestParams("appealId=501");
+        reviewHistory.setUpdatedAt(LocalDateTime.of(2026, 1, 10, 10, 0));
+        when(sysRequestHistoryService.searchByRequestUrlPrefix("/api/appeals/501/reviews", 1, 200))
+                .thenReturn(List.of(reviewHistory));
+        when(sysRequestHistoryService.searchByRequestUrlPrefix("/api/appeals/501/reviews", 2, 200))
+                .thenReturn(List.of());
+
+        ResponseEntity<List<SysRequestHistory>> response = controller.listCurrentUserProgress(1, 20, 501L);
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        assertEquals(List.of(reviewHistory, managerHistory, targetAppealHistory), response.getBody());
+        verify(currentUserTrafficSupportService, never()).getCurrentUserIdCardNumber();
+        verify(currentUserTrafficSupportService, never()).listCurrentUserFines(anyInt(), anyInt());
+        verify(currentUserTrafficSupportService, never()).listCurrentUserOffenses(anyInt(), anyInt());
+        verify(currentUserTrafficSupportService, never()).listCurrentUserDeductions(anyInt(), anyInt());
+        verify(paymentRecordService, never()).searchByPayerIdCard(any(), anyInt(), anyInt());
+    }
+
+    @Test
+    void listCurrentUserProgressShouldRejectAppealIdOutsideCurrentUserScope() {
+        SysRequestHistoryService sysRequestHistoryService = Mockito.mock(SysRequestHistoryService.class);
+        CurrentUserTrafficSupportService currentUserTrafficSupportService = Mockito.mock(CurrentUserTrafficSupportService.class);
+        PaymentRecordService paymentRecordService = Mockito.mock(PaymentRecordService.class);
+
+        ProgressItemController controller = new ProgressItemController(
+                sysRequestHistoryService,
+                currentUserTrafficSupportService,
+                paymentRecordService);
+
+        SysUser currentUser = new SysUser();
+        currentUser.setUserId(42L);
+        when(currentUserTrafficSupportService.requireCurrentUser()).thenReturn(currentUser);
+        when(currentUserTrafficSupportService.listCurrentUserAppeals(1, 100)).thenReturn(List.of());
+
+        ResponseEntity<List<SysRequestHistory>> response = controller.listCurrentUserProgress(1, 20, 999L);
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+        verify(sysRequestHistoryService, never()).findByUserId(any(), anyInt(), anyInt());
+        verify(sysRequestHistoryService, never()).findByBusinessIds(any(), anyInt(), anyInt());
+        verify(sysRequestHistoryService, never()).searchByRequestUrlPrefix(any(), anyInt(), anyInt());
     }
 
     @Test
@@ -4633,7 +4725,7 @@ class BusinessFlowConsistencyTest {
                 .thenReturn(firstBusinessHistoryPage);
         when(sysRequestHistoryService.findByBusinessIds(any(), eq(2), eq(200))).thenReturn(List.of(relatedHistoryPageTwo));
 
-        ResponseEntity<List<SysRequestHistory>> response = controller.listCurrentUserProgress(1, 20);
+        ResponseEntity<List<SysRequestHistory>> response = controller.listCurrentUserProgress(1, 20, null);
 
         assertEquals(HttpStatus.OK, response.getStatusCode());
         assertEquals(20, response.getBody().size());
@@ -4664,6 +4756,26 @@ class BusinessFlowConsistencyTest {
         assertRolesContain(TrafficViolationController.class, "APPEAL_REVIEWER");
         assertRolesContain(OffenseDetailsController.class, "FINANCE");
         assertRolesContain(OffenseDetailsController.class, "APPEAL_REVIEWER");
+    }
+
+    @Test
+    void currentUserSelfServiceEndpointsShouldRemainUserOnly() throws Exception {
+        assertRolesExactly(
+                AppealManagementController.class.getMethod("listCurrentUserAppeals", int.class, int.class),
+                "USER");
+        assertRolesExactly(
+                AppealManagementController.class.getMethod("createCurrentUserAppeal", AppealRecord.class, String.class),
+                "USER");
+        assertRolesExactly(
+                AppealManagementController.class.getMethod(
+                        "triggerCurrentUserAppealAcceptanceEvent",
+                        Long.class,
+                        AppealAcceptanceEvent.class,
+                        AppealManagementController.CurrentUserAppealSubmissionRequest.class),
+                "USER");
+        assertRolesExactly(
+                ProgressItemController.class.getMethod("listCurrentUserProgress", int.class, int.class, Long.class),
+                "USER");
     }
 
     @Test
@@ -4706,5 +4818,12 @@ class BusinessFlowConsistencyTest {
         assertNotNull(rolesAllowed, "Missing @RolesAllowed on type: " + type.getName());
         assertTrue(List.of(rolesAllowed.value()).contains(expectedRole),
                 "Expected role " + expectedRole + " on type " + type.getName());
+    }
+
+    private void assertRolesExactly(Method method, String... expectedRoles) {
+        RolesAllowed rolesAllowed = method.getAnnotation(RolesAllowed.class);
+        assertNotNull(rolesAllowed, "Missing @RolesAllowed on method: " + method);
+        assertEquals(List.of(expectedRoles), List.of(rolesAllowed.value()),
+                "Unexpected roles on method " + method);
     }
 }

@@ -5,7 +5,6 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:final_assignment_front/features/model/appeal_record.dart';
 import 'package:final_assignment_front/features/api/appeal_management_controller_api.dart';
-import 'package:final_assignment_front/features/dashboard/controllers/progress_controller.dart';
 import 'package:final_assignment_front/features/dashboard/views/shared/components/progress_detail.dart';
 import 'package:final_assignment_front/features/api/driver_information_controller_api.dart';
 import 'package:final_assignment_front/features/api/offense_information_controller_api.dart';
@@ -19,6 +18,7 @@ import 'package:final_assignment_front/i18n/personal_field_localizers.dart';
 import 'package:final_assignment_front/i18n/progress_localizers.dart';
 import 'package:final_assignment_front/i18n/status_localizers.dart';
 import 'package:final_assignment_front/utils/helpers/role_utils.dart';
+import 'package:final_assignment_front/utils/services/api_client.dart';
 import 'package:get/get.dart';
 import 'package:final_assignment_front/features/dashboard/controllers/user_dashboard_screen_controller.dart';
 import 'package:final_assignment_front/features/dashboard/views/shared/widgets/dashboard_page_template.dart';
@@ -956,9 +956,11 @@ class UserAppealDetailPage extends StatefulWidget {
 }
 
 class _UserAppealDetailPageState extends State<UserAppealDetailPage> {
+  static const int _relatedProgressPageSize = 100;
+
   final AppealManagementControllerApi _appealApi =
       AppealManagementControllerApi();
-  late final ProgressController _progressController;
+  final ApiClient _progressApiClient = ApiClient();
   final UserDashboardController? controller =
       Get.isRegistered<UserDashboardController>()
           ? Get.find<UserDashboardController>()
@@ -978,9 +980,6 @@ class _UserAppealDetailPageState extends State<UserAppealDetailPage> {
   void initState() {
     super.initState();
     _appeal = widget.appeal;
-    _progressController = Get.isRegistered<ProgressController>()
-        ? Get.find<ProgressController>()
-        : Get.put(ProgressController());
     _syncSupplementDraft(_appeal);
     _initializeApi();
     _loadRelatedProgress();
@@ -1059,12 +1058,7 @@ class _UserAppealDetailPageState extends State<UserAppealDetailPage> {
       _relatedProgressError = '';
     });
     try {
-      await _progressController.fetchProgress();
-      final items = _progressController.progressItems.toList(growable: false);
-      final related = items
-          .where((item) => _isRelatedProgressItem(item, appealId))
-          .toList()
-        ..sort((left, right) => right.submitTime.compareTo(left.submitTime));
+      final related = await _fetchRelatedProgressItems(appealId);
       if (!mounted) {
         return;
       }
@@ -1086,16 +1080,43 @@ class _UserAppealDetailPageState extends State<UserAppealDetailPage> {
     }
   }
 
-  bool _isRelatedProgressItem(ProgressItem item, int appealId) {
-    if (item.appealId == appealId) {
-      return true;
+  Future<List<ProgressItem>> _fetchRelatedProgressItems(int appealId) async {
+    final items = <ProgressItem>[];
+    var page = 1;
+    while (true) {
+      final response = await _progressApiClient.invokeAPI(
+        '/api/progress/me',
+        'GET',
+        [
+          QueryParam('appealId', '$appealId'),
+          QueryParam('page', '$page'),
+          QueryParam('size', '$_relatedProgressPageSize'),
+        ],
+        null,
+        {},
+        {},
+        'application/json',
+        ['bearerAuth'],
+      );
+      if (response.statusCode != 200) {
+        final message = response.bodyBytes.isEmpty
+            ? 'HTTP ${response.statusCode}'
+            : utf8.decode(response.bodyBytes);
+        throw Exception(message);
+      }
+      final pageItems = response.bodyBytes.isEmpty
+          ? const <ProgressItem>[]
+          : (jsonDecode(utf8.decode(response.bodyBytes)) as List<dynamic>)
+              .map(
+                  (json) => ProgressItem.fromJson(json as Map<String, dynamic>))
+              .toList(growable: false);
+      items.addAll(pageItems);
+      if (pageItems.length < _relatedProgressPageSize) {
+        break;
+      }
+      page++;
     }
-    final businessType = (item.businessType ?? '').trim().toUpperCase();
-    if (businessType.startsWith('APPEAL_') && item.businessId == appealId) {
-      return true;
-    }
-    final requestUrl = (item.requestUrl ?? '').trim();
-    return requestUrl.contains('/api/appeals/$appealId/');
+    return items;
   }
 
   void _syncSupplementDraft(AppealRecordModel appeal) {

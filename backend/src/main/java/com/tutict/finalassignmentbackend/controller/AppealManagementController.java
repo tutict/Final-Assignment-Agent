@@ -50,7 +50,7 @@ public class AppealManagementController {
     }
 
     @GetMapping("/me")
-    @RolesAllowed({"SUPER_ADMIN", "ADMIN", "APPEAL_REVIEWER", "USER"})
+    @RolesAllowed({"USER"})
     @Operation(summary = "查询当前登录用户申诉记录")
     public ResponseEntity<List<AppealRecord>> listCurrentUserAppeals(@RequestParam(defaultValue = "1") int page,
                                                                      @RequestParam(defaultValue = "20") int size) {
@@ -65,7 +65,7 @@ public class AppealManagementController {
     }
 
     @PostMapping("/me")
-    @RolesAllowed({"SUPER_ADMIN", "ADMIN", "APPEAL_REVIEWER", "USER"})
+    @RolesAllowed({"USER"})
     @Operation(summary = "创建当前登录用户申诉记录")
     public ResponseEntity<AppealRecord> createCurrentUserAppeal(@RequestBody AppealRecord request,
                                                                 @RequestHeader(value = "Idempotency-Key", required = false)
@@ -99,7 +99,7 @@ public class AppealManagementController {
     }
 
     @PostMapping("/me/{appealId}/acceptance-events/{event}")
-    @RolesAllowed({"SUPER_ADMIN", "ADMIN", "APPEAL_REVIEWER", "USER"})
+    @RolesAllowed({"USER"})
     @Operation(summary = "Current user triggers a self-service appeal acceptance event")
     public ResponseEntity<AppealRecord> triggerCurrentUserAppealAcceptanceEvent(@PathVariable Long appealId,
                                                                                 @PathVariable AppealAcceptanceEvent event,
