@@ -1,13 +1,19 @@
 package com.tutict.finalassignmentbackend.service;
 
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.tutict.finalassignmentbackend.config.websocket.WsAction;
+import com.tutict.finalassignmentbackend.entity.DriverVehicle;
+import com.tutict.finalassignmentbackend.entity.OffenseRecord;
 import com.tutict.finalassignmentbackend.entity.SysRequestHistory;
 import com.tutict.finalassignmentbackend.entity.VehicleInformation;
 import com.tutict.finalassignmentbackend.entity.elastic.VehicleInformationDocument;
+import com.tutict.finalassignmentbackend.mapper.DriverVehicleMapper;
+import com.tutict.finalassignmentbackend.mapper.OffenseRecordMapper;
 import com.tutict.finalassignmentbackend.mapper.SysRequestHistoryMapper;
 import com.tutict.finalassignmentbackend.mapper.VehicleInformationMapper;
 import com.tutict.finalassignmentbackend.repository.VehicleInformationSearchRepository;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
@@ -20,6 +26,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.web.context.request.RequestAttributes;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
@@ -37,16 +46,22 @@ public class VehicleInformationService {
     private static final String CACHE_NAME = "vehicleCache";
 
     private final VehicleInformationMapper vehicleInformationMapper;
+    private final DriverVehicleMapper driverVehicleMapper;
+    private final OffenseRecordMapper offenseRecordMapper;
     private final SysRequestHistoryMapper sysRequestHistoryMapper;
     private final KafkaTemplate<String, VehicleInformation> kafkaTemplate;
     private final VehicleInformationSearchRepository vehicleInformationSearchRepository;
 
     @Autowired
     public VehicleInformationService(VehicleInformationMapper vehicleInformationMapper,
+                                     DriverVehicleMapper driverVehicleMapper,
+                                     OffenseRecordMapper offenseRecordMapper,
                                      SysRequestHistoryMapper sysRequestHistoryMapper,
                                      KafkaTemplate<String, VehicleInformation> kafkaTemplate,
                                      VehicleInformationSearchRepository vehicleInformationSearchRepository) {
         this.vehicleInformationMapper = vehicleInformationMapper;
+        this.driverVehicleMapper = driverVehicleMapper;
+        this.offenseRecordMapper = offenseRecordMapper;
         this.sysRequestHistoryMapper = sysRequestHistoryMapper;
         this.kafkaTemplate = kafkaTemplate;
         this.vehicleInformationSearchRepository = vehicleInformationSearchRepository;
@@ -63,18 +78,10 @@ public class VehicleInformationService {
             throw new RuntimeException("Duplicate vehicle request detected");
         }
 
-        SysRequestHistory history = new SysRequestHistory();
-        history.setIdempotencyKey(idempotencyKey);
-        history.setBusinessStatus("PROCESSING");
-        history.setCreatedAt(LocalDateTime.now());
+        SysRequestHistory history = buildHistory(idempotencyKey, vehicleInformation, action);
         sysRequestHistoryMapper.insert(history);
 
-        sendKafkaMessage(action, vehicleInformation);
-
-        history.setBusinessStatus("SUCCESS");
-        history.setBusinessId(vehicleInformation.getVehicleId());
-        history.setUpdatedAt(LocalDateTime.now());
-        sysRequestHistoryMapper.updateById(history);
+        sendKafkaMessage(action, idempotencyKey, vehicleInformation);
     }
 
     @Transactional
@@ -103,6 +110,7 @@ public class VehicleInformationService {
     @CacheEvict(cacheNames = CACHE_NAME, allEntries = true)
     public void deleteVehicleInformation(long vehicleId) {
         validateVehicleId(vehicleId);
+        ensureVehicleCanBeDeleted(vehicleId);
         int rows = vehicleInformationMapper.deleteById(vehicleId);
         if (rows == 0) {
             throw new IllegalStateException("Vehicle not found with ID: " + vehicleId);
@@ -120,16 +128,16 @@ public class VehicleInformationService {
         if (vehicles.isEmpty()) {
             return;
         }
-        vehicleInformationMapper.delete(wrapper);
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                vehicles.stream()
-                        .map(VehicleInformation::getVehicleId)
-                        .filter(Objects::nonNull)
-                        .forEach(vehicleInformationSearchRepository::deleteById);
+        for (VehicleInformation vehicle : vehicles) {
+            if (vehicle != null && vehicle.getVehicleId() != null) {
+                ensureVehicleCanBeDeleted(vehicle.getVehicleId());
             }
-        });
+        }
+        vehicleInformationMapper.delete(wrapper);
+        runAfterCommitOrNow(() -> vehicles.stream()
+                .map(VehicleInformation::getVehicleId)
+                .filter(Objects::nonNull)
+                .forEach(vehicleInformationSearchRepository::deleteById));
     }
 
     @Cacheable(cacheNames = CACHE_NAME, key = "#vehicleId", unless = "#result == null")
@@ -158,11 +166,49 @@ public class VehicleInformationService {
             return fromIndex;
         }
         List<VehicleInformation> db = vehicleInformationMapper.selectList(null);
-        db.stream()
-                .map(VehicleInformationDocument::fromEntity)
-                .filter(Objects::nonNull)
-                .forEach(vehicleInformationSearchRepository::save);
+        syncBatchToIndexAfterCommit(db);
         return db;
+    }
+
+    @Cacheable(cacheNames = CACHE_NAME, key = "'page:' + #page + ':' + #size")
+    public List<VehicleInformation> listVehicles(int page, int size) {
+        validatePagination(page, size);
+        QueryWrapper<VehicleInformation> wrapper = new QueryWrapper<>();
+        wrapper.orderByDesc("updated_at")
+                .orderByDesc("vehicle_id");
+        return fetchFromDatabase(wrapper, page, size);
+    }
+
+    public boolean shouldSkipProcessing(String idempotencyKey) {
+        SysRequestHistory history = sysRequestHistoryMapper.selectByIdempotencyKey(idempotencyKey);
+        return history != null
+                && "SUCCESS".equalsIgnoreCase(history.getBusinessStatus())
+                && history.getBusinessId() != null
+                && history.getBusinessId() > 0;
+    }
+
+    public void markHistorySuccess(String idempotencyKey, Long vehicleId) {
+        SysRequestHistory history = sysRequestHistoryMapper.selectByIdempotencyKey(idempotencyKey);
+        if (history == null) {
+            log.log(Level.WARNING, "Cannot mark success for missing idempotency key {0}", idempotencyKey);
+            return;
+        }
+        history.setBusinessStatus("SUCCESS");
+        history.setBusinessId(vehicleId);
+        history.setUpdatedAt(LocalDateTime.now());
+        sysRequestHistoryMapper.updateById(history);
+    }
+
+    public void markHistoryFailure(String idempotencyKey, String reason) {
+        SysRequestHistory history = sysRequestHistoryMapper.selectByIdempotencyKey(idempotencyKey);
+        if (history == null) {
+            log.log(Level.WARNING, "Cannot mark failure for missing idempotency key {0}", idempotencyKey);
+            return;
+        }
+        history.setBusinessStatus("FAILED");
+        history.setRequestParams(appendFailureReason(history.getRequestParams(), reason));
+        history.setUpdatedAt(LocalDateTime.now());
+        sysRequestHistoryMapper.updateById(history);
     }
 
     @Cacheable(cacheNames = CACHE_NAME, key = "'plate:' + #licensePlate")
@@ -210,6 +256,45 @@ public class VehicleInformationService {
         return vehicleInformationMapper.selectList(wrapper);
     }
 
+    @Transactional
+    @CacheEvict(cacheNames = CACHE_NAME, allEntries = true)
+    public void reassignOwnerIdCard(String previousIdCardNumber,
+                                    String nextIdCardNumber,
+                                    String ownerName,
+                                    String ownerContact) {
+        if (isBlank(previousIdCardNumber)
+                || isBlank(nextIdCardNumber)
+                || previousIdCardNumber.trim().equals(nextIdCardNumber.trim())) {
+            return;
+        }
+        QueryWrapper<VehicleInformation> wrapper = new QueryWrapper<>();
+        wrapper.eq("owner_id_card", previousIdCardNumber.trim())
+                .orderByDesc("updated_at")
+                .orderByDesc("vehicle_id");
+        List<VehicleInformation> vehicles = vehicleInformationMapper.selectList(wrapper);
+        if (vehicles.isEmpty()) {
+            return;
+        }
+        List<VehicleInformation> updatedVehicles = new ArrayList<>();
+        LocalDateTime now = LocalDateTime.now();
+        for (VehicleInformation vehicle : vehicles) {
+            if (vehicle == null || vehicle.getVehicleId() == null) {
+                continue;
+            }
+            vehicle.setOwnerIdCard(nextIdCardNumber.trim());
+            if (!isBlank(ownerName)) {
+                vehicle.setOwnerName(ownerName.trim());
+            }
+            if (!isBlank(ownerContact)) {
+                vehicle.setOwnerContact(ownerContact.trim());
+            }
+            vehicle.setUpdatedAt(now);
+            vehicleInformationMapper.updateById(vehicle);
+            updatedVehicles.add(vehicle);
+        }
+        syncBatchToIndexAfterCommit(updatedVehicles);
+    }
+
     @Cacheable(cacheNames = CACHE_NAME, key = "'status:' + #status")
     public List<VehicleInformation> getVehicleInformationByStatus(String status) {
         validateInput(status, "Invalid status");
@@ -229,8 +314,10 @@ public class VehicleInformationService {
             return fromIndex;
         }
         QueryWrapper<VehicleInformation> wrapper = new QueryWrapper<>();
-        wrapper.likeRight("owner_name", ownerName);
-        return vehicleInformationMapper.selectList(wrapper);
+        wrapper.likeRight("owner_name", ownerName)
+                .orderByDesc("updated_at")
+                .orderByDesc("vehicle_id");
+        return fetchFromDatabase(wrapper, page, size);
     }
 
     @Cacheable(cacheNames = CACHE_NAME, key = "'ownerIdCardSearch:' + #ownerIdCard + ':' + #page + ':' + #size")
@@ -244,8 +331,10 @@ public class VehicleInformationService {
             return fromIndex;
         }
         QueryWrapper<VehicleInformation> wrapper = new QueryWrapper<>();
-        wrapper.likeRight("owner_id_card", ownerIdCard);
-        return vehicleInformationMapper.selectList(wrapper);
+        wrapper.eq("owner_id_card", ownerIdCard)
+                .orderByDesc("updated_at")
+                .orderByDesc("vehicle_id");
+        return fetchFromDatabase(wrapper, page, size);
     }
 
     @Cacheable(cacheNames = CACHE_NAME, key = "'statusSearch:' + #status + ':' + #page + ':' + #size")
@@ -259,8 +348,10 @@ public class VehicleInformationService {
             return fromIndex;
         }
         QueryWrapper<VehicleInformation> wrapper = new QueryWrapper<>();
-        wrapper.eq("status", status);
-        return vehicleInformationMapper.selectList(wrapper);
+        wrapper.eq("status", status)
+                .orderByDesc("updated_at")
+                .orderByDesc("vehicle_id");
+        return fetchFromDatabase(wrapper, page, size);
     }
 
     @Cacheable(cacheNames = CACHE_NAME, key = "'search:' + #query + ':' + #page + ':' + #size")
@@ -366,34 +457,155 @@ public class VehicleInformationService {
         return PageRequest.of(Math.max(page - 1, 0), Math.max(size, 1));
     }
 
+    private List<VehicleInformation> fetchFromDatabase(QueryWrapper<VehicleInformation> wrapper, int page, int size) {
+        Page<VehicleInformation> mpPage = new Page<>(Math.max(page, 1), Math.max(size, 1));
+        vehicleInformationMapper.selectPage(mpPage, wrapper);
+        List<VehicleInformation> records = mpPage.getRecords();
+        syncBatchToIndexAfterCommit(records);
+        return records;
+    }
+
+    private SysRequestHistory buildHistory(String idempotencyKey, VehicleInformation vehicleInformation, String action) {
+        SysRequestHistory history = new SysRequestHistory();
+        history.setIdempotencyKey(idempotencyKey);
+        history.setRequestMethod(resolveRequestMethod("POST"));
+        history.setRequestUrl(resolveRequestUrl("/api/vehicles"));
+        history.setRequestParams(buildRequestParams(vehicleInformation));
+        history.setBusinessType(resolveBusinessType(action));
+        history.setBusinessStatus("PROCESSING");
+        history.setRequestIp(resolveRequestIp());
+        history.setCreatedAt(LocalDateTime.now());
+        history.setUpdatedAt(LocalDateTime.now());
+        return history;
+    }
+
+    private String buildRequestParams(VehicleInformation vehicleInformation) {
+        if (vehicleInformation == null) {
+            return null;
+        }
+        StringBuilder builder = new StringBuilder();
+        appendParam(builder, "licensePlate", vehicleInformation.getLicensePlate());
+        appendParam(builder, "vehicleType", vehicleInformation.getVehicleType());
+        appendParam(builder, "ownerName", vehicleInformation.getOwnerName());
+        appendParam(builder, "ownerIdCard", vehicleInformation.getOwnerIdCard());
+        appendParam(builder, "status", vehicleInformation.getStatus());
+        return truncate(builder.toString());
+    }
+
+    private String resolveBusinessType(String action) {
+        String normalized = isBlank(action) ? "CREATE" : action.trim().toUpperCase(Locale.ROOT);
+        return "VEHICLE_" + normalized;
+    }
+
+    private void appendParam(StringBuilder builder, String key, Object value) {
+        if (builder == null || value == null) {
+            return;
+        }
+        String normalized = value.toString().trim();
+        if (normalized.isEmpty()) {
+            return;
+        }
+        if (!builder.isEmpty()) {
+            builder.append(',');
+        }
+        builder.append(key).append('=').append(normalized);
+    }
+
+    private String appendFailureReason(String existing, String reason) {
+        String normalizedReason = truncate(reason);
+        if (isBlank(normalizedReason)) {
+            return existing;
+        }
+        if (isBlank(existing)) {
+            return "failure=" + normalizedReason;
+        }
+        return truncate(existing + ",failure=" + normalizedReason);
+    }
+
     private void syncToIndexAfterCommit(VehicleInformation vehicleInformation) {
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                VehicleInformationDocument doc = VehicleInformationDocument.fromEntity(vehicleInformation);
-                if (doc != null) {
-                    vehicleInformationSearchRepository.save(doc);
-                }
+        if (vehicleInformation == null) {
+            return;
+        }
+        runAfterCommitOrNow(() -> {
+            VehicleInformationDocument doc = VehicleInformationDocument.fromEntity(vehicleInformation);
+            if (doc != null) {
+                vehicleInformationSearchRepository.save(doc);
+            }
+        });
+    }
+
+    private void syncBatchToIndexAfterCommit(List<VehicleInformation> vehicles) {
+        if (vehicles == null || vehicles.isEmpty()) {
+            return;
+        }
+        runAfterCommitOrNow(() -> {
+            List<VehicleInformationDocument> documents = vehicles.stream()
+                    .filter(Objects::nonNull)
+                    .map(VehicleInformationDocument::fromEntity)
+                    .filter(Objects::nonNull)
+                    .collect(Collectors.toList());
+            if (!documents.isEmpty()) {
+                vehicleInformationSearchRepository.saveAll(documents);
             }
         });
     }
 
     private void syncDeleteAfterCommit(Long vehicleId) {
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                vehicleInformationSearchRepository.deleteById(vehicleId);
-            }
-        });
+        runAfterCommitOrNow(() -> vehicleInformationSearchRepository.deleteById(vehicleId));
     }
 
-    private void sendKafkaMessage(String action, VehicleInformation vehicleInformation) {
+    private void sendKafkaMessage(String action, String idempotencyKey, VehicleInformation vehicleInformation) {
         String topic = "vehicle_" + action.toLowerCase(Locale.ROOT);
         try {
-            kafkaTemplate.send(topic, vehicleInformation);
+            kafkaTemplate.send(topic, idempotencyKey, vehicleInformation);
         } catch (Exception e) {
             log.log(Level.WARNING, "Failed to send vehicle Kafka message", e);
         }
+    }
+
+    private String resolveRequestMethod(String fallback) {
+        RequestAttributes requestAttributes = RequestContextHolder.getRequestAttributes();
+        if (!(requestAttributes instanceof ServletRequestAttributes servletRequestAttributes)) {
+            return fallback;
+        }
+        HttpServletRequest request = servletRequestAttributes.getRequest();
+        if (request == null || isBlank(request.getMethod())) {
+            return fallback;
+        }
+        return request.getMethod().trim().toUpperCase(Locale.ROOT);
+    }
+
+    private String resolveRequestUrl(String fallback) {
+        RequestAttributes requestAttributes = RequestContextHolder.getRequestAttributes();
+        if (!(requestAttributes instanceof ServletRequestAttributes servletRequestAttributes)) {
+            return fallback;
+        }
+        HttpServletRequest request = servletRequestAttributes.getRequest();
+        if (request == null || isBlank(request.getRequestURI())) {
+            return fallback;
+        }
+        return request.getRequestURI().trim();
+    }
+
+    private String resolveRequestIp() {
+        RequestAttributes requestAttributes = RequestContextHolder.getRequestAttributes();
+        if (!(requestAttributes instanceof ServletRequestAttributes servletRequestAttributes)) {
+            return null;
+        }
+        HttpServletRequest request = servletRequestAttributes.getRequest();
+        if (request == null) {
+            return null;
+        }
+        String forwardedFor = request.getHeader("X-Forwarded-For");
+        if (!isBlank(forwardedFor)) {
+            return forwardedFor.split(",")[0].trim();
+        }
+        String realIp = request.getHeader("X-Real-IP");
+        if (!isBlank(realIp)) {
+            return realIp.trim();
+        }
+        String remoteAddr = request.getRemoteAddr();
+        return isBlank(remoteAddr) ? null : remoteAddr.trim();
     }
 
     private void validateVehicle(VehicleInformation vehicleInformation) {
@@ -401,6 +613,9 @@ public class VehicleInformationService {
             throw new IllegalArgumentException("Vehicle information cannot be null");
         }
         validateInput(vehicleInformation.getLicensePlate(), "License plate cannot be empty");
+        ensureUniqueLicensePlate(vehicleInformation);
+        ensureUniqueEngineNumber(vehicleInformation);
+        ensureUniqueFrameNumber(vehicleInformation);
     }
 
     private void validateVehicleId(VehicleInformation vehicleInformation) {
@@ -420,9 +635,93 @@ public class VehicleInformationService {
         }
     }
 
+    private boolean isBlank(String value) {
+        return value == null || value.trim().isEmpty();
+    }
+
+    private String truncate(String value) {
+        if (value == null) {
+            return null;
+        }
+        return value.length() <= 500 ? value : value.substring(0, 500);
+    }
+
+    private void runAfterCommitOrNow(Runnable task) {
+        if (task == null) {
+            return;
+        }
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    task.run();
+                }
+            });
+            return;
+        }
+        task.run();
+    }
+
     private void validateInput(String value, String message) {
         if (value == null || value.trim().isEmpty()) {
             throw new IllegalArgumentException(message);
+        }
+    }
+
+    private void ensureUniqueLicensePlate(VehicleInformation vehicleInformation) {
+        QueryWrapper<VehicleInformation> wrapper = new QueryWrapper<>();
+        wrapper.eq("license_plate", vehicleInformation.getLicensePlate().trim());
+        if (vehicleInformation.getVehicleId() != null) {
+            wrapper.ne("vehicle_id", vehicleInformation.getVehicleId());
+        }
+        if (vehicleInformationMapper.selectCount(wrapper) > 0) {
+            throw new IllegalArgumentException("License plate already exists");
+        }
+    }
+
+    private void ensureUniqueEngineNumber(VehicleInformation vehicleInformation) {
+        if (vehicleInformation == null
+                || vehicleInformation.getEngineNumber() == null
+                || vehicleInformation.getEngineNumber().trim().isEmpty()) {
+            return;
+        }
+        QueryWrapper<VehicleInformation> wrapper = new QueryWrapper<>();
+        wrapper.eq("engine_number", vehicleInformation.getEngineNumber().trim());
+        if (vehicleInformation.getVehicleId() != null) {
+            wrapper.ne("vehicle_id", vehicleInformation.getVehicleId());
+        }
+        if (vehicleInformationMapper.selectCount(wrapper) > 0) {
+            throw new IllegalArgumentException("Engine number already exists");
+        }
+    }
+
+    private void ensureUniqueFrameNumber(VehicleInformation vehicleInformation) {
+        if (vehicleInformation == null
+                || vehicleInformation.getFrameNumber() == null
+                || vehicleInformation.getFrameNumber().trim().isEmpty()) {
+            return;
+        }
+        QueryWrapper<VehicleInformation> wrapper = new QueryWrapper<>();
+        wrapper.eq("frame_number", vehicleInformation.getFrameNumber().trim());
+        if (vehicleInformation.getVehicleId() != null) {
+            wrapper.ne("vehicle_id", vehicleInformation.getVehicleId());
+        }
+        if (vehicleInformationMapper.selectCount(wrapper) > 0) {
+            throw new IllegalArgumentException("Frame number already exists");
+        }
+    }
+
+    private void ensureVehicleCanBeDeleted(Long vehicleId) {
+        QueryWrapper<DriverVehicle> bindingWrapper = new QueryWrapper<>();
+        bindingWrapper.eq("vehicle_id", vehicleId);
+        if (driverVehicleMapper.selectCount(bindingWrapper) > 0) {
+            throw new IllegalStateException("Cannot delete vehicle while driver bindings still exist");
+        }
+
+        QueryWrapper<OffenseRecord> offenseWrapper = new QueryWrapper<>();
+        offenseWrapper.eq("vehicle_id", vehicleId);
+        if (offenseRecordMapper.selectCount(offenseWrapper) > 0) {
+            throw new IllegalStateException("Cannot delete vehicle while offense records still exist");
         }
     }
 }

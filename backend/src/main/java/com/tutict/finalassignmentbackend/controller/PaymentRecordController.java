@@ -2,6 +2,7 @@ package com.tutict.finalassignmentbackend.controller;
 
 import com.tutict.finalassignmentbackend.config.statemachine.states.PaymentState;
 import com.tutict.finalassignmentbackend.entity.PaymentRecord;
+import com.tutict.finalassignmentbackend.service.CurrentUserTrafficSupportService;
 import com.tutict.finalassignmentbackend.service.PaymentRecordService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
@@ -34,9 +35,40 @@ public class PaymentRecordController {
     private static final Logger LOG = Logger.getLogger(PaymentRecordController.class.getName());
 
     private final PaymentRecordService paymentRecordService;
+    private final CurrentUserTrafficSupportService currentUserTrafficSupportService;
 
-    public PaymentRecordController(PaymentRecordService paymentRecordService) {
+    public PaymentRecordController(PaymentRecordService paymentRecordService,
+                                   CurrentUserTrafficSupportService currentUserTrafficSupportService) {
         this.paymentRecordService = paymentRecordService;
+        this.currentUserTrafficSupportService = currentUserTrafficSupportService;
+    }
+
+    @PostMapping("/me")
+    @RolesAllowed({"SUPER_ADMIN", "ADMIN", "FINANCE", "USER"})
+    @Operation(summary = "Create a payment record for the current user")
+    public ResponseEntity<PaymentRecord> createCurrentUserPayment(@RequestBody PaymentRecord request,
+                                                                  @RequestHeader(value = "Idempotency-Key", required = false)
+                                                                  String idempotencyKey) {
+        boolean useKey = hasKey(idempotencyKey);
+        try {
+            if (useKey) {
+                if (paymentRecordService.shouldSkipProcessing(idempotencyKey)) {
+                    return ResponseEntity.status(HttpStatus.ALREADY_REPORTED).build();
+                }
+                paymentRecordService.checkAndInsertIdempotency(idempotencyKey, request, "create");
+            }
+            PaymentRecord saved = currentUserTrafficSupportService.createPaymentForCurrentUser(request);
+            if (useKey && saved.getPaymentId() != null) {
+                paymentRecordService.markHistorySuccess(idempotencyKey, saved.getPaymentId());
+            }
+            return ResponseEntity.status(HttpStatus.CREATED).body(saved);
+        } catch (Exception ex) {
+            if (useKey) {
+                paymentRecordService.markHistoryFailure(idempotencyKey, ex.getMessage());
+            }
+            LOG.log(Level.SEVERE, "Create current user payment failed", ex);
+            return ResponseEntity.status(resolveStatus(ex)).build();
+        }
     }
 
     @PostMapping
@@ -72,36 +104,13 @@ public class PaymentRecordController {
                                                        @RequestBody PaymentRecord request,
                                                        @RequestHeader(value = "Idempotency-Key", required = false)
                                                        String idempotencyKey) {
-        boolean useKey = hasKey(idempotencyKey);
-        try {
-            request.setPaymentId(paymentId);
-            if (useKey) {
-                paymentRecordService.checkAndInsertIdempotency(idempotencyKey, request, "update");
-            }
-            PaymentRecord updated = paymentRecordService.updatePaymentRecord(request);
-            if (useKey && updated.getPaymentId() != null) {
-                paymentRecordService.markHistorySuccess(idempotencyKey, updated.getPaymentId());
-            }
-            return ResponseEntity.ok(updated);
-        } catch (Exception ex) {
-            if (useKey) {
-                paymentRecordService.markHistoryFailure(idempotencyKey, ex.getMessage());
-            }
-            LOG.log(Level.SEVERE, "Update payment record failed", ex);
-            return ResponseEntity.status(resolveStatus(ex)).build();
-        }
+        return ResponseEntity.status(HttpStatus.METHOD_NOT_ALLOWED).build();
     }
 
     @DeleteMapping("/{paymentId}")
     @Operation(summary = "删除支付记录")
     public ResponseEntity<Void> deletePayment(@PathVariable Long paymentId) {
-        try {
-            paymentRecordService.deletePaymentRecord(paymentId);
-            return ResponseEntity.noContent().build();
-        } catch (Exception ex) {
-            LOG.log(Level.WARNING, "Delete payment record failed", ex);
-            return ResponseEntity.status(resolveStatus(ex)).build();
-        }
+        return ResponseEntity.status(HttpStatus.METHOD_NOT_ALLOWED).build();
     }
 
     @GetMapping("/{paymentId}")
@@ -113,8 +122,9 @@ public class PaymentRecordController {
 
     @GetMapping
     @Operation(summary = "查询全部支付记录")
-    public ResponseEntity<List<PaymentRecord>> listPayments() {
-        return ResponseEntity.ok(paymentRecordService.findAll());
+    public ResponseEntity<List<PaymentRecord>> listPayments(@RequestParam(defaultValue = "1") int page,
+                                                            @RequestParam(defaultValue = "20") int size) {
+        return ResponseEntity.ok(paymentRecordService.listPayments(page, size));
     }
 
     @GetMapping("/fine/{fineId}")
@@ -195,7 +205,7 @@ public class PaymentRecordController {
     public ResponseEntity<PaymentRecord> updatePaymentStatus(@PathVariable Long paymentId,
                                                              @PathVariable PaymentState state) {
         try {
-            PaymentRecord updated = paymentRecordService.updatePaymentStatus(paymentId, state);
+            PaymentRecord updated = paymentRecordService.transitionPaymentStatus(paymentId, state);
             return ResponseEntity.ok(updated);
         } catch (Exception ex) {
             LOG.log(Level.WARNING, "Update payment status failed", ex);

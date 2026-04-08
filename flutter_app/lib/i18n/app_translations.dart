@@ -101,10 +101,12 @@ class AppTranslations extends Translations {
     'auth.error.passwordResetCancelled': 'Password reset cancelled',
     'auth.error.passwordResetFailed': 'Password reset failed: @code',
     'auth.error.passwordResetError': 'Password reset error: @error',
+    'auth.error.currentPasswordIncorrect': 'Current password is incorrect',
     'auth.success.passwordUpdated': 'Password updated',
     'auth.resetPassword': 'Reset password',
     'auth.email': 'Email',
     'auth.password': 'Password',
+    'auth.currentPassword': 'Current password',
     'auth.newPassword': 'New password',
     'auth.confirmPassword': 'Confirm password',
     'auth.createAccount': 'Create account',
@@ -454,8 +456,10 @@ class AppTranslations extends Translations {
     'userAdmin.error.createFailed': 'Failed to create user: @error',
     'userAdmin.error.updateFailed': 'Failed to update user: @error',
     'userAdmin.error.deleteFailed': 'Failed to delete user: @error',
+    'userAdmin.error.roleLoadFailed': 'Failed to manage user roles: @error',
     'userAdmin.empty.default': 'No user records available.',
     'userAdmin.empty.filtered': 'No users match the current filters.',
+    'userAdmin.empty.roles': 'This user has no role bindings yet.',
     'userAdmin.search.username': 'Search username',
     'userAdmin.search.status': 'Search status',
     'userAdmin.search.department': 'Search department',
@@ -468,14 +472,17 @@ class AppTranslations extends Translations {
     'userAdmin.filter.byEmail': 'By email',
     'userAdmin.dialog.createTitle': 'Create user',
     'userAdmin.dialog.editTitle': 'Edit user',
+    'userAdmin.dialog.manageRolesTitle': 'Manage roles for @username',
     'userAdmin.delete.confirmTitle': 'Confirm delete',
     'userAdmin.delete.confirmBody':
         'Are you sure you want to delete this user? This action cannot be undone.',
     'userAdmin.action.relogin': 'Sign in again',
     'userAdmin.action.create': 'Create user',
+    'userAdmin.action.manageRoles': 'Manage roles',
     'userAdmin.action.edit': 'Edit user',
     'userAdmin.action.delete': 'Delete user',
     'userAdmin.action.refresh': 'Refresh list',
+    'userAdmin.hint.selectRole': 'Select a role to add',
     'userAdmin.field.username': 'Username',
     'userAdmin.field.password': 'Password',
     'userAdmin.field.newPassword': 'New password',
@@ -502,10 +509,13 @@ class AppTranslations extends Translations {
     'userAdmin.validation.remarksTooLong':
         'Remarks cannot exceed 255 characters.',
     'userAdmin.validation.statusRequired': 'Please select a status.',
+    'userAdmin.validation.roleRequired': 'Please select a role first.',
     'userAdmin.validation.usernameExists': 'This username already exists.',
     'userAdmin.success.created': 'User created successfully.',
     'userAdmin.success.updated': 'User updated successfully.',
     'userAdmin.success.deleted': 'User deleted successfully.',
+    'userAdmin.success.roleAdded': 'Role binding added successfully.',
+    'userAdmin.success.roleRemoved': 'Role binding removed successfully.',
     'userAdmin.status.active': 'Active',
     'userAdmin.status.inactive': 'Inactive',
     'userAdmin.value.unknownUser': 'Unknown user',
@@ -547,6 +557,18 @@ class AppTranslations extends Translations {
     'loginLog.validation.usernameRequired': 'Username cannot be empty.',
     'loginLog.validation.loginIpRequired': 'Login IP address cannot be empty.',
     'loginLog.validation.loginResultRequired': 'Login result cannot be empty.',
+    'loginLog.validation.usernameTooLong':
+        'Username cannot exceed 100 characters.',
+    'loginLog.validation.loginIpTooLong':
+        'Login IP address cannot exceed 50 characters.',
+    'loginLog.validation.loginResultTooLong':
+        'Login result cannot exceed 50 characters.',
+    'loginLog.validation.browserTypeTooLong':
+        'Browser type cannot exceed 100 characters.',
+    'loginLog.validation.osVersionTooLong':
+        'Operating system version cannot exceed 100 characters.',
+    'loginLog.validation.remarksTooLong':
+        'Remarks cannot exceed 500 characters.',
     'loginLog.success.created': 'Login log created successfully.',
     'loginLog.success.updated': 'Login log updated successfully.',
     'loginLog.success.deleted': 'Login log deleted successfully.',
@@ -610,10 +632,18 @@ class AppTranslations extends Translations {
     'operationLog.field.operationTime': 'Operation time',
     'operationLog.validation.userIdRequired': 'User ID cannot be empty.',
     'operationLog.validation.userIdNumeric': 'User ID must be a number.',
+    'operationLog.validation.userIdTooLong':
+        'User ID cannot exceed 20 characters.',
     'operationLog.validation.operationContentRequired':
         'Operation content cannot be empty.',
+    'operationLog.validation.operationContentTooLong':
+        'Operation content cannot exceed 500 characters.',
     'operationLog.validation.operationResultRequired':
         'Operation result cannot be empty.',
+    'operationLog.validation.operationResultTooLong':
+        'Operation result cannot exceed 100 characters.',
+    'operationLog.validation.remarksTooLong':
+        'Remarks cannot exceed 500 characters.',
     'operationLog.success.created': 'Operation log created successfully.',
     'operationLog.success.updated': 'Operation log updated successfully.',
     'operationLog.success.deleted': 'Operation log deleted successfully.',
@@ -698,6 +728,11 @@ class AppTranslations extends Translations {
     'backupRestore.error.deleteFailed': 'Failed to delete backup: @error',
     'backupRestore.error.server': 'Server error',
     'backupRestore.error.fileNameRequired': 'File name cannot be empty.',
+    'backupRestore.validation.required': 'Please fill in @field.',
+    'backupRestore.validation.fileNameTooLong':
+        'File name cannot exceed 255 characters.',
+    'backupRestore.validation.remarksTooLong':
+        'Remarks cannot exceed 500 characters.',
     'backupRestore.success.created': 'Backup created successfully.',
     'backupRestore.success.updated': 'Backup updated successfully.',
     'backupRestore.success.restored': 'Backup restored successfully.',
@@ -736,6 +771,30 @@ class AppTranslations extends Translations {
     'progress.filter.clear': 'Clear filters',
     'progress.filter.selectTimeRange': 'Select a time range',
     'progress.filter.clearTooltip': 'Clear filters',
+    'progress.view.items': 'Progress updates',
+    'progress.view.refunds': 'Refund audits',
+    'progress.refund.empty': 'No refund audit records found',
+    'progress.refund.filter.fineId': 'Fine ID',
+    'progress.refund.filter.paymentId': 'Payment ID',
+    'progress.refund.filter.searchTooltip': 'Search refund audits',
+    'progress.refund.filter.clearTooltip': 'Clear refund filters',
+    'progress.refund.status.all': 'All statuses',
+    'progress.refund.type.partial': 'Partial refund',
+    'progress.refund.type.waive': 'Waive and refund',
+    'progress.refund.type.partialFailed': 'Partial refund failed',
+    'progress.refund.type.waiveFailed': 'Waive and refund failed',
+    'progress.refund.detail.businessType': 'Refund type: @value',
+    'progress.refund.detail.businessId': 'Payment ID: @value',
+    'progress.refund.detail.fineId': 'Fine ID: @value',
+    'progress.refund.detail.refundAmount': 'Refund amount: @value',
+    'progress.refund.detail.operator': 'Operator: @value',
+    'progress.refund.detail.reason': 'Reason: @value',
+    'progress.refund.detail.failure': 'Failure: @value',
+    'progress.refund.detail.requestIp': 'Request IP: @value',
+    'progress.refund.detail.userId': 'User ID: @value',
+    'progress.refund.detail.updatedTime': 'Updated at: @value',
+    'progress.refund.detail.idempotencyKey': 'Idempotency key: @value',
+    'progress.refund.detail.noReason': 'No refund reason',
     'progress.submitNew': 'Submit new progress',
     'progress.dialog.submitTitle': 'Submit new progress',
     'progress.dialog.editTitle': 'Edit progress',
@@ -744,8 +803,13 @@ class AppTranslations extends Translations {
     'progress.field.detailsOptional': 'Details (optional)',
     'progress.field.relatedAppealOptional': 'Related appeal (optional)',
     'progress.field.appealOption': 'Appeal: @name (ID: @id)',
+    'progress.validation.required': 'Please fill in @field.',
     'progress.validation.titleAndDetails': 'Title and details cannot be empty.',
     'progress.validation.titleRequired': 'Title cannot be empty.',
+    'progress.validation.titleTooLong':
+        'Progress title cannot exceed 100 characters.',
+    'progress.validation.detailsTooLong':
+        'Progress details cannot exceed 500 characters.',
     'progress.error.adminOnly':
         'Access denied. This page is only available to administrators.',
     'progress.detail.status': 'Status: @value',
@@ -800,6 +864,8 @@ class AppTranslations extends Translations {
     'common.status.completed': 'Completed',
     'common.status.archived': 'Archived',
     'trafficDashboard.page.title': 'Traffic violation dashboard',
+    'trafficDashboard.error.loadFailed':
+        'Failed to load traffic dashboard: @error',
     'trafficDashboard.section.violationType': 'Violation type distribution',
     'trafficDashboard.section.fineTrend': 'Fine and point trends',
     'trafficDashboard.section.appealReason': 'Appeal reason distribution',
@@ -1015,9 +1081,14 @@ class AppTranslations extends Translations {
     'fine.detail.receipt': 'Receipt number',
     'fine.detail.time': 'Fine time',
     'fine.detail.status': 'Status',
+    'fine.detail.outstanding': 'Outstanding amount',
     'fine.detail.remarks': 'Remarks',
     'fine.qr.alipayHint': 'Scan the QR code below with Alipay to pay',
     'fine.action.close': 'Close',
+    'fine.action.payNow': 'Pay now (\$@amount)',
+    'fine.payment.unavailable': 'This fine cannot be paid right now.',
+    'fine.payment.success': 'Payment recorded successfully: \$@amount',
+    'fine.payment.failed': 'Failed to record payment: @error',
     'fine.page.title': 'Traffic violation fine records',
     'fine.action.refresh': 'Refresh fine records',
     'fine.empty.byDriver': 'No fine records matched driver @driver',
@@ -1169,6 +1240,9 @@ class AppTranslations extends Translations {
     'appeal.form.idCard': 'ID card number *',
     'appeal.form.contact': 'Contact number *',
     'appeal.form.reason': 'Appeal reason *',
+    'appeal.validation.required': 'Please fill in @field.',
+    'appeal.validation.reasonTooLong':
+        'Appeal reason cannot exceed 500 characters.',
     'appeal.validation.requiredFields': 'Please fill in all required fields.',
     'appeal.search.hint': 'Search appeal reason',
     'appeal.filter.rangeLabel': 'Date range: @start to @end',
@@ -1195,6 +1269,7 @@ class AppTranslations extends Translations {
     'appeal.detail.contact': 'Contact number',
     'appeal.detail.reason': 'Appeal reason',
     'appeal.detail.time': 'Appeal time',
+    'appeal.detail.acceptanceStatus': 'Acceptance status',
     'appeal.detail.status': 'Processing status',
     'appeal.detail.result': 'Processing result',
     'appeal.progress.related': 'Related feedback',
@@ -1269,6 +1344,7 @@ class AppTranslations extends Translations {
         'Deduction date range: @start to @end',
     'deductionAdmin.filter.selectDateRange': 'Select a deduction date range',
     'deductionAdmin.filter.tooltip': 'Search by deduction date range',
+    'deductionAdmin.filter.clearDateRange': 'Clear date range',
     'deductionAdmin.error.unauthorized': 'Unauthorized. Please sign in again.',
     'deductionAdmin.error.expired':
         'Your login has expired. Please sign in again.',
@@ -1868,10 +1944,13 @@ class AppTranslations extends Translations {
         '\u5bc6\u7801\u91cd\u7f6e\u5931\u8d25: @code',
     'auth.error.passwordResetError':
         '\u5bc6\u7801\u91cd\u7f6e\u5f02\u5e38: @error',
+    'auth.error.currentPasswordIncorrect':
+        '\u5f53\u524d\u5bc6\u7801\u4e0d\u6b63\u786e',
     'auth.success.passwordUpdated': '\u5bc6\u7801\u5df2\u66f4\u65b0',
     'auth.resetPassword': '\u91cd\u7f6e\u5bc6\u7801',
     'auth.email': '\u90ae\u7bb1',
     'auth.password': '\u5bc6\u7801',
+    'auth.currentPassword': '\u5f53\u524d\u5bc6\u7801',
     'auth.newPassword': '\u65b0\u5bc6\u7801',
     'auth.confirmPassword': '\u786e\u8ba4\u5bc6\u7801',
     'auth.createAccount': '\u521b\u5efa\u8d26\u53f7',
@@ -2084,8 +2163,7 @@ class AppTranslations extends Translations {
     'shared.map.error.tileLoadFailed':
         '\u5730\u56fe\u74e6\u7247\u91cd\u8bd5 @count \u6b21\u540e\u4ecd\u52a0\u8f7d\u5931\u8d25\u3002',
     'shared.map.error.placeholder': '\u5730\u56fe\u52a0\u8f7d\u9519\u8bef',
-    'shared.map.attribution.openStreetMap':
-        'OpenStreetMap \u8d21\u732e\u8005',
+    'shared.map.attribution.openStreetMap': 'OpenStreetMap \u8d21\u732e\u8005',
     'shared.notificationBar.defaultMessage':
         '\u8bf7\u8f93\u5165\u8eab\u4efd\u8bc1\u53f7\u548c\u9a7e\u9a76\u8bc1\u53f7\u4ee5\u7ee7\u7eed',
     'shared.notificationBar.defaultAction': '\u7acb\u5373\u586b\u5199',
@@ -2239,8 +2317,10 @@ class AppTranslations extends Translations {
     'userAdmin.error.createFailed': '创建用户失败：@error',
     'userAdmin.error.updateFailed': '更新用户失败：@error',
     'userAdmin.error.deleteFailed': '删除用户失败：@error',
+    'userAdmin.error.roleLoadFailed': '管理用户角色失败：@error',
     'userAdmin.empty.default': '当前暂无用户记录。',
     'userAdmin.empty.filtered': '没有匹配当前筛选条件的用户。',
+    'userAdmin.empty.roles': '该用户当前还没有角色绑定。',
     'userAdmin.search.username': '搜索账号',
     'userAdmin.search.status': '搜索状态',
     'userAdmin.search.department': '搜索部门',
@@ -2253,13 +2333,16 @@ class AppTranslations extends Translations {
     'userAdmin.filter.byEmail': '按邮箱',
     'userAdmin.dialog.createTitle': '创建用户',
     'userAdmin.dialog.editTitle': '编辑用户',
+    'userAdmin.dialog.manageRolesTitle': '管理 @username 的角色',
     'userAdmin.delete.confirmTitle': '确认删除',
     'userAdmin.delete.confirmBody': '确定要删除此用户吗？此操作不可撤销。',
     'userAdmin.action.relogin': '重新登录',
     'userAdmin.action.create': '创建用户',
+    'userAdmin.action.manageRoles': '管理角色',
     'userAdmin.action.edit': '编辑用户',
     'userAdmin.action.delete': '删除用户',
     'userAdmin.action.refresh': '刷新列表',
+    'userAdmin.hint.selectRole': '选择要新增的角色',
     'userAdmin.field.username': '账号',
     'userAdmin.field.password': '密码',
     'userAdmin.field.newPassword': '新密码',
@@ -2280,10 +2363,13 @@ class AppTranslations extends Translations {
     'userAdmin.validation.departmentTooLong': '部门长度不能超过 100 个字符。',
     'userAdmin.validation.remarksTooLong': '备注长度不能超过 255 个字符。',
     'userAdmin.validation.statusRequired': '请选择状态。',
+    'userAdmin.validation.roleRequired': '请先选择一个角色。',
     'userAdmin.validation.usernameExists': '该账号已存在。',
     'userAdmin.success.created': '用户创建成功。',
     'userAdmin.success.updated': '用户更新成功。',
     'userAdmin.success.deleted': '用户删除成功。',
+    'userAdmin.success.roleAdded': '角色绑定添加成功。',
+    'userAdmin.success.roleRemoved': '角色绑定移除成功。',
     'userAdmin.status.active': '启用',
     'userAdmin.status.inactive': '禁用',
     'userAdmin.value.unknownUser': '未知用户',
@@ -2333,6 +2419,18 @@ class AppTranslations extends Translations {
         '\u767b\u5f55 IP \u5730\u5740\u4e0d\u80fd\u4e3a\u7a7a',
     'loginLog.validation.loginResultRequired':
         '\u767b\u5f55\u7ed3\u679c\u4e0d\u80fd\u4e3a\u7a7a',
+    'loginLog.validation.usernameTooLong':
+        '\u7528\u6237\u540d\u4e0d\u80fd\u8d85\u8fc7100\u4e2a\u5b57\u7b26',
+    'loginLog.validation.loginIpTooLong':
+        '\u767b\u5f55 IP \u5730\u5740\u4e0d\u80fd\u8d85\u8fc750\u4e2a\u5b57\u7b26',
+    'loginLog.validation.loginResultTooLong':
+        '\u767b\u5f55\u7ed3\u679c\u4e0d\u80fd\u8d85\u8fc750\u4e2a\u5b57\u7b26',
+    'loginLog.validation.browserTypeTooLong':
+        '\u6d4f\u89c8\u5668\u7c7b\u578b\u4e0d\u80fd\u8d85\u8fc7100\u4e2a\u5b57\u7b26',
+    'loginLog.validation.osVersionTooLong':
+        '\u64cd\u4f5c\u7cfb\u7edf\u7248\u672c\u4e0d\u80fd\u8d85\u8fc7100\u4e2a\u5b57\u7b26',
+    'loginLog.validation.remarksTooLong':
+        '\u5907\u6ce8\u4e0d\u80fd\u8d85\u8fc7500\u4e2a\u5b57\u7b26',
     'loginLog.success.created':
         '\u767b\u5f55\u65e5\u5fd7\u521b\u5efa\u6210\u529f',
     'loginLog.success.updated':
@@ -2407,10 +2505,18 @@ class AppTranslations extends Translations {
         '\u7528\u6237 ID \u4e0d\u80fd\u4e3a\u7a7a',
     'operationLog.validation.userIdNumeric':
         '\u7528\u6237 ID \u5fc5\u987b\u662f\u6570\u5b57',
+    'operationLog.validation.userIdTooLong':
+        '\u7528\u6237 ID \u4e0d\u80fd\u8d85\u8fc720\u4e2a\u5b57\u7b26',
     'operationLog.validation.operationContentRequired':
         '\u64cd\u4f5c\u5185\u5bb9\u4e0d\u80fd\u4e3a\u7a7a',
+    'operationLog.validation.operationContentTooLong':
+        '\u64cd\u4f5c\u5185\u5bb9\u4e0d\u80fd\u8d85\u8fc7500\u4e2a\u5b57\u7b26',
     'operationLog.validation.operationResultRequired':
         '\u64cd\u4f5c\u7ed3\u679c\u4e0d\u80fd\u4e3a\u7a7a',
+    'operationLog.validation.operationResultTooLong':
+        '\u64cd\u4f5c\u7ed3\u679c\u4e0d\u80fd\u8d85\u8fc7100\u4e2a\u5b57\u7b26',
+    'operationLog.validation.remarksTooLong':
+        '\u5907\u6ce8\u4e0d\u80fd\u8d85\u8fc7500\u4e2a\u5b57\u7b26',
     'operationLog.success.created':
         '\u64cd\u4f5c\u65e5\u5fd7\u521b\u5efa\u6210\u529f',
     'operationLog.success.updated':
@@ -2519,6 +2625,11 @@ class AppTranslations extends Translations {
     'backupRestore.error.server': '\u670d\u52a1\u5668\u9519\u8bef',
     'backupRestore.error.fileNameRequired':
         '\u6587\u4ef6\u540d\u4e0d\u80fd\u4e3a\u7a7a',
+    'backupRestore.validation.required': '\u8bf7\u586b\u5199@field',
+    'backupRestore.validation.fileNameTooLong':
+        '\u6587\u4ef6\u540d\u4e0d\u80fd\u8d85\u8fc7255\u4e2a\u5b57\u7b26',
+    'backupRestore.validation.remarksTooLong':
+        '\u5907\u6ce8\u4e0d\u80fd\u8d85\u8fc7500\u4e2a\u5b57\u7b26',
     'backupRestore.success.created': '\u5907\u4efd\u521b\u5efa\u6210\u529f',
     'backupRestore.success.updated': '\u5907\u4efd\u66f4\u65b0\u6210\u529f',
     'backupRestore.success.restored': '\u5907\u4efd\u6062\u590d\u6210\u529f',
@@ -2559,6 +2670,38 @@ class AppTranslations extends Translations {
     'progress.filter.clear': '\u6e05\u9664\u7b5b\u9009',
     'progress.filter.selectTimeRange': '\u9009\u62e9\u65f6\u95f4\u8303\u56f4',
     'progress.filter.clearTooltip': '\u6e05\u9664\u7b5b\u9009',
+    'progress.view.items': '\u8fdb\u5ea6\u6d88\u606f',
+    'progress.view.refunds': '\u9000\u6b3e\u5ba1\u8ba1',
+    'progress.refund.empty':
+        '\u672a\u627e\u5230\u9000\u6b3e\u5ba1\u8ba1\u8bb0\u5f55',
+    'progress.refund.filter.fineId': '\u7f5a\u6b3e ID',
+    'progress.refund.filter.paymentId': '\u7f34\u8d39 ID',
+    'progress.refund.filter.searchTooltip':
+        '\u67e5\u8be2\u9000\u6b3e\u5ba1\u8ba1',
+    'progress.refund.filter.clearTooltip':
+        '\u6e05\u7a7a\u9000\u6b3e\u7b5b\u9009',
+    'progress.refund.status.all': '\u5168\u90e8\u72b6\u6001',
+    'progress.refund.type.partial': '\u90e8\u5206\u9000\u6b3e',
+    'progress.refund.type.waive': '\u514d\u7f5a\u5e76\u9000\u6b3e',
+    'progress.refund.type.partialFailed':
+        '\u90e8\u5206\u9000\u6b3e\u5931\u8d25',
+    'progress.refund.type.waiveFailed':
+        '\u514d\u7f5a\u5e76\u9000\u6b3e\u5931\u8d25',
+    'progress.refund.detail.businessType':
+        '\u9000\u6b3e\u7c7b\u578b\uff1a@value',
+    'progress.refund.detail.businessId': '\u7f34\u8d39 ID\uff1a@value',
+    'progress.refund.detail.fineId': '\u7f5a\u6b3e ID\uff1a@value',
+    'progress.refund.detail.refundAmount':
+        '\u9000\u6b3e\u91d1\u989d\uff1a@value',
+    'progress.refund.detail.operator': '\u64cd\u4f5c\u4eba\uff1a@value',
+    'progress.refund.detail.reason': '\u539f\u56e0\uff1a@value',
+    'progress.refund.detail.failure': '\u5931\u8d25\u4fe1\u606f\uff1a@value',
+    'progress.refund.detail.requestIp': 'IP\uff1a@value',
+    'progress.refund.detail.userId': '\u7528\u6237 ID\uff1a@value',
+    'progress.refund.detail.updatedTime':
+        '\u66f4\u65b0\u65f6\u95f4\uff1a@value',
+    'progress.refund.detail.idempotencyKey': '\u5e42\u7b49\u952e\uff1a@value',
+    'progress.refund.detail.noReason': '\u65e0\u9000\u6b3e\u539f\u56e0',
     'progress.submitNew': '\u63d0\u4ea4\u65b0\u8fdb\u5ea6',
     'progress.dialog.submitTitle': '\u63d0\u4ea4\u65b0\u8fdb\u5ea6',
     'progress.dialog.editTitle': '\u7f16\u8f91\u8fdb\u5ea6',
@@ -2568,9 +2711,14 @@ class AppTranslations extends Translations {
     'progress.field.relatedAppealOptional':
         '\u5173\u8054\u7533\u8bc9\uff08\u53ef\u9009\uff09',
     'progress.field.appealOption': '\u7533\u8bc9\uff1a@name (ID: @id)',
+    'progress.validation.required': '\u8bf7\u586b\u5199@field',
     'progress.validation.titleAndDetails':
         '\u6807\u9898\u548c\u8be6\u60c5\u4e0d\u80fd\u4e3a\u7a7a\u3002',
     'progress.validation.titleRequired': '\u6807\u9898\u4e0d\u80fd\u4e3a\u7a7a',
+    'progress.validation.titleTooLong':
+        '\u8fdb\u5ea6\u6807\u9898\u4e0d\u80fd\u8d85\u8fc7100\u4e2a\u5b57\u7b26',
+    'progress.validation.detailsTooLong':
+        '\u8fdb\u5ea6\u8be6\u60c5\u4e0d\u80fd\u8d85\u8fc7500\u4e2a\u5b57\u7b26',
     'progress.error.adminOnly':
         '\u6743\u9650\u4e0d\u8db3\uff1a\u4ec5\u7ba1\u7406\u5458\u53ef\u8bbf\u95ee',
     'progress.detail.status': '\u72b6\u6001\uff1a@value',
@@ -2629,6 +2777,8 @@ class AppTranslations extends Translations {
     'common.status.completed': '\u5df2\u5b8c\u6210',
     'common.status.archived': '\u5df2\u5f52\u6863',
     'trafficDashboard.page.title': '\u4ea4\u901a\u8fdd\u6cd5\u4eea\u8868\u677f',
+    'trafficDashboard.error.loadFailed':
+        '\u52a0\u8f7d\u4ea4\u901a\u8fdd\u6cd5\u4eea\u8868\u677f\u5931\u8d25\uff1a@error',
     'trafficDashboard.section.violationType':
         '\u8fdd\u6cd5\u7c7b\u578b\u5206\u5e03',
     'trafficDashboard.section.fineTrend':
@@ -2680,7 +2830,8 @@ class AppTranslations extends Translations {
     'chart.noOffenseData': '\u6682\u65e0\u8fdd\u6cd5\u6570\u636e',
     'chart.noData': '\u6682\u65e0\u6570\u636e',
     'chart.total': '\u603b\u8ba1',
-    'chart.error.loadData': '\u52a0\u8f7d\u56fe\u8868\u6570\u636e\u5931\u8d25\u3002',
+    'chart.error.loadData':
+        '\u52a0\u8f7d\u56fe\u8868\u6570\u636e\u5931\u8d25\u3002',
     'search.hint': '\u8bf7\u8f93\u5165...',
     'common.none': '\u65e0',
     'offense.error.unauthorized':
@@ -2819,10 +2970,18 @@ class AppTranslations extends Translations {
     'fine.detail.receipt': '\u6536\u636e\u7f16\u53f7',
     'fine.detail.time': '\u7f5a\u6b3e\u65f6\u95f4',
     'fine.detail.status': '\u72b6\u6001',
+    'fine.detail.outstanding': '\u5f85\u7f34\u91d1\u989d',
     'fine.detail.remarks': '\u5907\u6ce8',
     'fine.qr.alipayHint':
         '\u8bf7\u4f7f\u7528\u652f\u4ed8\u5b9d\u626b\u63cf\u4e0b\u65b9\u4e8c\u7ef4\u7801\u5b8c\u6210\u652f\u4ed8',
     'fine.action.close': '\u5173\u95ed',
+    'fine.action.payNow': '\u7acb\u5373\u7f34\u8d39 (\$@amount)',
+    'fine.payment.unavailable':
+        '\u5f53\u524d\u7f5a\u6b3e\u6682\u65f6\u65e0\u6cd5\u652f\u4ed8',
+    'fine.payment.success':
+        '\u652f\u4ed8\u8bb0\u5f55\u5df2\u751f\u6210: \$@amount',
+    'fine.payment.failed':
+        '\u751f\u6210\u652f\u4ed8\u8bb0\u5f55\u5931\u8d25: @error',
     'fine.page.title': '\u4ea4\u901a\u8fdd\u6cd5\u7f5a\u6b3e\u8bb0\u5f55',
     'fine.action.refresh': '\u5237\u65b0\u7f5a\u6b3e\u8bb0\u5f55',
     'fine.empty.byDriver':
@@ -2999,6 +3158,9 @@ class AppTranslations extends Translations {
     'appeal.form.idCard': '\u8eab\u4efd\u8bc1\u53f7\u7801 *',
     'appeal.form.contact': '\u8054\u7cfb\u7535\u8bdd *',
     'appeal.form.reason': '\u7533\u8bc9\u539f\u56e0 *',
+    'appeal.validation.required': '\u8bf7\u586b\u5199@field',
+    'appeal.validation.reasonTooLong':
+        '\u7533\u8bc9\u539f\u56e0\u4e0d\u80fd\u8d85\u8fc7500\u4e2a\u5b57\u7b26',
     'appeal.validation.requiredFields':
         '\u8bf7\u586b\u5199\u6240\u6709\u5fc5\u586b\u5b57\u6bb5',
     'appeal.search.hint': '\u641c\u7d22\u7533\u8bc9\u539f\u56e0',
@@ -3028,6 +3190,7 @@ class AppTranslations extends Translations {
     'appeal.detail.contact': '\u8054\u7cfb\u7535\u8bdd',
     'appeal.detail.reason': '\u7533\u8bc9\u539f\u56e0',
     'appeal.detail.time': '\u7533\u8bc9\u65f6\u95f4',
+    'appeal.detail.acceptanceStatus': '\u53d7\u7406\u72b6\u6001',
     'appeal.detail.status': '\u5904\u7406\u72b6\u6001',
     'appeal.detail.result': '\u5904\u7406\u7ed3\u679c',
     'appeal.progress.related': '\u76f8\u5173\u53cd\u9988',
@@ -3112,6 +3275,8 @@ class AppTranslations extends Translations {
         '\u9009\u62e9\u6263\u5206\u65e5\u671f\u8303\u56f4',
     'deductionAdmin.filter.tooltip':
         '\u6309\u6263\u5206\u65e5\u671f\u8303\u56f4\u641c\u7d22',
+    'deductionAdmin.filter.clearDateRange':
+        '\u6e05\u9664\u65f6\u95f4\u8303\u56f4',
     'deductionAdmin.error.unauthorized':
         '\u672a\u6388\u6743\uff0c\u8bf7\u91cd\u65b0\u767b\u5f55',
     'deductionAdmin.error.expired':

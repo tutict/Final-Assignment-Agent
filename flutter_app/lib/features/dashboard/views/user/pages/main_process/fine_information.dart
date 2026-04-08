@@ -1,17 +1,17 @@
 import 'package:final_assignment_front/features/api/fine_information_controller_api.dart';
+import 'package:final_assignment_front/features/api/payment_record_controller_api.dart';
 import 'package:final_assignment_front/features/api/driver_information_controller_api.dart';
 import 'package:final_assignment_front/features/api/user_management_controller_api.dart';
 import 'package:final_assignment_front/features/dashboard/controllers/user_dashboard_screen_controller.dart';
 import 'package:final_assignment_front/features/dashboard/views/shared/widgets/dashboard_page_template.dart';
 import 'package:final_assignment_front/features/model/fine_information.dart';
+import 'package:final_assignment_front/features/model/payment_record.dart';
 import 'package:final_assignment_front/i18n/api_error_localizers.dart';
 import 'package:final_assignment_front/i18n/fine_localizers.dart';
 import 'package:final_assignment_front/i18n/status_localizers.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'dart:developer' as developer;
-import 'package:jwt_decoder/jwt_decoder.dart';
-import 'package:qr_flutter/qr_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class FineInformationPage extends StatefulWidget {
@@ -22,7 +22,10 @@ class FineInformationPage extends StatefulWidget {
 }
 
 class _FineInformationPageState extends State<FineInformationPage> {
+  static const int _pageSize = 100;
+
   late FineInformationControllerApi fineApi;
+  late PaymentRecordControllerApi paymentApi;
   late Future<List<FineInformation>> _finesFuture;
   final UserDashboardController controller =
       Get.find<UserDashboardController>();
@@ -32,12 +35,12 @@ class _FineInformationPageState extends State<FineInformationPage> {
   bool _isLoading = true;
   String _errorMessage = '';
   String? _currentDriverName;
-  final Map<String, Widget> _qrCodes = {};
 
   @override
   void initState() {
     super.initState();
     fineApi = FineInformationControllerApi();
+    paymentApi = PaymentRecordControllerApi();
     _initializeFines();
   }
 
@@ -49,29 +52,27 @@ class _FineInformationPageState extends State<FineInformationPage> {
     try {
       final prefs = await SharedPreferences.getInstance();
       final jwtToken = prefs.getString('jwtToken');
-      _currentDriverName = prefs.getString('driverName');
-      if (_currentDriverName == null && jwtToken != null) {
-        _currentDriverName = await _fetchDriverName(jwtToken);
-        if (_currentDriverName != null) {
-          await prefs.setString('driverName', _currentDriverName!);
-        } else {
-          _currentDriverName = 'common.unknown'.tr;
-        }
-        developer.log('Fetched and stored driver name: $_currentDriverName');
-      }
-      developer.log('Current Driver Name: $_currentDriverName');
-      if (jwtToken == null || _currentDriverName == null) {
+      if (jwtToken == null) {
         throw Exception('fine.error.missingLoginOrDriver'.tr);
       }
       await fineApi.initializeWithJwt();
+      await paymentApi.initializeWithJwt();
       await driverApi.initializeWithJwt();
       await userApi.initializeWithJwt();
+      _currentDriverName = await _fetchDriverName();
+      if (_currentDriverName != null && _currentDriverName!.isNotEmpty) {
+        await prefs.setString('driverName', _currentDriverName!);
+        await prefs.setString('displayName', _currentDriverName!);
+      } else {
+        _currentDriverName = prefs.getString('driverName') ??
+            prefs.getString('displayName') ??
+            prefs.getString('userName') ??
+            'common.unknown'.tr;
+      }
+      developer.log('Current Driver Name: $_currentDriverName');
       _finesFuture = _loadUserFines();
       final fines = await _finesFuture;
       developer.log('Loaded Fines: $fines');
-      for (var fine in fines) {
-        if (!isPaidFineStatus(fine.status)) await _generateQRCode(fine);
-      }
     } catch (e) {
       developer.log('Initialization error: $e');
       setState(() {
@@ -84,38 +85,18 @@ class _FineInformationPageState extends State<FineInformationPage> {
     }
   }
 
-  Future<String?> _fetchDriverName(String jwtToken) async {
+  Future<String?> _fetchDriverName() async {
     try {
-      await userApi.initializeWithJwt();
       final prefs = await SharedPreferences.getInstance();
-      final storedUsername = prefs.getString('userName');
-      Map<String, dynamic>? decoded;
-      try {
-        decoded = JwtDecoder.decode(jwtToken);
-      } catch (_) {}
-      final username = storedUsername?.isNotEmpty == true
-          ? storedUsername!
-          : decoded?['sub']?.toString();
-      if (username == null || username.isEmpty) {
-        throw Exception('fine.error.usernameMissing'.tr);
-      }
-
-      final user = await userApi.apiUsersSearchUsernameGet(username: username);
-      if (user?.userId == null) {
-        throw Exception('personal.error.currentUserNotFound'.tr);
-      }
-
-      await driverApi.initializeWithJwt();
-      final driverInfo =
-          await driverApi.apiDriversDriverIdGet(driverId: user!.userId!);
-      if (driverInfo != null && driverInfo.name != null) {
-        final driverName = driverInfo.name!;
-        developer.log('Driver name from API: $driverName');
-        return driverName;
-      } else {
-        developer.log('No driver info found for userId: ${user.userId}');
-        return null;
-      }
+      final user = await userApi.apiUsersMeGet();
+      final driverInfo = await driverApi.apiDriversMeGet();
+      final driverName = driverInfo?.name ??
+          prefs.getString('displayName') ??
+          prefs.getString('driverName') ??
+          user?.realName ??
+          user?.username;
+      developer.log('Driver name from API: $driverName');
+      return driverName;
     } catch (e) {
       developer.log('Error fetching driver name: $e');
       return null;
@@ -124,12 +105,21 @@ class _FineInformationPageState extends State<FineInformationPage> {
 
   Future<List<FineInformation>> _loadUserFines() async {
     try {
-      final allFines = await fineApi.apiFinesGet();
-      developer.log('All Fines: $allFines');
-      final filteredFines =
-          allFines.where((fine) => fine.payee == _currentDriverName).toList();
-      developer.log('Filtered Fines for $_currentDriverName: $filteredFines');
-      return filteredFines;
+      final fines = <FineInformation>[];
+      var page = 1;
+      while (true) {
+        final pageItems = await fineApi.apiFinesMeGet(
+          page: page,
+          size: _pageSize,
+        );
+        fines.addAll(pageItems);
+        if (pageItems.length < _pageSize) {
+          break;
+        }
+        page++;
+      }
+      developer.log('Loaded fines for current user: $fines');
+      return fines;
     } catch (e) {
       developer.log('Error loading fines: $e');
       setState(() {
@@ -143,59 +133,85 @@ class _FineInformationPageState extends State<FineInformationPage> {
     }
   }
 
-  Future<void> _generateQRCode(FineInformation fine) async {
-    try {
-      final paymentUrl =
-          'weixin://pay?amount=${fine.fineAmount}&payee=${fine.payee}&receipt=${fine.receiptNumber}';
-
-      final qrWidget = QrImageView(
-        data: paymentUrl,
-        version: QrVersions.auto,
-        size: 200.0,
-        backgroundColor: const Color(0xFFFFFFFF),
-        eyeStyle: const QrEyeStyle(color: Color(0xFF7CB342)),
-        dataModuleStyle: const QrDataModuleStyle(color: Color(0xFF7CB342)),
-        embeddedImageStyle: const QrEmbeddedImageStyle(size: Size(60, 60)),
-      );
-      final qrKey = fine.receiptNumber ?? fine.fineTime ?? 'unknown';
-      setState(() {
-        _qrCodes[qrKey] = qrWidget;
-      });
-      developer.log('Generated QR code for fine ${fine.receiptNumber}');
-    } catch (e) {
-      debugPrint(
-          'Failed to generate QR code for fine ${fine.receiptNumber}: $e');
-      _showSnackBar(
-        'fine.error.generateQrFailed'
-            .trParams({'error': localizeApiErrorDetail(e)}),
-        isError: true,
-      );
-    }
+  String _generateIdempotencyKey() {
+    return DateTime.now().microsecondsSinceEpoch.toString();
   }
 
-  void _showSnackBar(String message, {bool isError = false}) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: isError ? Colors.red : Colors.green,
-      ),
-    );
+  double _resolveOutstandingAmount(FineInformation fine) {
+    final totalAmount =
+        fine.totalAmount ?? ((fine.fineAmount ?? 0) + (fine.lateFee ?? 0));
+    final paidAmount = fine.paidAmount ?? 0;
+    final outstandingAmount = fine.unpaidAmount ?? (totalAmount - paidAmount);
+    return outstandingAmount > 0 ? outstandingAmount : 0;
+  }
+
+  bool _canSubmitPayment(FineInformation fine) {
+    final rawStatus =
+        (fine.paymentStatus ?? fine.status ?? '').trim().toLowerCase();
+    if (rawStatus == 'waived') {
+      return false;
+    }
+    return _resolveOutstandingAmount(fine) > 0;
+  }
+
+  Future<void> _submitPayment(FineInformation fine) async {
+    final outstandingAmount = _resolveOutstandingAmount(fine);
+    if (fine.fineId == null || outstandingAmount <= 0) {
+      Get.snackbar(
+        'common.error'.tr,
+        'fine.payment.unavailable'.tr,
+        snackPosition: SnackPosition.TOP,
+      );
+      return;
+    }
+    setState(() {
+      _isLoading = true;
+      _errorMessage = '';
+    });
+    try {
+      await paymentApi.apiPaymentsMePost(
+        paymentRecord: PaymentRecordModel(
+          fineId: fine.fineId,
+          paymentAmount: outstandingAmount,
+          paymentMethod: 'WeChat',
+          paymentChannel: 'APP',
+          remarks: 'Current user self-service payment',
+        ),
+        idempotencyKey: _generateIdempotencyKey(),
+      );
+      Get.snackbar(
+        'common.confirm'.tr,
+        'fine.payment.success'.trParams({
+          'amount': outstandingAmount.toStringAsFixed(2),
+        }),
+        snackPosition: SnackPosition.TOP,
+      );
+      await _refreshFines();
+    } catch (e) {
+      developer.log('Error submitting fine payment: $e');
+      Get.snackbar(
+        'common.error'.tr,
+        'fine.payment.failed'.trParams({
+          'error': localizeApiErrorDetail(e),
+        }),
+        snackPosition: SnackPosition.TOP,
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
   }
 
   Future<void> _refreshFines() async {
     setState(() {
       _isLoading = true;
       _errorMessage = '';
-      _qrCodes.clear();
     });
     try {
       _finesFuture = _loadUserFines();
       final fines = await _finesFuture;
       developer.log('Refreshed Fines: $fines');
-      for (var fine in fines) {
-        if (!isPaidFineStatus(fine.status)) await _generateQRCode(fine);
-      }
     } catch (e) {
       developer.log('Error refreshing fines: $e');
       setState(() {
@@ -209,9 +225,8 @@ class _FineInformationPageState extends State<FineInformationPage> {
 
   void _showFineDetailsDialog(FineInformation fine) {
     final themeData = controller.currentBodyTheme.value;
-    final qrKey = fine.receiptNumber ?? fine.fineTime ?? 'unknown';
-    final hasQRCode =
-        _qrCodes.containsKey(qrKey) && !isPaidFineStatus(fine.status);
+    final outstandingAmount = _resolveOutstandingAmount(fine);
+    final canSubmitPayment = _canSubmitPayment(fine);
 
     showDialog(
       context: context,
@@ -231,8 +246,10 @@ class _FineInformationPageState extends State<FineInformationPage> {
                   'fine.detail.amount'.tr,
                   '\$${fine.fineAmount?.toStringAsFixed(2) ?? "0.00"}',
                   themeData),
-              _buildDetailRow('fine.detail.payee'.tr,
-                  fine.payee ?? 'common.unknown'.tr, themeData),
+              _buildDetailRow(
+                  'fine.detail.payee'.tr,
+                  fine.payee ?? _currentDriverName ?? 'common.unknown'.tr,
+                  themeData),
               _buildDetailRow('fine.detail.account'.tr,
                   fine.accountNumber ?? 'common.unknown'.tr, themeData),
               _buildDetailRow('fine.detail.bank'.tr,
@@ -245,25 +262,25 @@ class _FineInformationPageState extends State<FineInformationPage> {
                   themeData),
               _buildDetailRow('fine.detail.status'.tr,
                   localizeFineDisplayStatus(fine.status), themeData),
+              _buildDetailRow('fine.detail.outstanding'.tr,
+                  '\$${outstandingAmount.toStringAsFixed(2)}', themeData),
               _buildDetailRow('fine.detail.remarks'.tr,
                   fine.remarks ?? 'common.none'.tr, themeData),
-              if (hasQRCode) ...[
+              if (canSubmitPayment) ...[
                 const SizedBox(height: 16),
-                Center(
-                  child: Text(
-                    'fine.qr.alipayHint'.tr,
-                    style: themeData.textTheme.bodyMedium?.copyWith(
-                      color: themeData.colorScheme.onSurface,
-                      fontWeight: FontWeight.bold,
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton.icon(
+                    onPressed: () {
+                      Navigator.pop(ctx);
+                      _submitPayment(fine);
+                    },
+                    icon: const Icon(Icons.payment),
+                    label: Text(
+                      'fine.action.payNow'.trParams({
+                        'amount': outstandingAmount.toStringAsFixed(2),
+                      }),
                     ),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Center(
-                  child: SizedBox(
-                    width: 200,
-                    height: 200,
-                    child: _qrCodes[qrKey] ?? const CircularProgressIndicator(),
                   ),
                 ),
               ],
@@ -383,7 +400,9 @@ class _FineInformationPageState extends State<FineInformationPage> {
                       itemBuilder: (context, index) {
                         final record = fines[index];
                         final amount = record.fineAmount ?? 0.0;
-                        final payee = record.payee ?? 'common.unknown'.tr;
+                        final payee = record.payee ??
+                            _currentDriverName ??
+                            'common.unknown'.tr;
                         final date = formatFineUserDateTime(
                           record.fineDate,
                           record.fineTime,

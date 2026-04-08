@@ -82,15 +82,14 @@ class PaymentRecordControllerApi {
         jsonDecode(_decodeBodyBytes(response)) as Map<String, dynamic>);
   }
 
-  /// PUT /api/payments/{paymentId}
-  Future<PaymentRecordModel> apiPaymentsPaymentIdPut({
-    required int paymentId,
+  /// POST /api/payments/me
+  Future<PaymentRecordModel> apiPaymentsMePost({
     required PaymentRecordModel paymentRecord,
     String? idempotencyKey,
   }) async {
     final response = await apiClient.invokeAPI(
-      '/api/payments/$paymentId',
-      'PUT',
+      '/api/payments/me',
+      'POST',
       const [],
       paymentRecord.toJson(),
       await _getHeaders(idempotencyKey: idempotencyKey),
@@ -101,23 +100,6 @@ class PaymentRecordControllerApi {
     _ensureSuccess(response);
     return PaymentRecordModel.fromJson(
         jsonDecode(_decodeBodyBytes(response)) as Map<String, dynamic>);
-  }
-
-  /// DELETE /api/payments/{paymentId}
-  Future<void> apiPaymentsPaymentIdDelete({required int paymentId}) async {
-    final response = await apiClient.invokeAPI(
-      '/api/payments/$paymentId',
-      'DELETE',
-      const [],
-      null,
-      await _getHeaders(),
-      const {},
-      null,
-      ['bearerAuth'],
-    );
-    if (response.statusCode != 204 && response.statusCode != 200) {
-      _ensureSuccess(response);
-    }
   }
 
   /// GET /api/payments/{paymentId}
@@ -142,11 +124,17 @@ class PaymentRecordControllerApi {
   }
 
   /// GET /api/payments
-  Future<List<PaymentRecordModel>> apiPaymentsGet() async {
+  Future<List<PaymentRecordModel>> apiPaymentsGet({
+    int page = 1,
+    int size = 20,
+  }) async {
     final response = await apiClient.invokeAPI(
       '/api/payments',
       'GET',
-      const [],
+      [
+        QueryParam('page', '$page'),
+        QueryParam('size', '$size'),
+      ],
       null,
       await _getHeaders(),
       const {},

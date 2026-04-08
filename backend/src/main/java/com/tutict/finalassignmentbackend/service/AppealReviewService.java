@@ -3,22 +3,38 @@ package com.tutict.finalassignmentbackend.service;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.tutict.finalassignmentbackend.config.statemachine.states.AppealAcceptanceState;
+import com.tutict.finalassignmentbackend.config.statemachine.states.AppealProcessState;
+import com.tutict.finalassignmentbackend.config.statemachine.states.PaymentState;
 import com.tutict.finalassignmentbackend.config.websocket.WsAction;
+import com.tutict.finalassignmentbackend.entity.AppealRecord;
 import com.tutict.finalassignmentbackend.entity.AppealReview;
+import com.tutict.finalassignmentbackend.entity.DeductionRecord;
+import com.tutict.finalassignmentbackend.entity.FineRecord;
 import com.tutict.finalassignmentbackend.entity.SysRequestHistory;
+import com.tutict.finalassignmentbackend.entity.SysUser;
 import com.tutict.finalassignmentbackend.entity.elastic.AppealReviewDocument;
 import com.tutict.finalassignmentbackend.mapper.AppealReviewMapper;
 import com.tutict.finalassignmentbackend.mapper.SysRequestHistoryMapper;
 import com.tutict.finalassignmentbackend.repository.AppealReviewSearchRepository;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.security.authentication.AnonymousAuthenticationToken;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.web.context.request.RequestAttributes;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 
+import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeParseException;
 import java.util.List;
@@ -37,6 +53,12 @@ public class AppealReviewService {
     private final AppealReviewMapper appealReviewMapper;
     private final SysRequestHistoryMapper sysRequestHistoryMapper;
     private final AppealReviewSearchRepository appealReviewSearchRepository;
+    private final AppealRecordService appealRecordService;
+    private final OffenseRecordService offenseRecordService;
+    private final FineRecordService fineRecordService;
+    private final DeductionRecordService deductionRecordService;
+    private final PaymentRecordService paymentRecordService;
+    private final SysUserService sysUserService;
     private final KafkaTemplate<String, String> kafkaTemplate;
     private final ObjectMapper objectMapper;
 
@@ -44,11 +66,23 @@ public class AppealReviewService {
     public AppealReviewService(AppealReviewMapper appealReviewMapper,
                                SysRequestHistoryMapper sysRequestHistoryMapper,
                                AppealReviewSearchRepository appealReviewSearchRepository,
+                               AppealRecordService appealRecordService,
+                               OffenseRecordService offenseRecordService,
+                               FineRecordService fineRecordService,
+                               DeductionRecordService deductionRecordService,
+                               PaymentRecordService paymentRecordService,
+                               SysUserService sysUserService,
                                KafkaTemplate<String, String> kafkaTemplate,
                                ObjectMapper objectMapper) {
         this.appealReviewMapper = appealReviewMapper;
         this.sysRequestHistoryMapper = sysRequestHistoryMapper;
         this.appealReviewSearchRepository = appealReviewSearchRepository;
+        this.appealRecordService = appealRecordService;
+        this.offenseRecordService = offenseRecordService;
+        this.fineRecordService = fineRecordService;
+        this.deductionRecordService = deductionRecordService;
+        this.paymentRecordService = paymentRecordService;
+        this.sysUserService = sysUserService;
         this.kafkaTemplate = kafkaTemplate;
         this.objectMapper = objectMapper;
     }
@@ -61,27 +95,18 @@ public class AppealReviewService {
         if (sysRequestHistoryMapper.selectByIdempotencyKey(idempotencyKey) != null) {
             throw new RuntimeException("Duplicate appeal review request detected");
         }
-        SysRequestHistory history = new SysRequestHistory();
-        history.setIdempotencyKey(idempotencyKey);
-        history.setBusinessStatus("PROCESSING");
-        history.setCreatedAt(LocalDateTime.now());
-        history.setUpdatedAt(LocalDateTime.now());
+        SysRequestHistory history = buildHistory(idempotencyKey, appealReview, action);
         sysRequestHistoryMapper.insert(history);
 
         sendKafkaMessage("appeal_review_" + action, idempotencyKey, appealReview);
-
-        history.setBusinessStatus("SUCCESS");
-        history.setBusinessId(appealReview.getReviewId());
-        history.setRequestParams("PENDING");
-        history.setUpdatedAt(LocalDateTime.now());
-        sysRequestHistoryMapper.updateById(history);
     }
 
     @Transactional
     @CacheEvict(cacheNames = CACHE_NAME, allEntries = true)
     public AppealReview createReview(AppealReview appealReview) {
-        validateAppealReview(appealReview);
+        validateAppealReview(appealReview, null);
         appealReviewMapper.insert(appealReview);
+        applyReviewOutcome(null, appealReview);
         syncToIndexAfterCommit(appealReview);
         return appealReview;
     }
@@ -89,12 +114,20 @@ public class AppealReviewService {
     @Transactional
     @CacheEvict(cacheNames = CACHE_NAME, allEntries = true)
     public AppealReview updateReview(AppealReview appealReview) {
-        validateAppealReview(appealReview);
+        throw new IllegalStateException("Appeal review records are audit evidence and cannot be manually updated");
+    }
+
+    @Transactional
+    @CacheEvict(cacheNames = CACHE_NAME, allEntries = true)
+    public AppealReview updateReviewSystemManaged(AppealReview appealReview) {
         requirePositive(appealReview.getReviewId());
+        AppealReview existingReview = appealReviewMapper.selectById(appealReview.getReviewId());
+        validateAppealReview(appealReview, existingReview);
         int rows = appealReviewMapper.updateById(appealReview);
         if (rows == 0) {
             throw new IllegalStateException("No AppealReview updated for id=" + appealReview.getReviewId());
         }
+        applyReviewOutcome(existingReview, appealReview);
         syncToIndexAfterCommit(appealReview);
         return appealReview;
     }
@@ -102,17 +135,7 @@ public class AppealReviewService {
     @Transactional
     @CacheEvict(cacheNames = CACHE_NAME, allEntries = true)
     public void deleteReview(Long reviewId) {
-        requirePositive(reviewId);
-        int rows = appealReviewMapper.deleteById(reviewId);
-        if (rows == 0) {
-            throw new IllegalStateException("No AppealReview deleted for id=" + reviewId);
-        }
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                appealReviewSearchRepository.deleteById(reviewId);
-            }
-        });
+        throw new IllegalStateException("Appeal review records are audit evidence and cannot be manually deleted");
     }
 
     @Cacheable(cacheNames = CACHE_NAME, key = "#reviewId", unless = "#result == null")
@@ -140,6 +163,18 @@ public class AppealReviewService {
         List<AppealReview> fromDb = appealReviewMapper.selectList(null);
         syncBatchToIndexAfterCommit(fromDb);
         return fromDb;
+    }
+
+    @Cacheable(
+            cacheNames = CACHE_NAME,
+            key = "'all:' + #page + ':' + #size",
+            unless = "#result == null || #result.isEmpty()")
+    public List<AppealReview> findAll(int page, int size) {
+        validatePagination(page, size);
+        QueryWrapper<AppealReview> wrapper = new QueryWrapper<>();
+        wrapper.orderByDesc("review_time")
+                .orderByDesc("review_id");
+        return fetchFromDatabase(wrapper, page, size);
     }
 
     @Cacheable(cacheNames = CACHE_NAME, key = "'reviewer:' + #reviewer + ':' + #page + ':' + #size", unless = "#result == null || #result.isEmpty()")
@@ -201,7 +236,8 @@ public class AppealReviewService {
         SysRequestHistory history = sysRequestHistoryMapper.selectByIdempotencyKey(idempotencyKey);
         return history != null
                 && "SUCCESS".equalsIgnoreCase(history.getBusinessStatus())
-                && "DONE".equalsIgnoreCase(history.getRequestParams());
+                && history.getBusinessId() != null
+                && history.getBusinessId() > 0;
     }
 
     public void markHistorySuccess(String idempotencyKey, Long reviewId) {
@@ -212,7 +248,6 @@ public class AppealReviewService {
         }
         history.setBusinessStatus("SUCCESS");
         history.setBusinessId(reviewId);
-        history.setRequestParams("DONE");
         history.setUpdatedAt(LocalDateTime.now());
         sysRequestHistoryMapper.updateById(history);
     }
@@ -224,9 +259,72 @@ public class AppealReviewService {
             return;
         }
         history.setBusinessStatus("FAILED");
-        history.setRequestParams(truncate(reason));
+        history.setRequestParams(appendFailureReason(history.getRequestParams(), reason));
         history.setUpdatedAt(LocalDateTime.now());
         sysRequestHistoryMapper.updateById(history);
+    }
+
+    private SysRequestHistory buildHistory(String idempotencyKey, AppealReview appealReview, String action) {
+        SysRequestHistory history = new SysRequestHistory();
+        history.setIdempotencyKey(idempotencyKey);
+        history.setRequestMethod(resolveRequestMethod("POST"));
+        history.setRequestUrl(resolveRequestUrl(resolveDefaultRequestUrl(appealReview)));
+        history.setRequestParams(buildRequestParams(appealReview));
+        history.setBusinessType(resolveBusinessType(action));
+        history.setBusinessStatus("PROCESSING");
+        history.setUserId(resolveCurrentUserId());
+        history.setRequestIp(resolveRequestIp());
+        history.setCreatedAt(LocalDateTime.now());
+        history.setUpdatedAt(LocalDateTime.now());
+        return history;
+    }
+
+    private String resolveDefaultRequestUrl(AppealReview appealReview) {
+        Long appealId = appealReview == null ? null : appealReview.getAppealId();
+        return appealId == null ? "/api/appeals/reviews" : "/api/appeals/" + appealId + "/reviews";
+    }
+
+    private String buildRequestParams(AppealReview appealReview) {
+        if (appealReview == null) {
+            return null;
+        }
+        StringBuilder builder = new StringBuilder();
+        appendParam(builder, "appealId", appealReview.getAppealId());
+        appendParam(builder, "reviewLevel", appealReview.getReviewLevel());
+        appendParam(builder, "reviewResult", appealReview.getReviewResult());
+        appendParam(builder, "suggestedAction", appealReview.getSuggestedAction());
+        appendParam(builder, "reviewer", appealReview.getReviewer());
+        return truncate(builder.toString());
+    }
+
+    private String resolveBusinessType(String action) {
+        String normalized = isBlank(action) ? "CREATE" : action.trim().toUpperCase();
+        return "APPEAL_REVIEW_" + normalized;
+    }
+
+    private void appendParam(StringBuilder builder, String key, Object value) {
+        if (builder == null || value == null) {
+            return;
+        }
+        String normalized = value.toString().trim();
+        if (normalized.isEmpty()) {
+            return;
+        }
+        if (!builder.isEmpty()) {
+            builder.append(',');
+        }
+        builder.append(key).append('=').append(normalized);
+    }
+
+    private String appendFailureReason(String existing, String reason) {
+        String normalizedReason = truncate(reason);
+        if (isBlank(normalizedReason)) {
+            return existing;
+        }
+        if (isBlank(existing)) {
+            return "failure=" + normalizedReason;
+        }
+        return truncate(existing + ",failure=" + normalizedReason);
     }
 
     private void sendKafkaMessage(String topic, String idempotencyKey, AppealReview appealReview) {
@@ -243,13 +341,10 @@ public class AppealReviewService {
         if (appealReview == null) {
             return;
         }
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                AppealReviewDocument doc = AppealReviewDocument.fromEntity(appealReview);
-                if (doc != null) {
-                    appealReviewSearchRepository.save(doc);
-                }
+        runAfterCommitOrNow(() -> {
+            AppealReviewDocument doc = AppealReviewDocument.fromEntity(appealReview);
+            if (doc != null) {
+                appealReviewSearchRepository.save(doc);
             }
         });
     }
@@ -258,19 +353,32 @@ public class AppealReviewService {
         if (reviews == null || reviews.isEmpty()) {
             return;
         }
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                List<AppealReviewDocument> documents = reviews.stream()
-                        .filter(Objects::nonNull)
-                        .map(AppealReviewDocument::fromEntity)
-                        .filter(Objects::nonNull)
-                        .collect(Collectors.toList());
-                if (!documents.isEmpty()) {
-                    appealReviewSearchRepository.saveAll(documents);
-                }
+        runAfterCommitOrNow(() -> {
+            List<AppealReviewDocument> documents = reviews.stream()
+                    .filter(Objects::nonNull)
+                    .map(AppealReviewDocument::fromEntity)
+                    .filter(Objects::nonNull)
+                    .collect(Collectors.toList());
+            if (!documents.isEmpty()) {
+                appealReviewSearchRepository.saveAll(documents);
             }
         });
+    }
+
+    private void runAfterCommitOrNow(Runnable task) {
+        if (task == null) {
+            return;
+        }
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    task.run();
+                }
+            });
+            return;
+        }
+        task.run();
     }
 
     private List<AppealReview> fetchFromDatabase(QueryWrapper<AppealReview> wrapper, int page, int size) {
@@ -295,11 +403,51 @@ public class AppealReviewService {
         return org.springframework.data.domain.PageRequest.of(Math.max(page - 1, 0), Math.max(size, 1));
     }
 
-    private void validateAppealReview(AppealReview appealReview) {
+    private void validateAppealReview(AppealReview appealReview, AppealReview existingReview) {
         Objects.requireNonNull(appealReview, "AppealReview must not be null");
+        requirePositive(appealReview.getAppealId(), "Appeal ID");
+        AppealRecord appealRecord = appealRecordService.getAppealById(appealReview.getAppealId());
+        if (appealRecord == null) {
+            throw new IllegalArgumentException("Appeal does not exist");
+        }
+        AppealProcessState processState = AppealProcessState.fromCode(appealRecord.getProcessStatus());
+        if (existingReview != null) {
+            if (existingReview.getAppealId() != null
+                    && !Objects.equals(existingReview.getAppealId(), appealReview.getAppealId())) {
+                throw new IllegalArgumentException("Appeal ID cannot be changed for an existing review");
+            }
+            if (isAppealFinalized(processState) && isReviewContentChanged(existingReview, appealReview)) {
+                throw new IllegalStateException("Cannot change review records after the appeal has been finalized");
+            }
+        } else if (isAppealFinalized(processState)) {
+            throw new IllegalStateException("Cannot create new reviews after the appeal has been finalized");
+        }
+        if (AppealAcceptanceState.fromCode(appealRecord.getAcceptanceStatus()) != AppealAcceptanceState.ACCEPTED) {
+            throw new IllegalStateException("Appeal must be accepted before reviews can be created");
+        }
+        if (processState == null || processState == AppealProcessState.UNPROCESSED || processState == AppealProcessState.WITHDRAWN) {
+            throw new IllegalStateException("Appeal review cannot be created before the review workflow starts");
+        }
         if (appealReview.getReviewLevel() == null || appealReview.getReviewLevel().isBlank()) {
             throw new IllegalArgumentException("Review level must not be blank");
         }
+        if (appealReview.getReviewResult() == null || appealReview.getReviewResult().isBlank()) {
+            throw new IllegalArgumentException("Review result must not be blank");
+        }
+        if (appealReview.getReviewTime() == null) {
+            appealReview.setReviewTime(LocalDateTime.now());
+        }
+        if (isBlank(appealReview.getReviewer())) {
+            appealReview.setReviewer(resolveOperatorName());
+        }
+        if (appealReview.getSuggestedFineAmount() != null && appealReview.getSuggestedFineAmount().signum() < 0) {
+            throw new IllegalArgumentException("Suggested fine amount must not be negative");
+        }
+        if (appealReview.getSuggestedPoints() != null && appealReview.getSuggestedPoints() < 0) {
+            throw new IllegalArgumentException("Suggested points must not be negative");
+        }
+        validateSuggestedActionBounds(appealReview, appealRecord);
+        ensureSingleReviewPerLevel(appealReview, existingReview);
     }
 
     private void validatePagination(int page, int size) {
@@ -309,8 +457,12 @@ public class AppealReviewService {
     }
 
     private void requirePositive(Number number) {
+        requirePositive(number, "Review ID");
+    }
+
+    private void requirePositive(Number number, String fieldName) {
         if (number == null || number.longValue() <= 0) {
-            throw new IllegalArgumentException("Review ID" + " must be greater than zero");
+            throw new IllegalArgumentException(fieldName + " must be greater than zero");
         }
     }
 
@@ -335,5 +487,341 @@ public class AppealReviewService {
             return null;
         }
         return value.length() <= 500 ? value : value.substring(0, 500);
+    }
+
+    private String resolveOperatorName() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication == null
+                || !authentication.isAuthenticated()
+                || authentication instanceof AnonymousAuthenticationToken
+                || authentication.getName() == null
+                || authentication.getName().isBlank()) {
+            return null;
+        }
+        return authentication.getName();
+    }
+
+    private String resolveRequestMethod(String fallback) {
+        RequestAttributes requestAttributes = RequestContextHolder.getRequestAttributes();
+        if (!(requestAttributes instanceof ServletRequestAttributes servletRequestAttributes)) {
+            return fallback;
+        }
+        HttpServletRequest request = servletRequestAttributes.getRequest();
+        if (request == null || isBlank(request.getMethod())) {
+            return fallback;
+        }
+        return request.getMethod().trim().toUpperCase();
+    }
+
+    private String resolveRequestUrl(String fallback) {
+        RequestAttributes requestAttributes = RequestContextHolder.getRequestAttributes();
+        if (!(requestAttributes instanceof ServletRequestAttributes servletRequestAttributes)) {
+            return fallback;
+        }
+        HttpServletRequest request = servletRequestAttributes.getRequest();
+        if (request == null || isBlank(request.getRequestURI())) {
+            return fallback;
+        }
+        return request.getRequestURI().trim();
+    }
+
+    private Long resolveCurrentUserId() {
+        String operatorName = resolveOperatorName();
+        if (isBlank(operatorName)) {
+            return null;
+        }
+        SysUser user = sysUserService.findByUsername(operatorName);
+        return user == null ? null : user.getUserId();
+    }
+
+    private String resolveRequestIp() {
+        RequestAttributes requestAttributes = RequestContextHolder.getRequestAttributes();
+        if (!(requestAttributes instanceof ServletRequestAttributes servletRequestAttributes)) {
+            return null;
+        }
+        HttpServletRequest request = servletRequestAttributes.getRequest();
+        if (request == null) {
+            return null;
+        }
+        String forwardedFor = request.getHeader("X-Forwarded-For");
+        if (!isBlank(forwardedFor)) {
+            return forwardedFor.split(",")[0].trim();
+        }
+        String realIp = request.getHeader("X-Real-IP");
+        if (!isBlank(realIp)) {
+            return realIp.trim();
+        }
+        String remoteAddr = request.getRemoteAddr();
+        return isBlank(remoteAddr) ? null : remoteAddr.trim();
+    }
+
+    private void applyReviewOutcome(AppealReview existingReview, AppealReview appealReview) {
+        if (appealReview == null || !isFinalReview(appealReview.getReviewLevel())) {
+            return;
+        }
+        if (existingReview != null && !isReviewDecisionChanged(existingReview, appealReview)) {
+            return;
+        }
+        AppealRecord appealRecord = appealRecordService.getAppealById(appealReview.getAppealId());
+        if (appealRecord == null) {
+            throw new IllegalStateException("Appeal does not exist");
+        }
+        AppealProcessState processState = AppealProcessState.fromCode(appealRecord.getProcessStatus());
+        if (processState == null) {
+            processState = AppealProcessState.UNPROCESSED;
+        }
+
+        String reviewResult = trimToEmpty(appealReview.getReviewResult());
+        if ("Approved".equalsIgnoreCase(reviewResult)) {
+            if (processState == AppealProcessState.UNDER_REVIEW) {
+                appealRecord = appealRecordService.updateProcessStatus(appealRecord.getAppealId(), AppealProcessState.APPROVED);
+            }
+            applyApprovedReviewAction(appealReview, appealRecord);
+            return;
+        }
+
+        if (("Rejected".equalsIgnoreCase(reviewResult) || "Need_Resubmit".equalsIgnoreCase(reviewResult))
+                && processState == AppealProcessState.UNDER_REVIEW) {
+            appealRecordService.updateProcessStatus(appealRecord.getAppealId(), AppealProcessState.REJECTED);
+        }
+    }
+
+    private void ensureReviewCanBeDeleted(AppealReview review) {
+        if (review == null || review.getAppealId() == null) {
+            return;
+        }
+        AppealRecord appealRecord = appealRecordService.getAppealById(review.getAppealId());
+        if (appealRecord == null) {
+            return;
+        }
+        AppealProcessState processState = AppealProcessState.fromCode(appealRecord.getProcessStatus());
+        if (isAppealFinalized(processState)) {
+            throw new IllegalStateException("Cannot delete review records after the appeal has been finalized");
+        }
+    }
+
+    private void applyApprovedReviewAction(AppealReview appealReview, AppealRecord appealRecord) {
+        String suggestedAction = trimToEmpty(appealReview.getSuggestedAction());
+        if (suggestedAction.isEmpty() || appealRecord == null || appealRecord.getOffenseId() == null) {
+            return;
+        }
+        Long offenseId = appealRecord.getOffenseId();
+        if ("Cancel_Offense".equalsIgnoreCase(suggestedAction)) {
+            waiveFinesByOffense(offenseId);
+            restoreDeductionsByOffense(offenseId, "Appeal approved via final review");
+            offenseRecordService.updatePenaltySummary(offenseId, BigDecimal.ZERO, 0, 0);
+            return;
+        }
+        if ("Reduce_Fine".equalsIgnoreCase(suggestedAction)) {
+            reduceFineByOffense(offenseId, appealReview.getSuggestedFineAmount());
+            return;
+        }
+        if ("Reduce_Points".equalsIgnoreCase(suggestedAction)) {
+            reduceDeductionByOffense(offenseId, appealReview.getSuggestedPoints());
+        }
+    }
+
+    private void validateSuggestedActionBounds(AppealReview appealReview, AppealRecord appealRecord) {
+        if (appealReview == null || appealRecord == null || appealRecord.getOffenseId() == null) {
+            return;
+        }
+        String suggestedAction = trimToEmpty(appealReview.getSuggestedAction());
+        if ("Reduce_Fine".equalsIgnoreCase(suggestedAction)) {
+            validateReducedFineAmount(appealRecord.getOffenseId(), appealReview.getSuggestedFineAmount());
+            return;
+        }
+        if ("Reduce_Points".equalsIgnoreCase(suggestedAction)) {
+            validateReducedPoints(appealRecord.getOffenseId(), appealReview.getSuggestedPoints());
+        }
+    }
+
+    private void validateReducedFineAmount(Long offenseId, BigDecimal suggestedFineAmount) {
+        if (suggestedFineAmount == null || suggestedFineAmount.signum() < 0) {
+            throw new IllegalArgumentException("Suggested fine amount must be provided for Reduce_Fine");
+        }
+        List<FineRecord> fineRecords = fineRecordService.findByOffenseId(offenseId, 1, 200);
+        if (fineRecords.size() != 1 || fineRecords.get(0) == null) {
+            throw new IllegalStateException("Reduce_Fine requires exactly one fine record for the offense");
+        }
+        BigDecimal currentFineAmount = normalizeAmount(fineRecords.get(0).getFineAmount());
+        if (suggestedFineAmount.compareTo(currentFineAmount) > 0) {
+            throw new IllegalArgumentException("Suggested fine amount cannot exceed the current fine amount");
+        }
+    }
+
+    private void validateReducedPoints(Long offenseId, Integer suggestedPoints) {
+        if (suggestedPoints == null || suggestedPoints < 0) {
+            throw new IllegalArgumentException("Suggested points must be provided for Reduce_Points");
+        }
+        List<DeductionRecord> deductionRecords = deductionRecordService.findByOffenseId(offenseId, 1, 200);
+        if (deductionRecords.size() != 1 || deductionRecords.get(0) == null) {
+            throw new IllegalStateException("Reduce_Points requires exactly one deduction record for the offense");
+        }
+        Integer currentPoints = deductionRecords.get(0).getDeductedPoints();
+        int normalizedCurrentPoints = currentPoints == null ? 0 : currentPoints;
+        if (suggestedPoints > normalizedCurrentPoints) {
+            throw new IllegalArgumentException("Suggested points cannot exceed the current deducted points");
+        }
+    }
+
+    private void waiveFinesByOffense(Long offenseId) {
+        List<FineRecord> fineRecords = fineRecordService.findByOffenseId(offenseId, 1, 200);
+        for (FineRecord fineRecord : fineRecords) {
+            if (fineRecord == null) {
+                continue;
+            }
+            paymentRecordService.waiveAndRefundPaymentsByFineId(
+                    fineRecord.getFineId(),
+                    "Appeal approved with offense cancellation");
+            FineRecord refreshed = fineRecordService.findById(fineRecord.getFineId());
+            if (refreshed != null && PaymentState.WAIVED.getCode().equalsIgnoreCase(trimToEmpty(refreshed.getPaymentStatus()))) {
+                continue;
+            }
+            fineRecord.setPaymentStatus(PaymentState.WAIVED.getCode());
+            fineRecord.setUnpaidAmount(BigDecimal.ZERO);
+            fineRecord.setPaidAmount(BigDecimal.ZERO);
+            fineRecord.setUpdatedAt(LocalDateTime.now());
+            fineRecordService.updateFineRecordSystemManaged(fineRecord);
+        }
+    }
+
+    private void restoreDeductionsByOffense(Long offenseId, String reason) {
+        List<DeductionRecord> deductionRecords = deductionRecordService.findByOffenseId(offenseId, 1, 200);
+        for (DeductionRecord deductionRecord : deductionRecords) {
+            if (deductionRecord == null) {
+                continue;
+            }
+            deductionRecord.setStatus("Restored");
+            deductionRecord.setRestoreTime(LocalDateTime.now());
+            deductionRecord.setRestoreReason(truncate(reason));
+            deductionRecord.setUpdatedAt(LocalDateTime.now());
+            deductionRecordService.updateDeductionRecordSystemManaged(deductionRecord);
+        }
+    }
+
+    private void reduceFineByOffense(Long offenseId, BigDecimal suggestedFineAmount) {
+        if (suggestedFineAmount == null || suggestedFineAmount.signum() < 0) {
+            throw new IllegalArgumentException("Suggested fine amount must be provided for Reduce_Fine");
+        }
+        List<FineRecord> fineRecords = fineRecordService.findByOffenseId(offenseId, 1, 200);
+        if (fineRecords.size() != 1) {
+            throw new IllegalStateException("Reduce_Fine requires exactly one fine record for the offense");
+        }
+        FineRecord fineRecord = fineRecords.get(0);
+        BigDecimal lateFee = normalizeAmount(fineRecord.getLateFee());
+        BigDecimal paidAmount = normalizeAmount(fineRecord.getPaidAmount());
+        BigDecimal totalAmount = suggestedFineAmount.add(lateFee);
+        BigDecimal refundAmount = paidAmount.subtract(totalAmount);
+        if (refundAmount.signum() > 0) {
+            paymentRecordService.refundPaymentsByFineId(
+                    fineRecord.getFineId(),
+                    refundAmount,
+                    "Appeal approved with fine reduction");
+            fineRecord = fineRecordService.findById(fineRecord.getFineId());
+            paidAmount = normalizeAmount(fineRecord == null ? null : fineRecord.getPaidAmount());
+        }
+        BigDecimal unpaidAmount = totalAmount.subtract(paidAmount);
+        if (unpaidAmount.signum() < 0) {
+            unpaidAmount = BigDecimal.ZERO;
+        }
+        if (fineRecord == null) {
+            throw new IllegalStateException("Fine record not found after refund processing");
+        }
+        fineRecord.setFineAmount(suggestedFineAmount);
+        fineRecord.setTotalAmount(totalAmount);
+        fineRecord.setUnpaidAmount(unpaidAmount);
+        fineRecord.setPaymentStatus(resolveFinePaymentStatus(fineRecord.getPaymentDeadline(), totalAmount, paidAmount));
+        fineRecord.setUpdatedAt(LocalDateTime.now());
+        fineRecordService.updateFineRecordSystemManaged(fineRecord);
+        offenseRecordService.updatePenaltySummary(offenseId, suggestedFineAmount, null, null);
+    }
+
+    private void reduceDeductionByOffense(Long offenseId, Integer suggestedPoints) {
+        if (suggestedPoints == null || suggestedPoints < 0) {
+            throw new IllegalArgumentException("Suggested points must be provided for Reduce_Points");
+        }
+        List<DeductionRecord> deductionRecords = deductionRecordService.findByOffenseId(offenseId, 1, 200);
+        if (deductionRecords.size() != 1) {
+            throw new IllegalStateException("Reduce_Points requires exactly one deduction record for the offense");
+        }
+        DeductionRecord deductionRecord = deductionRecords.get(0);
+        if (suggestedPoints == 0) {
+            deductionRecord.setStatus("Restored");
+            deductionRecord.setRestoreTime(LocalDateTime.now());
+            deductionRecord.setRestoreReason("Appeal approved with zero points");
+        } else {
+            deductionRecord.setDeductedPoints(suggestedPoints);
+            deductionRecord.setStatus("Effective");
+            deductionRecord.setRestoreTime(null);
+            deductionRecord.setRestoreReason(null);
+        }
+        deductionRecord.setUpdatedAt(LocalDateTime.now());
+        deductionRecordService.updateDeductionRecordSystemManaged(deductionRecord);
+        offenseRecordService.updatePenaltySummary(offenseId, null, suggestedPoints, null);
+    }
+
+    private boolean isFinalReview(String reviewLevel) {
+        return "Final".equalsIgnoreCase(trimToEmpty(reviewLevel));
+    }
+
+    private boolean isAppealFinalized(AppealProcessState state) {
+        return state == AppealProcessState.APPROVED || state == AppealProcessState.REJECTED;
+    }
+
+    private boolean isReviewContentChanged(AppealReview existing, AppealReview incoming) {
+        return !trimToEmpty(existing.getReviewLevel()).equalsIgnoreCase(trimToEmpty(incoming.getReviewLevel()))
+                || !trimToEmpty(existing.getReviewResult()).equalsIgnoreCase(trimToEmpty(incoming.getReviewResult()))
+                || !trimToEmpty(existing.getSuggestedAction()).equalsIgnoreCase(trimToEmpty(incoming.getSuggestedAction()))
+                || !Objects.equals(existing.getSuggestedFineAmount(), incoming.getSuggestedFineAmount())
+                || !Objects.equals(existing.getSuggestedPoints(), incoming.getSuggestedPoints())
+                || !trimToEmpty(existing.getReviewer()).equalsIgnoreCase(trimToEmpty(incoming.getReviewer()))
+                || !trimToEmpty(existing.getReviewerDept()).equalsIgnoreCase(trimToEmpty(incoming.getReviewerDept()))
+                || !Objects.equals(existing.getReviewTime(), incoming.getReviewTime())
+                || !trimToEmpty(existing.getRemarks()).equalsIgnoreCase(trimToEmpty(incoming.getRemarks()));
+    }
+
+    private boolean isReviewDecisionChanged(AppealReview existing, AppealReview incoming) {
+        return !trimToEmpty(existing.getReviewLevel()).equalsIgnoreCase(trimToEmpty(incoming.getReviewLevel()))
+                || !trimToEmpty(existing.getReviewResult()).equalsIgnoreCase(trimToEmpty(incoming.getReviewResult()))
+                || !trimToEmpty(existing.getSuggestedAction()).equalsIgnoreCase(trimToEmpty(incoming.getSuggestedAction()))
+                || !Objects.equals(existing.getSuggestedFineAmount(), incoming.getSuggestedFineAmount())
+                || !Objects.equals(existing.getSuggestedPoints(), incoming.getSuggestedPoints());
+    }
+
+    private void ensureSingleReviewPerLevel(AppealReview appealReview, AppealReview existingReview) {
+        QueryWrapper<AppealReview> wrapper = new QueryWrapper<>();
+        wrapper.eq("appeal_id", appealReview.getAppealId())
+                .eq("review_level", trimToEmpty(appealReview.getReviewLevel()));
+        List<AppealReview> duplicates = appealReviewMapper.selectList(wrapper);
+        for (AppealReview duplicate : duplicates) {
+            if (duplicate == null) {
+                continue;
+            }
+            if (existingReview != null && Objects.equals(existingReview.getReviewId(), duplicate.getReviewId())) {
+                continue;
+            }
+            throw new IllegalStateException("Only one review per level is allowed for the same appeal");
+        }
+    }
+
+    private String trimToEmpty(String value) {
+        return value == null ? "" : value.trim();
+    }
+
+    private BigDecimal normalizeAmount(BigDecimal amount) {
+        return amount == null ? BigDecimal.ZERO : amount;
+    }
+
+    private String resolveFinePaymentStatus(LocalDate paymentDeadline, BigDecimal totalAmount, BigDecimal paidAmount) {
+        if (totalAmount.signum() <= 0 || paidAmount.compareTo(totalAmount) >= 0) {
+            return PaymentState.PAID.getCode();
+        }
+        if (paidAmount.signum() > 0) {
+            return PaymentState.PARTIAL.getCode();
+        }
+        if (paymentDeadline != null && paymentDeadline.isBefore(LocalDate.now())) {
+            return PaymentState.OVERDUE.getCode();
+        }
+        return PaymentState.UNPAID.getCode();
     }
 }
