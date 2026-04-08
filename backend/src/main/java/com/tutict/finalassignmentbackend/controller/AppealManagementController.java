@@ -1,7 +1,9 @@
 package com.tutict.finalassignmentbackend.controller;
 
+import com.tutict.finalassignmentbackend.config.statemachine.events.AppealAcceptanceEvent;
 import com.tutict.finalassignmentbackend.entity.AppealRecord;
 import com.tutict.finalassignmentbackend.entity.AppealReview;
+import com.tutict.finalassignmentbackend.service.CurrentUserTrafficSupportService;
 import com.tutict.finalassignmentbackend.service.AppealRecordService;
 import com.tutict.finalassignmentbackend.service.AppealReviewService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -37,11 +39,83 @@ public class AppealManagementController {
 
     private final AppealRecordService appealRecordService;
     private final AppealReviewService appealReviewService;
+    private final CurrentUserTrafficSupportService currentUserTrafficSupportService;
 
     public AppealManagementController(AppealRecordService appealRecordService,
-                                      AppealReviewService appealReviewService) {
+                                      AppealReviewService appealReviewService,
+                                      CurrentUserTrafficSupportService currentUserTrafficSupportService) {
         this.appealRecordService = appealRecordService;
         this.appealReviewService = appealReviewService;
+        this.currentUserTrafficSupportService = currentUserTrafficSupportService;
+    }
+
+    @GetMapping("/me")
+    @RolesAllowed({"SUPER_ADMIN", "ADMIN", "APPEAL_REVIEWER", "USER"})
+    @Operation(summary = "查询当前登录用户申诉记录")
+    public ResponseEntity<List<AppealRecord>> listCurrentUserAppeals(@RequestParam(defaultValue = "1") int page,
+                                                                     @RequestParam(defaultValue = "20") int size) {
+        try {
+            return ResponseEntity.ok(currentUserTrafficSupportService.listCurrentUserAppeals(page, size));
+        } catch (IllegalStateException ex) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        } catch (Exception ex) {
+            LOG.log(Level.WARNING, "List current user appeals failed", ex);
+            return ResponseEntity.status(resolveStatus(ex)).build();
+        }
+    }
+
+    @PostMapping("/me")
+    @RolesAllowed({"SUPER_ADMIN", "ADMIN", "APPEAL_REVIEWER", "USER"})
+    @Operation(summary = "创建当前登录用户申诉记录")
+    public ResponseEntity<AppealRecord> createCurrentUserAppeal(@RequestBody AppealRecord request,
+                                                                @RequestHeader(value = "Idempotency-Key", required = false)
+                                                                String idempotencyKey) {
+        boolean useIdempotency = hasKey(idempotencyKey);
+        try {
+            if (useIdempotency) {
+                if (appealRecordService.shouldSkipProcessing(idempotencyKey)) {
+                    return ResponseEntity.status(HttpStatus.ALREADY_REPORTED).build();
+                }
+                appealRecordService.checkAndInsertIdempotency(idempotencyKey, request, "create");
+            }
+            AppealRecord saved = currentUserTrafficSupportService.createAppealForCurrentUser(request);
+            if (useIdempotency && saved.getAppealId() != null) {
+                appealRecordService.markHistorySuccess(idempotencyKey, saved.getAppealId());
+            }
+            return ResponseEntity.status(HttpStatus.CREATED).body(saved);
+        } catch (IllegalStateException ex) {
+            if (useIdempotency) {
+                appealRecordService.markHistoryFailure(idempotencyKey, ex.getMessage());
+            }
+            LOG.log(Level.WARNING, "Create current user appeal rejected", ex);
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).build();
+        } catch (Exception ex) {
+            if (useIdempotency) {
+                appealRecordService.markHistoryFailure(idempotencyKey, ex.getMessage());
+            }
+            LOG.log(Level.SEVERE, "Create current user appeal failed", ex);
+            return ResponseEntity.status(resolveStatus(ex)).build();
+        }
+    }
+
+    @PostMapping("/me/{appealId}/acceptance-events/{event}")
+    @RolesAllowed({"SUPER_ADMIN", "ADMIN", "APPEAL_REVIEWER", "USER"})
+    @Operation(summary = "Current user triggers a self-service appeal acceptance event")
+    public ResponseEntity<AppealRecord> triggerCurrentUserAppealAcceptanceEvent(@PathVariable Long appealId,
+                                                                                @PathVariable AppealAcceptanceEvent event) {
+        try {
+            return ResponseEntity.ok(
+                    currentUserTrafficSupportService.triggerCurrentUserAppealAcceptanceEvent(appealId, event));
+        } catch (IllegalArgumentException ex) {
+            LOG.log(Level.WARNING, "Current user appeal acceptance event rejected", ex);
+            return ResponseEntity.badRequest().build();
+        } catch (IllegalStateException ex) {
+            LOG.log(Level.WARNING, "Current user appeal acceptance transition failed", ex);
+            return ResponseEntity.status(HttpStatus.CONFLICT).build();
+        } catch (Exception ex) {
+            LOG.log(Level.SEVERE, "Current user appeal acceptance transition failed unexpectedly", ex);
+            return ResponseEntity.status(resolveStatus(ex)).build();
+        }
     }
 
     @PostMapping
@@ -78,36 +152,13 @@ public class AppealManagementController {
                                                      @RequestBody AppealRecord request,
                                                      @RequestHeader(value = "Idempotency-Key", required = false)
                                                      String idempotencyKey) {
-        boolean useIdempotency = hasKey(idempotencyKey);
-        try {
-            request.setAppealId(appealId);
-            if (useIdempotency) {
-                appealRecordService.checkAndInsertIdempotency(idempotencyKey, request, "update");
-            }
-            AppealRecord updated = appealRecordService.updateAppeal(request);
-            if (useIdempotency && updated.getAppealId() != null) {
-                appealRecordService.markHistorySuccess(idempotencyKey, updated.getAppealId());
-            }
-            return ResponseEntity.ok(updated);
-        } catch (Exception ex) {
-            if (useIdempotency) {
-                appealRecordService.markHistoryFailure(idempotencyKey, ex.getMessage());
-            }
-            LOG.log(Level.SEVERE, "Update appeal failed", ex);
-            return ResponseEntity.status(resolveStatus(ex)).build();
-        }
+        return ResponseEntity.status(HttpStatus.METHOD_NOT_ALLOWED).build();
     }
 
     @DeleteMapping("/{appealId}")
     @Operation(summary = "删除申诉记录")
     public ResponseEntity<Void> deleteAppeal(@PathVariable Long appealId) {
-        try {
-            appealRecordService.deleteAppeal(appealId);
-            return ResponseEntity.noContent().build();
-        } catch (Exception ex) {
-            LOG.log(Level.WARNING, "Delete appeal failed", ex);
-            return ResponseEntity.status(resolveStatus(ex)).build();
-        }
+        return ResponseEntity.status(HttpStatus.METHOD_NOT_ALLOWED).build();
     }
 
     @GetMapping("/{appealId}")
@@ -124,11 +175,13 @@ public class AppealManagementController {
 
     @GetMapping
     @Operation(summary = "按违法记录分页查询申诉")
-    public ResponseEntity<List<AppealRecord>> listAppeals(@RequestParam Long offenseId,
+    public ResponseEntity<List<AppealRecord>> listAppeals(@RequestParam(required = false) Long offenseId,
                                                           @RequestParam(defaultValue = "1") int page,
                                                           @RequestParam(defaultValue = "20") int size) {
         try {
-            return ResponseEntity.ok(appealRecordService.findByOffenseId(offenseId, page, size));
+            return ResponseEntity.ok(offenseId == null
+                    ? appealRecordService.listAppeals(page, size)
+                    : appealRecordService.findByOffenseId(offenseId, page, size));
         } catch (Exception ex) {
             LOG.log(Level.WARNING, "List appeals failed", ex);
             return ResponseEntity.status(resolveStatus(ex)).build();
@@ -144,11 +197,19 @@ public class AppealManagementController {
     }
 
     @GetMapping("/search/number/fuzzy")
-    @Operation(summary = "Search appeals by number fuzzy")
+    @Operation(summary = "Search appeals by number (legacy exact match)")
     public ResponseEntity<List<AppealRecord>> searchByNumberFuzzy(@RequestParam String appealNumber,
                                                                   @RequestParam(defaultValue = "1") int page,
                                                                   @RequestParam(defaultValue = "20") int size) {
         return ResponseEntity.ok(appealRecordService.searchByAppealNumberFuzzy(appealNumber, page, size));
+    }
+
+    @GetMapping("/search/reason/fuzzy")
+    @Operation(summary = "Search appeals by reason fuzzy")
+    public ResponseEntity<List<AppealRecord>> searchByReasonFuzzy(@RequestParam String appealReason,
+                                                                  @RequestParam(defaultValue = "1") int page,
+                                                                  @RequestParam(defaultValue = "20") int size) {
+        return ResponseEntity.ok(appealRecordService.searchByAppealReasonFuzzy(appealReason, page, size));
     }
 
     @GetMapping("/search/appellant/name/prefix")
@@ -244,36 +305,13 @@ public class AppealManagementController {
                                                      @RequestBody AppealReview review,
                                                      @RequestHeader(value = "Idempotency-Key", required = false)
                                                      String idempotencyKey) {
-        boolean useIdempotency = hasKey(idempotencyKey);
-        try {
-            review.setReviewId(reviewId);
-            if (useIdempotency) {
-                appealReviewService.checkAndInsertIdempotency(idempotencyKey, review, "update");
-            }
-            AppealReview updated = appealReviewService.updateReview(review);
-            if (useIdempotency && updated.getReviewId() != null) {
-                appealReviewService.markHistorySuccess(idempotencyKey, updated.getReviewId());
-            }
-            return ResponseEntity.ok(updated);
-        } catch (Exception ex) {
-            if (useIdempotency) {
-                appealReviewService.markHistoryFailure(idempotencyKey, ex.getMessage());
-            }
-            LOG.log(Level.SEVERE, "Update appeal review failed", ex);
-            return ResponseEntity.status(resolveStatus(ex)).build();
-        }
+        return ResponseEntity.status(HttpStatus.METHOD_NOT_ALLOWED).build();
     }
 
     @DeleteMapping("/reviews/{reviewId}")
     @Operation(summary = "删除复核记录")
     public ResponseEntity<Void> deleteReview(@PathVariable Long reviewId) {
-        try {
-            appealReviewService.deleteReview(reviewId);
-            return ResponseEntity.noContent().build();
-        } catch (Exception ex) {
-            LOG.log(Level.WARNING, "Delete appeal review failed", ex);
-            return ResponseEntity.status(resolveStatus(ex)).build();
-        }
+        return ResponseEntity.status(HttpStatus.METHOD_NOT_ALLOWED).build();
     }
 
     @GetMapping("/reviews/{reviewId}")
@@ -290,9 +328,10 @@ public class AppealManagementController {
 
     @GetMapping("/reviews")
     @Operation(summary = "查询全部复核记录")
-    public ResponseEntity<List<AppealReview>> listReviews() {
+    public ResponseEntity<List<AppealReview>> listReviews(@RequestParam(defaultValue = "1") int page,
+                                                          @RequestParam(defaultValue = "20") int size) {
         try {
-            return ResponseEntity.ok(appealReviewService.findAll());
+            return ResponseEntity.ok(appealReviewService.findAll(page, size));
         } catch (Exception ex) {
             LOG.log(Level.WARNING, "List appeal reviews failed", ex);
             return ResponseEntity.status(resolveStatus(ex)).build();

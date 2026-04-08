@@ -786,9 +786,21 @@ public class AppealRecordService {
             if (Objects.equals(existing.getAppealId(), appealRecord.getAppealId())) {
                 continue;
             }
-            if (!AppealProcessState.WITHDRAWN.getCode().equalsIgnoreCase(trimToEmpty(existing.getProcessStatus()))) {
-                throw new IllegalStateException("An active appeal already exists for this offense");
+            AppealProcessState processState = AppealProcessState.fromCode(trimToEmpty(existing.getProcessStatus()));
+            if (processState == AppealProcessState.WITHDRAWN) {
+                continue;
             }
+            AppealAcceptanceState acceptanceState =
+                    AppealAcceptanceState.fromCode(trimToEmpty(existing.getAcceptanceStatus()));
+            if (acceptanceState == AppealAcceptanceState.REJECTED) {
+                throw new IllegalStateException(
+                        "A rejected appeal already exists for this offense; please resubmit the existing appeal");
+            }
+            if (acceptanceState == AppealAcceptanceState.NEED_SUPPLEMENT) {
+                throw new IllegalStateException(
+                        "An appeal for this offense is waiting for supplemental materials");
+            }
+            throw new IllegalStateException("An active appeal already exists for this offense");
         }
     }
 

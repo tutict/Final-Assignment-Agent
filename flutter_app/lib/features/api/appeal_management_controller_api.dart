@@ -91,44 +91,6 @@ class AppealManagementControllerApi {
     return AppealRecordModel.fromJson(jsonDecode(body) as Map<String, dynamic>);
   }
 
-  /// PUT /api/appeals/{appealId}
-  Future<AppealRecordModel> apiAppealsAppealIdPut({
-    required int appealId,
-    required AppealRecordModel appealRecord,
-    String? idempotencyKey,
-  }) async {
-    final response = await apiClient.invokeAPI(
-      '/api/appeals/$appealId',
-      'PUT',
-      const [],
-      appealRecord.toJson(),
-      await _getHeaders(idempotencyKey: idempotencyKey),
-      const {},
-      'application/json',
-      ['bearerAuth'],
-    );
-    _ensureSuccess(response);
-    final body = _decodeBodyBytes(response);
-    return AppealRecordModel.fromJson(jsonDecode(body) as Map<String, dynamic>);
-  }
-
-  /// DELETE /api/appeals/{appealId}
-  Future<void> apiAppealsAppealIdDelete({required int appealId}) async {
-    final response = await apiClient.invokeAPI(
-      '/api/appeals/$appealId',
-      'DELETE',
-      const [],
-      null,
-      await _getHeaders(),
-      const {},
-      null,
-      ['bearerAuth'],
-    );
-    if (response.statusCode != 204 && response.statusCode != 200) {
-      _ensureSuccess(response);
-    }
-  }
-
   /// GET /api/appeals/{appealId}
   Future<AppealRecordModel?> apiAppealsAppealIdGet(
       {required int appealId}) async {
@@ -155,15 +117,15 @@ class AppealManagementControllerApi {
 
   /// GET /api/appeals?offenseId=...&page=...&size=...
   Future<List<AppealRecordModel>> apiAppealsGet({
-    required int offenseId,
+    int? offenseId,
     int page = 1,
     int size = 20,
   }) async {
-    if (offenseId <= 0) {
+    if (offenseId != null && offenseId <= 0) {
       throw ApiException(400, localizeMissingRequiredParam('offenseId'));
     }
     final queryParams = <QueryParam>[
-      QueryParam('offenseId', offenseId.toString()),
+      if (offenseId != null) QueryParam('offenseId', offenseId.toString()),
       QueryParam('page', page.toString()),
       QueryParam('size', size.toString()),
     ];
@@ -182,6 +144,69 @@ class AppealManagementControllerApi {
     }
     _ensureSuccess(response);
     return _parseAppealList(_decodeBodyBytes(response));
+  }
+
+  Future<List<AppealRecordModel>> apiAppealsMeGet({
+    int page = 1,
+    int size = 20,
+  }) async {
+    final response = await apiClient.invokeAPI(
+      '/api/appeals/me',
+      'GET',
+      [
+        QueryParam('page', '$page'),
+        QueryParam('size', '$size'),
+      ],
+      null,
+      await _getHeaders(),
+      const {},
+      null,
+      ['bearerAuth'],
+    );
+    if (response.statusCode == 404) {
+      return [];
+    }
+    _ensureSuccess(response);
+    return _parseAppealList(_decodeBodyBytes(response));
+  }
+
+  Future<AppealRecordModel> apiAppealsMePost({
+    required AppealRecordModel appealRecord,
+    String? idempotencyKey,
+  }) async {
+    final response = await apiClient.invokeAPI(
+      '/api/appeals/me',
+      'POST',
+      const [],
+      appealRecord.toJson(),
+      await _getHeaders(idempotencyKey: idempotencyKey),
+      const {},
+      'application/json',
+      ['bearerAuth'],
+    );
+    _ensureSuccess(response);
+    final body = _decodeBodyBytes(response);
+    return AppealRecordModel.fromJson(jsonDecode(body) as Map<String, dynamic>);
+  }
+
+  Future<AppealRecordModel> apiAppealsMeAppealIdAcceptanceEventsEventPost({
+    required int appealId,
+    required String event,
+    String? idempotencyKey,
+  }) async {
+    final response = await apiClient.invokeAPI(
+      '/api/appeals/me/$appealId/acceptance-events/$event',
+      'POST',
+      const [],
+      null,
+      await _getHeaders(idempotencyKey: idempotencyKey),
+      const {},
+      'application/json',
+      ['bearerAuth'],
+    );
+    _ensureSuccess(response);
+    final body = _decodeBodyBytes(response);
+    return AppealRecordModel.fromJson(jsonDecode(body) as Map<String, dynamic>);
   }
 
   /// GET /api/appeals/search/number/prefix
@@ -219,6 +244,30 @@ class AppealManagementControllerApi {
       'GET',
       [
         QueryParam('appealNumber', appealNumber),
+        QueryParam('page', '$page'),
+        QueryParam('size', '$size'),
+      ],
+      null,
+      await _getHeaders(),
+      const {},
+      null,
+      ['bearerAuth'],
+    );
+    _ensureSuccess(response);
+    return _parseAppealList(_decodeBodyBytes(response));
+  }
+
+  /// GET /api/appeals/search/reason/fuzzy
+  Future<List<AppealRecordModel>> apiAppealsSearchReasonFuzzyGet({
+    required String appealReason,
+    int page = 1,
+    int size = 20,
+  }) async {
+    final response = await apiClient.invokeAPI(
+      '/api/appeals/search/reason/fuzzy',
+      'GET',
+      [
+        QueryParam('appealReason', appealReason),
         QueryParam('page', '$page'),
         QueryParam('size', '$size'),
       ],
@@ -423,44 +472,6 @@ class AppealManagementControllerApi {
         jsonDecode(_decodeBodyBytes(response)) as Map<String, dynamic>);
   }
 
-  /// PUT /api/appeals/reviews/{reviewId}
-  Future<AppealReviewModel> apiAppealsReviewsReviewIdPut({
-    required int reviewId,
-    required AppealReviewModel review,
-    String? idempotencyKey,
-  }) async {
-    final response = await apiClient.invokeAPI(
-      '/api/appeals/reviews/$reviewId',
-      'PUT',
-      const [],
-      review.toJson(),
-      await _getHeaders(idempotencyKey: idempotencyKey),
-      const {},
-      'application/json',
-      ['bearerAuth'],
-    );
-    _ensureSuccess(response);
-    return AppealReviewModel.fromJson(
-        jsonDecode(_decodeBodyBytes(response)) as Map<String, dynamic>);
-  }
-
-  /// DELETE /api/appeals/reviews/{reviewId}
-  Future<void> apiAppealsReviewsReviewIdDelete({required int reviewId}) async {
-    final response = await apiClient.invokeAPI(
-      '/api/appeals/reviews/$reviewId',
-      'DELETE',
-      const [],
-      null,
-      await _getHeaders(),
-      const {},
-      null,
-      ['bearerAuth'],
-    );
-    if (response.statusCode != 204 && response.statusCode != 200) {
-      _ensureSuccess(response);
-    }
-  }
-
   /// GET /api/appeals/reviews/{reviewId}
   Future<AppealReviewModel?> apiAppealsReviewsReviewIdGet(
       {required int reviewId}) async {
@@ -486,11 +497,17 @@ class AppealManagementControllerApi {
   }
 
   /// GET /api/appeals/reviews
-  Future<List<AppealReviewModel>> apiAppealsReviewsGet() async {
+  Future<List<AppealReviewModel>> apiAppealsReviewsGet({
+    int page = 1,
+    int size = 20,
+  }) async {
     final response = await apiClient.invokeAPI(
       '/api/appeals/reviews',
       'GET',
-      const [],
+      [
+        QueryParam('page', '$page'),
+        QueryParam('size', '$size'),
+      ],
       null,
       await _getHeaders(),
       const {},
@@ -608,5 +625,49 @@ class AppealManagementControllerApi {
       return count.toInt();
     }
     return 0;
+  }
+
+  Future<AppealRecordModel> apiWorkflowAppealsAppealIdEventsEventPost({
+    required int appealId,
+    required String event,
+    String? idempotencyKey,
+  }) async {
+    final response = await apiClient.invokeAPI(
+      '/api/workflow/appeals/$appealId/events/$event',
+      'POST',
+      const [],
+      null,
+      await _getHeaders(idempotencyKey: idempotencyKey),
+      const {},
+      'application/json',
+      ['bearerAuth'],
+    );
+    _ensureSuccess(response);
+    final body = _decodeBodyBytes(response);
+    return AppealRecordModel.fromJson(jsonDecode(body) as Map<String, dynamic>);
+  }
+
+  Future<AppealRecordModel>
+      apiWorkflowAppealsAppealIdAcceptanceEventsEventPost({
+    required int appealId,
+    required String event,
+    String? rejectionReason,
+    String? idempotencyKey,
+  }) async {
+    final response = await apiClient.invokeAPI(
+      '/api/workflow/appeals/$appealId/acceptance-events/$event',
+      'POST',
+      const [],
+      rejectionReason == null || rejectionReason.trim().isEmpty
+          ? null
+          : {'rejectionReason': rejectionReason.trim()},
+      await _getHeaders(idempotencyKey: idempotencyKey),
+      const {},
+      'application/json',
+      ['bearerAuth'],
+    );
+    _ensureSuccess(response);
+    final body = _decodeBodyBytes(response);
+    return AppealRecordModel.fromJson(jsonDecode(body) as Map<String, dynamic>);
   }
 }

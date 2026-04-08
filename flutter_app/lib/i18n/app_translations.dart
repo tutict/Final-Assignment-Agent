@@ -1253,6 +1253,8 @@ class AppTranslations extends Translations {
     'appeal.filter.clear': 'Clear date range',
     'appeal.page.title': 'User appeal management',
     'appeal.action.submit': 'Submit appeal',
+    'appeal.action.supplementComplete': 'Submit supplemental materials',
+    'appeal.action.resubmit': 'Resubmit appeal',
     'appeal.empty.byAppellant': 'No appeal records matched appellant @name',
     'appeal.card.title': 'Appellant: @name (ID: @id)',
     'appeal.card.summary': 'Reason: @reason\nStatus: @status\nTime: @time',
@@ -1277,6 +1279,12 @@ class AppTranslations extends Translations {
     'appeal.progress.summary': 'Status: @status\nSubmitted at: @time',
     'appeal.note.readonly':
         'Note: users cannot edit or delete appeals. Contact an administrator for changes.',
+    'appeal.note.awaitingUserAction':
+        'This appeal is waiting for your action before acceptance can continue.',
+    'appeal.success.supplementCompleted':
+        'Your supplemental materials were submitted for acceptance review.',
+    'appeal.success.resubmitted':
+        'Your appeal has been resubmitted for acceptance review.',
     'appealAdmin.page.title': 'Appeal review management',
     'appealAdmin.error.unauthorizedMissing':
         'Unauthorized: login information was not found. Please sign in again.',
@@ -3185,6 +3193,8 @@ class AppTranslations extends Translations {
     'appeal.filter.clear': '\u6e05\u9664\u65e5\u671f\u8303\u56f4',
     'appeal.page.title': '\u7528\u6237\u7533\u8bc9\u7ba1\u7406',
     'appeal.action.submit': '\u63d0\u4ea4\u7533\u8bc9',
+    'appeal.action.supplementComplete': '\u63d0\u4ea4\u8865\u5145\u6750\u6599',
+    'appeal.action.resubmit': '\u91cd\u65b0\u63d0\u4ea4\u7533\u8bc9',
     'appeal.empty.byAppellant':
         '\u6682\u65e0\u4e0e\u7533\u8bc9\u4eba @name \u5339\u914d\u7684\u7533\u8bc9\u8bb0\u5f55',
     'appeal.card.title': '\u7533\u8bc9\u4eba: @name (ID: @id)',
@@ -3212,6 +3222,12 @@ class AppTranslations extends Translations {
         '\u72b6\u6001: @status\n\u63d0\u4ea4\u65f6\u95f4: @time',
     'appeal.note.readonly':
         '\u6ce8\u610f\uff1a\u7528\u6237\u65e0\u6cd5\u4fee\u6539\u6216\u5220\u9664\u7533\u8bc9\uff0c\u8bf7\u8054\u7cfb\u7ba1\u7406\u5458\u5904\u7406\u3002',
+    'appeal.note.awaitingUserAction':
+        '\u5f53\u524d\u7533\u8bc9\u9700\u8981\u4f60\u5148\u5b8c\u6210\u540e\u7eed\u64cd\u4f5c\uff0c\u624d\u80fd\u7ee7\u7eed\u53d7\u7406\u3002',
+    'appeal.success.supplementCompleted':
+        '\u8865\u5145\u6750\u6599\u5df2\u63d0\u4ea4\uff0c\u7533\u8bc9\u5df2\u9001\u56de\u5f85\u53d7\u7406',
+    'appeal.success.resubmitted':
+        '\u7533\u8bc9\u5df2\u91cd\u65b0\u63d0\u4ea4\u5f85\u53d7\u7406',
     'appealAdmin.page.title': '\u7533\u8bc9\u5ba1\u6279\u7ba1\u7406',
     'appealAdmin.error.unauthorizedMissing':
         '\u672a\u6388\u6743\uff1a\u672a\u627e\u5230\u767b\u5f55\u4fe1\u606f\uff0c\u8bf7\u91cd\u65b0\u767b\u5f55',

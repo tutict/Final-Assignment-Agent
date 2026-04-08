@@ -916,14 +916,16 @@ class _UserAppealPageState extends State<UserAppealPage> {
                                             ),
                                           ),
                                           onTap: () {
-                                            Navigator.push(
+                                            Navigator.push<bool>(
                                               context,
                                               MaterialPageRoute(
                                                 builder: (context) =>
                                                     UserAppealDetailPage(
                                                         appeal: appeal),
                                               ),
-                                            );
+                                            ).then((_) {
+                                              _fetchUserAppeals();
+                                            });
                                           },
                                         ),
                                       );
@@ -950,10 +952,29 @@ class UserAppealDetailPage extends StatefulWidget {
 }
 
 class _UserAppealDetailPageState extends State<UserAppealDetailPage> {
+  final AppealManagementControllerApi _appealApi =
+      AppealManagementControllerApi();
   final UserDashboardController? controller =
       Get.isRegistered<UserDashboardController>()
           ? Get.find<UserDashboardController>()
           : null;
+  late AppealRecordModel _appeal;
+  bool _isSubmittingAction = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _appeal = widget.appeal;
+    _initializeApi();
+  }
+
+  Future<void> _initializeApi() async {
+    try {
+      await _appealApi.initializeWithJwt();
+    } catch (e) {
+      developer.log('Failed to initialize appeal API for detail page: $e');
+    }
+  }
 
   Widget _buildDetailRow(String label, String value, ThemeData themeData,
       {Color? valueColor}) {
@@ -978,6 +999,89 @@ class _UserAppealDetailPageState extends State<UserAppealDetailPage> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  bool _isAcceptanceRejected() {
+    return normalizeAppealStatusCode(_appeal.acceptanceStatus) ==
+        appealRejectedStatusCode();
+  }
+
+  bool _isAcceptanceNeedSupplement() {
+    return normalizeAppealStatusCode(_appeal.acceptanceStatus) ==
+        'Need_Supplement';
+  }
+
+  Future<bool?> _showActionConfirmDialog(
+      ThemeData themeData, String title, String confirmLabel) {
+    return showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: themeData.colorScheme.surfaceContainer,
+        title: Text(title),
+        content: Text(title),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text('common.cancel'.tr),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(confirmLabel),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _triggerCurrentUserAcceptanceEvent({
+    required String event,
+    required String successMessage,
+  }) async {
+    final appealId = _appeal.appealId;
+    if (appealId == null) {
+      _showSnackBar(
+          'appeal.error.submitFailed'.trParams({'error': 'Invalid appeal ID'}),
+          isError: true);
+      return;
+    }
+    setState(() => _isSubmittingAction = true);
+    try {
+      await _appealApi.initializeWithJwt();
+      final updated = await _appealApi
+          .apiAppealsMeAppealIdAcceptanceEventsEventPost(
+            appealId: appealId,
+            event: event,
+            idempotencyKey: generateIdempotencyKey(),
+          )
+          .timeout(const Duration(seconds: 5));
+      setState(() => _appeal = updated);
+      _showSnackBar(successMessage);
+    } catch (e) {
+      _showSnackBar(
+        'appeal.error.submitFailed'
+            .trParams({'error': formatUserAppealError(e)}),
+        isError: true,
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isSubmittingAction = false);
+      }
+    }
+  }
+
+  void _showSnackBar(String message, {bool isError = false}) {
+    if (!mounted) {
+      return;
+    }
+    final themeData = controller?.currentBodyTheme.value ?? Theme.of(context);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: isError
+            ? themeData.colorScheme.error
+            : themeData.colorScheme.primary,
       ),
     );
   }
@@ -1011,64 +1115,127 @@ class _UserAppealDetailPageState extends State<UserAppealDetailPage> {
                       children: [
                         _buildDetailRow(
                             'appeal.detail.appealId'.tr,
-                            widget.appeal.appealId?.toString() ??
-                                'common.none'.tr,
+                            _appeal.appealId?.toString() ?? 'common.none'.tr,
                             themeData),
                         _buildDetailRow(
                             'appeal.detail.offenseId'.tr,
-                            widget.appeal.offenseId?.toString() ??
-                                'common.none'.tr,
+                            _appeal.offenseId?.toString() ?? 'common.none'.tr,
                             themeData),
                         _buildDetailRow(
                             'appeal.detail.appellant'.tr,
-                            widget.appeal.appellantName ?? 'common.none'.tr,
+                            _appeal.appellantName ?? 'common.none'.tr,
                             themeData),
                         _buildDetailRow(
                             'appeal.detail.idCard'.tr,
-                            widget.appeal.appellantIdCard ?? 'common.none'.tr,
+                            _appeal.appellantIdCard ?? 'common.none'.tr,
                             themeData),
                         _buildDetailRow(
                             'appeal.detail.contact'.tr,
-                            widget.appeal.appellantContact ?? 'common.none'.tr,
+                            _appeal.appellantContact ?? 'common.none'.tr,
                             themeData),
                         _buildDetailRow(
                             'appeal.detail.reason'.tr,
-                            widget.appeal.appealReason ?? 'common.none'.tr,
+                            _appeal.appealReason ?? 'common.none'.tr,
                             themeData),
                         _buildDetailRow(
                             'appeal.detail.time'.tr,
-                            formatAppealDateTime(widget.appeal.appealTime),
+                            formatAppealDateTime(_appeal.appealTime),
                             themeData),
                         _buildDetailRow(
                           'appeal.detail.acceptanceStatus'.tr,
-                          localizeAppealStatus(widget.appeal.acceptanceStatus),
+                          localizeAppealStatus(_appeal.acceptanceStatus),
                           themeData,
-                          valueColor: isRejectedAppealStatus(
-                                  widget.appeal.acceptanceStatus)
-                              ? themeData.colorScheme.error
-                              : themeData.colorScheme.onSurfaceVariant,
+                          valueColor:
+                              isRejectedAppealStatus(_appeal.acceptanceStatus)
+                                  ? themeData.colorScheme.error
+                                  : themeData.colorScheme.onSurfaceVariant,
                         ),
                         _buildDetailRow(
                             'appeal.detail.status'.tr,
-                            localizeAppealStatus(widget.appeal.processStatus),
+                            localizeAppealStatus(_appeal.processStatus),
                             themeData,
                             valueColor: isApprovedAppealStatus(
-                                    widget.appeal.processStatus)
+                                    _appeal.processStatus)
                                 ? Colors.green
-                                : isRejectedAppealStatus(
-                                        widget.appeal.processStatus)
+                                : isRejectedAppealStatus(_appeal.processStatus)
                                     ? themeData.colorScheme.error
                                     : themeData.colorScheme.onSurfaceVariant),
                         _buildDetailRow(
                             'appeal.detail.result'.tr,
-                            widget.appeal.processResult ??
-                                widget.appeal.rejectionReason ??
+                            _appeal.processResult ??
+                                _appeal.rejectionReason ??
                                 'common.none'.tr,
                             themeData),
                       ],
                     ),
                   ),
                 ),
+                const SizedBox(height: 20),
+                if (_isAcceptanceNeedSupplement() || _isAcceptanceRejected())
+                  Card(
+                    elevation: 2,
+                    color: themeData.colorScheme.surfaceContainer,
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12)),
+                    child: Padding(
+                      padding: const EdgeInsets.all(16.0),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Text(
+                            'appeal.note.awaitingUserAction'.tr,
+                            style: themeData.textTheme.bodyMedium?.copyWith(
+                              color: themeData.colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          if (_isSubmittingAction)
+                            const Center(child: CupertinoActivityIndicator())
+                          else if (_isAcceptanceNeedSupplement())
+                            ElevatedButton.icon(
+                              onPressed: () async {
+                                final confirmed =
+                                    await _showActionConfirmDialog(
+                                  themeData,
+                                  'appeal.action.supplementComplete'.tr,
+                                  'appeal.action.supplementComplete'.tr,
+                                );
+                                if (confirmed == true) {
+                                  await _triggerCurrentUserAcceptanceEvent(
+                                    event: 'SUPPLEMENT_COMPLETE',
+                                    successMessage:
+                                        'appeal.success.supplementCompleted'.tr,
+                                  );
+                                }
+                              },
+                              icon: const Icon(CupertinoIcons.doc_text),
+                              label:
+                                  Text('appeal.action.supplementComplete'.tr),
+                            )
+                          else
+                            ElevatedButton.icon(
+                              onPressed: () async {
+                                final confirmed =
+                                    await _showActionConfirmDialog(
+                                  themeData,
+                                  'appeal.action.resubmit'.tr,
+                                  'appeal.action.resubmit'.tr,
+                                );
+                                if (confirmed == true) {
+                                  await _triggerCurrentUserAcceptanceEvent(
+                                    event: 'RESUBMIT',
+                                    successMessage:
+                                        'appeal.success.resubmitted'.tr,
+                                  );
+                                }
+                              },
+                              icon: const Icon(CupertinoIcons.refresh),
+                              label: Text('appeal.action.resubmit'.tr),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
                 const SizedBox(height: 20),
                 Card(
                   elevation: 2,
@@ -1102,9 +1269,14 @@ class _UserAppealDetailPageState extends State<UserAppealDetailPage> {
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16.0),
                   child: Text(
-                    'appeal.note.readonly'.tr,
+                    (_isAcceptanceNeedSupplement() || _isAcceptanceRejected())
+                        ? 'appeal.note.awaitingUserAction'.tr
+                        : 'appeal.note.readonly'.tr,
                     style: themeData.textTheme.bodyMedium?.copyWith(
-                      color: themeData.colorScheme.error,
+                      color: (_isAcceptanceNeedSupplement() ||
+                              _isAcceptanceRejected())
+                          ? themeData.colorScheme.primary
+                          : themeData.colorScheme.error,
                       fontStyle: FontStyle.italic,
                     ),
                     textAlign: TextAlign.center,

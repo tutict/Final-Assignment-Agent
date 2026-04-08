@@ -3,6 +3,7 @@ package com.tutict.finalassignmentbackend.service;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tutict.finalassignmentbackend.config.login.jwt.TokenProvider;
+import com.tutict.finalassignmentbackend.config.statemachine.events.AppealAcceptanceEvent;
 import com.tutict.finalassignmentbackend.config.statemachine.events.AppealProcessEvent;
 import com.tutict.finalassignmentbackend.config.statemachine.events.OffenseProcessEvent;
 import com.tutict.finalassignmentbackend.config.statemachine.events.PaymentEvent;
@@ -536,6 +537,50 @@ class BusinessFlowConsistencyTest {
         assertThrows(IllegalArgumentException.class, () -> service.createAppeal(request));
         verify(appealRecordMapper, never()).insert(any(AppealRecord.class));
         verify(stateMachineService, never()).canTransitionOffenseState(any(), any());
+    }
+
+    @Test
+    void createAppealShouldExplainRejectedAppealMustBeResubmitted() {
+        AppealRecordMapper appealRecordMapper = Mockito.mock(AppealRecordMapper.class);
+        AppealReviewMapper appealReviewMapper = Mockito.mock(AppealReviewMapper.class);
+        SysRequestHistoryMapper requestHistoryMapper = Mockito.mock(SysRequestHistoryMapper.class);
+        @SuppressWarnings("unchecked")
+        KafkaTemplate<String, String> kafkaTemplate = Mockito.mock(KafkaTemplate.class);
+        AppealRecordSearchRepository searchRepository = Mockito.mock(AppealRecordSearchRepository.class);
+        OffenseRecordService offenseRecordService = Mockito.mock(OffenseRecordService.class);
+        SysUserService sysUserService = Mockito.mock(SysUserService.class);
+        StateMachineService stateMachineService = Mockito.mock(StateMachineService.class);
+
+        AppealRecordService service = new AppealRecordService(
+                appealRecordMapper,
+                appealReviewMapper,
+                requestHistoryMapper,
+                kafkaTemplate,
+                searchRepository,
+                offenseRecordService,
+                sysUserService,
+                stateMachineService,
+                new ObjectMapper());
+
+        OffenseRecord offense = new OffenseRecord();
+        offense.setOffenseId(20L);
+        when(offenseRecordService.findById(20L)).thenReturn(offense);
+
+        AppealRecord rejectedAppeal = new AppealRecord();
+        rejectedAppeal.setAppealId(21L);
+        rejectedAppeal.setOffenseId(20L);
+        rejectedAppeal.setAcceptanceStatus(AppealAcceptanceState.REJECTED.getCode());
+        rejectedAppeal.setProcessStatus(AppealProcessState.UNPROCESSED.getCode());
+        when(appealRecordMapper.selectList(any())).thenReturn(List.of(rejectedAppeal));
+
+        AppealRecord request = new AppealRecord();
+        request.setOffenseId(20L);
+        request.setAppealReason("Need to explain the earlier evidence");
+
+        IllegalStateException ex = assertThrows(IllegalStateException.class, () -> service.createAppeal(request));
+        assertEquals("A rejected appeal already exists for this offense; please resubmit the existing appeal",
+                ex.getMessage());
+        verify(appealRecordMapper, never()).insert(any(AppealRecord.class));
     }
 
     @Test
@@ -2567,6 +2612,7 @@ class BusinessFlowConsistencyTest {
         VehicleInformationService vehicleInformationService = Mockito.mock(VehicleInformationService.class);
         AppealRecordService appealRecordService = Mockito.mock(AppealRecordService.class);
         PaymentRecordService paymentRecordService = Mockito.mock(PaymentRecordService.class);
+        StateMachineService stateMachineService = Mockito.mock(StateMachineService.class);
 
         CurrentUserTrafficSupportService service = new CurrentUserTrafficSupportService(
                 sysUserService,
@@ -2576,7 +2622,8 @@ class BusinessFlowConsistencyTest {
                 deductionRecordService,
                 vehicleInformationService,
                 appealRecordService,
-                paymentRecordService);
+                paymentRecordService,
+                stateMachineService);
 
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken("alice", "n/a", Collections.emptyList()));
@@ -2669,6 +2716,7 @@ class BusinessFlowConsistencyTest {
         VehicleInformationService vehicleInformationService = Mockito.mock(VehicleInformationService.class);
         AppealRecordService appealRecordService = Mockito.mock(AppealRecordService.class);
         PaymentRecordService paymentRecordService = Mockito.mock(PaymentRecordService.class);
+        StateMachineService stateMachineService = Mockito.mock(StateMachineService.class);
 
         CurrentUserTrafficSupportService service = new CurrentUserTrafficSupportService(
                 sysUserService,
@@ -2678,7 +2726,8 @@ class BusinessFlowConsistencyTest {
                 deductionRecordService,
                 vehicleInformationService,
                 appealRecordService,
-                paymentRecordService);
+                paymentRecordService,
+                stateMachineService);
 
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken("carol", "n/a", Collections.emptyList()));
@@ -2722,6 +2771,7 @@ class BusinessFlowConsistencyTest {
         VehicleInformationService vehicleInformationService = Mockito.mock(VehicleInformationService.class);
         AppealRecordService appealRecordService = Mockito.mock(AppealRecordService.class);
         PaymentRecordService paymentRecordService = Mockito.mock(PaymentRecordService.class);
+        StateMachineService stateMachineService = Mockito.mock(StateMachineService.class);
 
         CurrentUserTrafficSupportService service = new CurrentUserTrafficSupportService(
                 sysUserService,
@@ -2731,7 +2781,8 @@ class BusinessFlowConsistencyTest {
                 deductionRecordService,
                 vehicleInformationService,
                 appealRecordService,
-                paymentRecordService);
+                paymentRecordService,
+                stateMachineService);
 
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken("carol", "n/a", Collections.emptyList()));
@@ -2784,6 +2835,7 @@ class BusinessFlowConsistencyTest {
         VehicleInformationService vehicleInformationService = Mockito.mock(VehicleInformationService.class);
         AppealRecordService appealRecordService = Mockito.mock(AppealRecordService.class);
         PaymentRecordService paymentRecordService = Mockito.mock(PaymentRecordService.class);
+        StateMachineService stateMachineService = Mockito.mock(StateMachineService.class);
 
         CurrentUserTrafficSupportService service = new CurrentUserTrafficSupportService(
                 sysUserService,
@@ -2793,7 +2845,8 @@ class BusinessFlowConsistencyTest {
                 deductionRecordService,
                 vehicleInformationService,
                 appealRecordService,
-                paymentRecordService);
+                paymentRecordService,
+                stateMachineService);
 
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken("carol", "n/a", Collections.emptyList()));
@@ -2837,7 +2890,7 @@ class BusinessFlowConsistencyTest {
     }
 
     @Test
-    void createCurrentUserPaymentShouldPopulatePayerFieldsWithinCurrentUserScope() {
+    void currentUserShouldResubmitOwnRejectedAppeal() {
         SysUserService sysUserService = Mockito.mock(SysUserService.class);
         DriverInformationService driverInformationService = Mockito.mock(DriverInformationService.class);
         OffenseRecordService offenseRecordService = Mockito.mock(OffenseRecordService.class);
@@ -2846,6 +2899,7 @@ class BusinessFlowConsistencyTest {
         VehicleInformationService vehicleInformationService = Mockito.mock(VehicleInformationService.class);
         AppealRecordService appealRecordService = Mockito.mock(AppealRecordService.class);
         PaymentRecordService paymentRecordService = Mockito.mock(PaymentRecordService.class);
+        StateMachineService stateMachineService = Mockito.mock(StateMachineService.class);
 
         CurrentUserTrafficSupportService service = new CurrentUserTrafficSupportService(
                 sysUserService,
@@ -2855,7 +2909,94 @@ class BusinessFlowConsistencyTest {
                 deductionRecordService,
                 vehicleInformationService,
                 appealRecordService,
-                paymentRecordService);
+                paymentRecordService,
+                stateMachineService);
+
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken("carol", "n/a", Collections.emptyList()));
+
+        SysUser user = new SysUser();
+        user.setUserId(200L);
+        user.setUsername("carol");
+        when(sysUserService.findByUsername("carol")).thenReturn(user);
+
+        DriverInformation driver = new DriverInformation();
+        driver.setDriverId(200L);
+        when(driverInformationService.findLinkedDriverForUser(any())).thenReturn(driver);
+        when(offenseRecordService.findIdsByDriverIds(List.of(200L))).thenReturn(List.of(500L));
+
+        AppealRecord existing = new AppealRecord();
+        existing.setAppealId(501L);
+        existing.setOffenseId(500L);
+        existing.setAcceptanceStatus(AppealAcceptanceState.REJECTED.getCode());
+        when(appealRecordService.getAppealById(501L)).thenReturn(existing);
+
+        AppealRecord updated = new AppealRecord();
+        updated.setAppealId(501L);
+        updated.setOffenseId(500L);
+        updated.setAcceptanceStatus(AppealAcceptanceState.PENDING.getCode());
+        when(stateMachineService.processAppealAcceptanceState(
+                501L,
+                AppealAcceptanceState.REJECTED,
+                AppealAcceptanceEvent.RESUBMIT)).thenReturn(AppealAcceptanceState.PENDING);
+        when(appealRecordService.updateAcceptanceStatus(501L, AppealAcceptanceState.PENDING)).thenReturn(updated);
+
+        AppealRecord result = service.triggerCurrentUserAppealAcceptanceEvent(501L, AppealAcceptanceEvent.RESUBMIT);
+
+        assertEquals(AppealAcceptanceState.PENDING.getCode(), result.getAcceptanceStatus());
+        verify(appealRecordService).updateAcceptanceStatus(501L, AppealAcceptanceState.PENDING);
+    }
+
+    @Test
+    void currentUserAppealAcceptanceEventShouldRejectManagerOnlyTransitions() {
+        SysUserService sysUserService = Mockito.mock(SysUserService.class);
+        DriverInformationService driverInformationService = Mockito.mock(DriverInformationService.class);
+        OffenseRecordService offenseRecordService = Mockito.mock(OffenseRecordService.class);
+        FineRecordService fineRecordService = Mockito.mock(FineRecordService.class);
+        DeductionRecordService deductionRecordService = Mockito.mock(DeductionRecordService.class);
+        VehicleInformationService vehicleInformationService = Mockito.mock(VehicleInformationService.class);
+        AppealRecordService appealRecordService = Mockito.mock(AppealRecordService.class);
+        PaymentRecordService paymentRecordService = Mockito.mock(PaymentRecordService.class);
+        StateMachineService stateMachineService = Mockito.mock(StateMachineService.class);
+
+        CurrentUserTrafficSupportService service = new CurrentUserTrafficSupportService(
+                sysUserService,
+                driverInformationService,
+                offenseRecordService,
+                fineRecordService,
+                deductionRecordService,
+                vehicleInformationService,
+                appealRecordService,
+                paymentRecordService,
+                stateMachineService);
+
+        assertThrows(IllegalArgumentException.class,
+                () -> service.triggerCurrentUserAppealAcceptanceEvent(501L, AppealAcceptanceEvent.ACCEPT));
+        verify(stateMachineService, never()).processAppealAcceptanceState(any(), any(), any());
+    }
+
+    @Test
+    void createCurrentUserPaymentShouldPopulatePayerFieldsWithinCurrentUserScope() {
+        SysUserService sysUserService = Mockito.mock(SysUserService.class);
+        DriverInformationService driverInformationService = Mockito.mock(DriverInformationService.class);
+        OffenseRecordService offenseRecordService = Mockito.mock(OffenseRecordService.class);
+        FineRecordService fineRecordService = Mockito.mock(FineRecordService.class);
+        DeductionRecordService deductionRecordService = Mockito.mock(DeductionRecordService.class);
+        VehicleInformationService vehicleInformationService = Mockito.mock(VehicleInformationService.class);
+        AppealRecordService appealRecordService = Mockito.mock(AppealRecordService.class);
+        PaymentRecordService paymentRecordService = Mockito.mock(PaymentRecordService.class);
+        StateMachineService stateMachineService = Mockito.mock(StateMachineService.class);
+
+        CurrentUserTrafficSupportService service = new CurrentUserTrafficSupportService(
+                sysUserService,
+                driverInformationService,
+                offenseRecordService,
+                fineRecordService,
+                deductionRecordService,
+                vehicleInformationService,
+                appealRecordService,
+                paymentRecordService,
+                stateMachineService);
 
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken("carol", "n/a", Collections.emptyList()));
@@ -2929,6 +3070,29 @@ class BusinessFlowConsistencyTest {
 
         assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
         verify(appealRecordService).markHistoryFailure("appeal-key", "Offense does not belong to current user");
+    }
+
+    @Test
+    void currentUserAppealAcceptanceEndpointShouldReturnConflictForInvalidSelfServiceTransition() {
+        AppealRecordService appealRecordService = Mockito.mock(AppealRecordService.class);
+        AppealReviewService appealReviewService = Mockito.mock(AppealReviewService.class);
+        CurrentUserTrafficSupportService currentUserTrafficSupportService =
+                Mockito.mock(CurrentUserTrafficSupportService.class);
+
+        AppealManagementController controller = new AppealManagementController(
+                appealRecordService,
+                appealReviewService,
+                currentUserTrafficSupportService);
+
+        when(currentUserTrafficSupportService.triggerCurrentUserAppealAcceptanceEvent(
+                501L,
+                AppealAcceptanceEvent.RESUBMIT)).thenThrow(new IllegalStateException("Appeal acceptance state does not allow this event"));
+
+        ResponseEntity<AppealRecord> response = controller.triggerCurrentUserAppealAcceptanceEvent(
+                501L,
+                AppealAcceptanceEvent.RESUBMIT);
+
+        assertEquals(HttpStatus.CONFLICT, response.getStatusCode());
     }
 
     @Test
@@ -3569,6 +3733,7 @@ class BusinessFlowConsistencyTest {
         VehicleInformationService vehicleInformationService = Mockito.mock(VehicleInformationService.class);
         AppealRecordService appealRecordService = Mockito.mock(AppealRecordService.class);
         PaymentRecordService paymentRecordService = Mockito.mock(PaymentRecordService.class);
+        StateMachineService stateMachineService = Mockito.mock(StateMachineService.class);
 
         CurrentUserTrafficSupportService service = new CurrentUserTrafficSupportService(
                 sysUserService,
@@ -3578,7 +3743,8 @@ class BusinessFlowConsistencyTest {
                 deductionRecordService,
                 vehicleInformationService,
                 appealRecordService,
-                paymentRecordService);
+                paymentRecordService,
+                stateMachineService);
 
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken("alice", "n/a", Collections.emptyList()));

@@ -1,5 +1,7 @@
 package com.tutict.finalassignmentbackend.service;
 
+import com.tutict.finalassignmentbackend.config.statemachine.events.AppealAcceptanceEvent;
+import com.tutict.finalassignmentbackend.config.statemachine.states.AppealAcceptanceState;
 import com.tutict.finalassignmentbackend.entity.AppealRecord;
 import com.tutict.finalassignmentbackend.entity.DeductionRecord;
 import com.tutict.finalassignmentbackend.entity.DriverInformation;
@@ -8,6 +10,7 @@ import com.tutict.finalassignmentbackend.entity.OffenseRecord;
 import com.tutict.finalassignmentbackend.entity.PaymentRecord;
 import com.tutict.finalassignmentbackend.entity.SysUser;
 import com.tutict.finalassignmentbackend.entity.VehicleInformation;
+import com.tutict.finalassignmentbackend.service.statemachine.StateMachineService;
 import org.springframework.security.authentication.AnonymousAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -40,6 +43,7 @@ public class CurrentUserTrafficSupportService {
     private final VehicleInformationService vehicleInformationService;
     private final AppealRecordService appealRecordService;
     private final PaymentRecordService paymentRecordService;
+    private final StateMachineService stateMachineService;
 
     public CurrentUserTrafficSupportService(SysUserService sysUserService,
                                            DriverInformationService driverInformationService,
@@ -48,7 +52,8 @@ public class CurrentUserTrafficSupportService {
                                            DeductionRecordService deductionRecordService,
                                            VehicleInformationService vehicleInformationService,
                                            AppealRecordService appealRecordService,
-                                           PaymentRecordService paymentRecordService) {
+                                           PaymentRecordService paymentRecordService,
+                                           StateMachineService stateMachineService) {
         this.sysUserService = sysUserService;
         this.driverInformationService = driverInformationService;
         this.offenseRecordService = offenseRecordService;
@@ -57,6 +62,7 @@ public class CurrentUserTrafficSupportService {
         this.vehicleInformationService = vehicleInformationService;
         this.appealRecordService = appealRecordService;
         this.paymentRecordService = paymentRecordService;
+        this.stateMachineService = stateMachineService;
     }
 
     public SysUser requireCurrentUser() {
@@ -302,8 +308,54 @@ public class CurrentUserTrafficSupportService {
         return appealRecordService.createAppeal(appealRecord);
     }
 
+    @Transactional
+    public AppealRecord triggerCurrentUserAppealAcceptanceEvent(Long appealId, AppealAcceptanceEvent event) {
+        if (appealId == null || appealId <= 0) {
+            throw new IllegalArgumentException("Appeal ID must be greater than zero");
+        }
+        if (event == null) {
+            throw new IllegalArgumentException("Appeal acceptance event must not be empty");
+        }
+        ensureCurrentUserCanTriggerAcceptanceEvent(event);
+        AppealRecord appeal = requireCurrentUserAppeal(appealId);
+        AppealAcceptanceState currentState = resolveAppealAcceptanceState(appeal.getAcceptanceStatus());
+        AppealAcceptanceState newState =
+                stateMachineService.processAppealAcceptanceState(appealId, currentState, event);
+        if (newState == currentState) {
+            throw new IllegalStateException("Appeal acceptance state does not allow this event");
+        }
+        return appealRecordService.updateAcceptanceStatus(appealId, newState);
+    }
+
     private DriverInformation resolveCurrentDriver() {
         return driverInformationService.findLinkedDriverForUser(requireCurrentUser());
+    }
+
+    private AppealRecord requireCurrentUserAppeal(Long appealId) {
+        AppealRecord appeal = appealRecordService.getAppealById(appealId);
+        if (appeal == null) {
+            throw new IllegalStateException("Appeal not found");
+        }
+        if (appeal.getOffenseId() == null) {
+            throw new IllegalStateException("Appeal offense does not belong to current user");
+        }
+        Long offenseId = appeal.getOffenseId();
+        if (!resolveCurrentUserOffenseIds().contains(offenseId)) {
+            throw new IllegalStateException("Appeal does not belong to current user");
+        }
+        return appeal;
+    }
+
+    private void ensureCurrentUserCanTriggerAcceptanceEvent(AppealAcceptanceEvent event) {
+        if (event != AppealAcceptanceEvent.SUPPLEMENT_COMPLETE
+                && event != AppealAcceptanceEvent.RESUBMIT) {
+            throw new IllegalArgumentException("Current user can only complete supplements or resubmit appeals");
+        }
+    }
+
+    private AppealAcceptanceState resolveAppealAcceptanceState(String code) {
+        AppealAcceptanceState state = AppealAcceptanceState.fromCode(code);
+        return state != null ? state : AppealAcceptanceState.PENDING;
     }
 
     private VehicleInformation requireCurrentUserVehicle(Long vehicleId) {
