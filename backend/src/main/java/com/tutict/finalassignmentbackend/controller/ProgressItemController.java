@@ -109,6 +109,7 @@ public class ProgressItemController {
             String currentUserIdCardNumber = tryResolveCurrentUserIdCardNumber();
             LinkedHashMap<Long, SysRequestHistory> merged = new LinkedHashMap<>();
             LinkedHashMap<String, LinkedHashSet<Long>> relatedBusinessIds = new LinkedHashMap<>();
+            LinkedHashSet<Long> appealIds = new LinkedHashSet<>();
             int relatedPageSize = Math.max(size * 5, 100);
             int relatedHistoryPageSize = Math.max(size * 10, 200);
             fetchAllPages(pageNumber -> sysRequestHistoryService.findByUserId(userId, pageNumber, relatedPageSize), relatedPageSize)
@@ -119,7 +120,10 @@ public class ProgressItemController {
             fetchAllPages(pageNumber -> currentUserTrafficSupportService.listCurrentUserAppeals(pageNumber, relatedPageSize), relatedPageSize).stream()
                     .map(appeal -> appeal == null ? null : appeal.getAppealId())
                     .filter(id -> id != null && id > 0)
-                    .forEach(id -> registerBusinessId(relatedBusinessIds, businessIds, id, "APPEAL_"));
+                    .forEach(id -> {
+                        appealIds.add(id);
+                        registerBusinessId(relatedBusinessIds, businessIds, id, "APPEAL_");
+                    });
             fetchAllPages(pageNumber -> currentUserTrafficSupportService.listCurrentUserFines(pageNumber, relatedPageSize), relatedPageSize).stream()
                     .map(fine -> fine == null ? null : fine.getFineId())
                     .filter(id -> id != null && id > 0)
@@ -156,6 +160,13 @@ public class ProgressItemController {
                             pageNumber -> sysRequestHistoryService.findRefundAudits(null, fineId, null, pageNumber, relatedPageSize),
                             relatedPageSize)
                     .forEach(history -> putIfPresent(merged, history)));
+            appealIds.forEach(appealId -> fetchAllPages(
+                            pageNumber -> sysRequestHistoryService.searchByRequestUrlPrefix(
+                                    "/api/appeals/" + appealId + "/reviews",
+                                    pageNumber,
+                                    relatedHistoryPageSize),
+                            relatedHistoryPageSize)
+                    .forEach(history -> putIfAppealReviewHistory(merged, history, appealId)));
 
             fetchAllPages(pageNumber -> sysRequestHistoryService.findByBusinessIds(businessIds, pageNumber, relatedHistoryPageSize),
                     relatedHistoryPageSize)
@@ -291,6 +302,58 @@ public class ProgressItemController {
             }
         }
         return false;
+    }
+
+    private void putIfAppealReviewHistory(LinkedHashMap<Long, SysRequestHistory> sink,
+                                          SysRequestHistory history,
+                                          Long appealId) {
+        if (!isAppealReviewHistoryForAppeal(history, appealId)) {
+            return;
+        }
+        putIfPresent(sink, history);
+    }
+
+    private boolean isAppealReviewHistoryForAppeal(SysRequestHistory history, Long appealId) {
+        if (history == null || appealId == null || appealId <= 0) {
+            return false;
+        }
+        String businessType = normalizeBusinessType(history.getBusinessType());
+        if (!businessType.startsWith("APPEAL_REVIEW_")) {
+            return false;
+        }
+        Long requestAppealId = parseRequestParamId(history.getRequestParams(), "appealId");
+        if (appealId.equals(requestAppealId)) {
+            return true;
+        }
+        String requestUrl = history.getRequestUrl();
+        return requestUrl != null && requestUrl.contains("/api/appeals/" + appealId + "/reviews");
+    }
+
+    private Long parseRequestParamId(String requestParams, String key) {
+        if (requestParams == null || requestParams.isBlank() || key == null || key.isBlank()) {
+            return null;
+        }
+        String normalizedKey = key.trim();
+        for (String segment : requestParams.split(",")) {
+            if (segment == null || segment.isBlank()) {
+                continue;
+            }
+            String trimmed = segment.trim();
+            int separatorIndex = trimmed.indexOf('=');
+            if (separatorIndex <= 0 || separatorIndex == trimmed.length() - 1) {
+                continue;
+            }
+            String currentKey = trimmed.substring(0, separatorIndex).trim();
+            if (!normalizedKey.equals(currentKey)) {
+                continue;
+            }
+            try {
+                return Long.parseLong(trimmed.substring(separatorIndex + 1).trim());
+            } catch (NumberFormatException ex) {
+                return null;
+            }
+        }
+        return null;
     }
 
     private void registerBusinessId(LinkedHashMap<String, LinkedHashSet<Long>> relatedBusinessIds,

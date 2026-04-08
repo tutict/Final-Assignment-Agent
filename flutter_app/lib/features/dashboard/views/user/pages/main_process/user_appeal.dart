@@ -5,14 +5,18 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:final_assignment_front/features/model/appeal_record.dart';
 import 'package:final_assignment_front/features/api/appeal_management_controller_api.dart';
+import 'package:final_assignment_front/features/dashboard/controllers/progress_controller.dart';
+import 'package:final_assignment_front/features/dashboard/views/shared/components/progress_detail.dart';
 import 'package:final_assignment_front/features/api/driver_information_controller_api.dart';
 import 'package:final_assignment_front/features/api/offense_information_controller_api.dart';
 import 'package:final_assignment_front/features/api/user_management_controller_api.dart';
 import 'package:final_assignment_front/features/model/driver_information.dart';
 import 'package:final_assignment_front/features/model/offense_information.dart';
+import 'package:final_assignment_front/features/model/progress_item.dart';
 import 'package:final_assignment_front/features/model/user_management.dart';
 import 'package:final_assignment_front/i18n/appeal_localizers.dart';
 import 'package:final_assignment_front/i18n/personal_field_localizers.dart';
+import 'package:final_assignment_front/i18n/progress_localizers.dart';
 import 'package:final_assignment_front/i18n/status_localizers.dart';
 import 'package:final_assignment_front/utils/helpers/role_utils.dart';
 import 'package:get/get.dart';
@@ -954,6 +958,7 @@ class UserAppealDetailPage extends StatefulWidget {
 class _UserAppealDetailPageState extends State<UserAppealDetailPage> {
   final AppealManagementControllerApi _appealApi =
       AppealManagementControllerApi();
+  late final ProgressController _progressController;
   final UserDashboardController? controller =
       Get.isRegistered<UserDashboardController>()
           ? Get.find<UserDashboardController>()
@@ -963,15 +968,22 @@ class _UserAppealDetailPageState extends State<UserAppealDetailPage> {
   final TextEditingController _evidenceDescriptionController =
       TextEditingController();
   final TextEditingController _evidenceUrlsController = TextEditingController();
+  List<ProgressItem> _relatedProgressItems = const [];
   late AppealRecordModel _appeal;
+  bool _isLoadingRelatedProgress = false;
   bool _isSubmittingAction = false;
+  String _relatedProgressError = '';
 
   @override
   void initState() {
     super.initState();
     _appeal = widget.appeal;
+    _progressController = Get.isRegistered<ProgressController>()
+        ? Get.find<ProgressController>()
+        : Get.put(ProgressController());
     _syncSupplementDraft(_appeal);
     _initializeApi();
+    _loadRelatedProgress();
   }
 
   @override
@@ -1029,6 +1041,61 @@ class _UserAppealDetailPageState extends State<UserAppealDetailPage> {
 
   bool _isAwaitingUserAction() {
     return _isAcceptanceNeedSupplement() || _isAcceptanceRejected();
+  }
+
+  Future<void> _loadRelatedProgress() async {
+    final appealId = _appeal.appealId;
+    if (appealId == null) {
+      setState(() {
+        _relatedProgressItems = const [];
+        _relatedProgressError = '';
+        _isLoadingRelatedProgress = false;
+      });
+      return;
+    }
+
+    setState(() {
+      _isLoadingRelatedProgress = true;
+      _relatedProgressError = '';
+    });
+    try {
+      await _progressController.fetchProgress();
+      final items = _progressController.progressItems.toList(growable: false);
+      final related = items
+          .where((item) => _isRelatedProgressItem(item, appealId))
+          .toList()
+        ..sort((left, right) => right.submitTime.compareTo(left.submitTime));
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _relatedProgressItems = related;
+      });
+    } catch (e) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _relatedProgressError = 'progress.error.fetchFailed'.tr;
+      });
+      developer.log('Failed to load related progress: $e');
+    } finally {
+      if (mounted) {
+        setState(() => _isLoadingRelatedProgress = false);
+      }
+    }
+  }
+
+  bool _isRelatedProgressItem(ProgressItem item, int appealId) {
+    if (item.appealId == appealId) {
+      return true;
+    }
+    final businessType = (item.businessType ?? '').trim().toUpperCase();
+    if (businessType.startsWith('APPEAL_') && item.businessId == appealId) {
+      return true;
+    }
+    final requestUrl = (item.requestUrl ?? '').trim();
+    return requestUrl.contains('/api/appeals/$appealId/');
   }
 
   void _syncSupplementDraft(AppealRecordModel appeal) {
@@ -1131,6 +1198,7 @@ class _UserAppealDetailPageState extends State<UserAppealDetailPage> {
         _appeal = updated;
         _syncSupplementDraft(updated);
       });
+      await _loadRelatedProgress();
       _showSnackBar(successMessage);
     } catch (e) {
       _showSnackBar(
@@ -1157,6 +1225,100 @@ class _UserAppealDetailPageState extends State<UserAppealDetailPage> {
             ? themeData.colorScheme.error
             : themeData.colorScheme.primary,
       ),
+    );
+  }
+
+  Widget _buildRelatedProgressSection(ThemeData themeData) {
+    if (_isLoadingRelatedProgress) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 24.0),
+        child: Center(child: CupertinoActivityIndicator()),
+      );
+    }
+    if (_relatedProgressError.isNotEmpty) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 12.0),
+        child: Text(
+          _relatedProgressError,
+          style: themeData.textTheme.bodyMedium?.copyWith(
+            color: themeData.colorScheme.error,
+          ),
+        ),
+      );
+    }
+    if (_relatedProgressItems.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 12.0),
+        child: Text(
+          'appeal.progress.empty'.tr,
+          style: themeData.textTheme.bodyMedium?.copyWith(
+            color: themeData.colorScheme.onSurfaceVariant,
+          ),
+        ),
+      );
+    }
+    return Column(
+      children: _relatedProgressItems
+          .map(
+            (item) => Card(
+              margin: const EdgeInsets.only(top: 12),
+              color: themeData.colorScheme.surfaceContainerLowest,
+              child: ListTile(
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 8,
+                ),
+                title: Text(
+                  item.title,
+                  style: themeData.textTheme.titleSmall?.copyWith(
+                    color: themeData.colorScheme.onSurface,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                subtitle: Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'appeal.progress.summary'.trParams({
+                          'status': localizeProgressStatus(item.status),
+                          'time': formatProgressDateTime(item.submitTime),
+                        }),
+                        style: themeData.textTheme.bodySmall?.copyWith(
+                          color: themeData.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                      if ((item.details ?? '').trim().isNotEmpty) ...[
+                        const SizedBox(height: 6),
+                        Text(
+                          item.details!.trim(),
+                          style: themeData.textTheme.bodySmall?.copyWith(
+                            color: themeData.colorScheme.onSurfaceVariant,
+                          ),
+                          maxLines: 3,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                trailing: Icon(
+                  Icons.chevron_right,
+                  color: themeData.colorScheme.onSurfaceVariant,
+                ),
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => ProgressDetailPage(item: item),
+                    ),
+                  );
+                },
+              ),
+            ),
+          )
+          .toList(),
     );
   }
 
@@ -1378,13 +1540,7 @@ class _UserAppealDetailPageState extends State<UserAppealDetailPage> {
                             fontWeight: FontWeight.bold,
                           ),
                         ),
-                        const SizedBox(height: 12),
-                        Text(
-                          'appeal.note.readonly'.tr,
-                          style: themeData.textTheme.bodyMedium?.copyWith(
-                            color: themeData.colorScheme.onSurfaceVariant,
-                          ),
-                        ),
+                        _buildRelatedProgressSection(themeData),
                       ],
                     ),
                   ),

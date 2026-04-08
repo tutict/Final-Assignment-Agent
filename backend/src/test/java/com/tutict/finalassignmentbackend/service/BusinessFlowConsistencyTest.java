@@ -4452,6 +4452,53 @@ class BusinessFlowConsistencyTest {
     }
 
     @Test
+    void listCurrentUserProgressShouldIncludeAppealReviewHistoriesLinkedByAppealId() {
+        SysRequestHistoryService sysRequestHistoryService = Mockito.mock(SysRequestHistoryService.class);
+        CurrentUserTrafficSupportService currentUserTrafficSupportService = Mockito.mock(CurrentUserTrafficSupportService.class);
+        PaymentRecordService paymentRecordService = Mockito.mock(PaymentRecordService.class);
+
+        ProgressItemController controller = new ProgressItemController(
+                sysRequestHistoryService,
+                currentUserTrafficSupportService,
+                paymentRecordService);
+
+        SysUser currentUser = new SysUser();
+        currentUser.setUserId(42L);
+        when(currentUserTrafficSupportService.requireCurrentUser()).thenReturn(currentUser);
+        when(currentUserTrafficSupportService.getCurrentUserIdCardNumber())
+                .thenThrow(new IllegalStateException("Current user profile has no ID card number"));
+
+        AppealRecord appealRecord = new AppealRecord();
+        appealRecord.setAppealId(501L);
+        when(currentUserTrafficSupportService.listCurrentUserAppeals(1, 100)).thenReturn(List.of(appealRecord));
+        when(currentUserTrafficSupportService.listCurrentUserAppeals(2, 100)).thenReturn(List.of());
+        when(currentUserTrafficSupportService.listCurrentUserFines(1, 100)).thenReturn(List.of());
+        when(currentUserTrafficSupportService.listCurrentUserOffenses(1, 100)).thenReturn(List.of());
+        when(currentUserTrafficSupportService.listCurrentUserDeductions(1, 100)).thenReturn(List.of());
+
+        when(sysRequestHistoryService.findByUserId(42L, 1, 100)).thenReturn(List.of());
+        when(sysRequestHistoryService.findByBusinessIds(any(), eq(1), eq(200))).thenReturn(List.of());
+
+        SysRequestHistory reviewHistory = new SysRequestHistory();
+        reviewHistory.setId(9001L);
+        reviewHistory.setBusinessType("APPEAL_REVIEW_CREATE");
+        reviewHistory.setBusinessId(7001L);
+        reviewHistory.setRequestUrl("/api/appeals/501/reviews");
+        reviewHistory.setRequestParams("appealId=501,reviewLevel=FIRST");
+        reviewHistory.setUpdatedAt(LocalDateTime.of(2026, 1, 6, 10, 0));
+        when(sysRequestHistoryService.searchByRequestUrlPrefix("/api/appeals/501/reviews", 1, 200))
+                .thenReturn(List.of(reviewHistory));
+        when(sysRequestHistoryService.searchByRequestUrlPrefix("/api/appeals/501/reviews", 2, 200))
+                .thenReturn(List.of());
+
+        ResponseEntity<List<SysRequestHistory>> response = controller.listCurrentUserProgress(1, 20);
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        assertEquals(1, response.getBody().size());
+        assertEquals(9001L, response.getBody().get(0).getId());
+    }
+
+    @Test
     void createPaymentRecordShouldMarkPartialWhenPaymentDoesNotClearFine() {
         PaymentRecordMapper paymentRecordMapper = Mockito.mock(PaymentRecordMapper.class);
         SysRequestHistoryMapper requestHistoryMapper = Mockito.mock(SysRequestHistoryMapper.class);
