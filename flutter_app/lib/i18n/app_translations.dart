@@ -1316,16 +1316,29 @@ class AppTranslations extends Translations {
     'appealAdmin.card.time': 'Time: @value',
     'appealAdmin.result.approved': 'Appeal approved',
     'appealAdmin.success.approved': 'The appeal has been approved.',
-    'appealAdmin.success.rejected':
-        'The appeal has been rejected. The user can submit again.',
+    'appealAdmin.success.acceptanceRejected':
+        'The appeal was not accepted. The user can resubmit after fixing the issue.',
+    'appealAdmin.success.supplementRequested':
+        'Supplemental materials have been requested for this appeal.',
+    'appealAdmin.success.supplementCompleted':
+        'The supplemental materials were marked complete and sent back for acceptance review.',
+    'appealAdmin.success.resubmitted':
+        'The appeal has been resubmitted for acceptance review.',
+    'appealAdmin.success.finalRejected': 'The appeal review has been rejected.',
     'appealAdmin.dialog.rejectTitle': 'Reject appeal',
+    'appealAdmin.dialog.requestSupplementTitle':
+        'Request supplemental materials',
     'appealAdmin.field.rejectionReason': 'Rejection reason',
+    'appealAdmin.field.supplementReason': 'Supplement request details',
     'appealAdmin.validation.rejectionReasonRequired':
         'Please enter a rejection reason.',
+    'appealAdmin.validation.supplementReasonRequired':
+        'Please enter the required supplemental materials.',
     'appealAdmin.action.approve': 'Approve',
     'appealAdmin.action.reject': 'Reject',
     'appealAdmin.action.relogin': 'Sign in again',
     'appealAdmin.action.confirmReject': 'Confirm rejection',
+    'appealAdmin.action.confirmRequestSupplement': 'Confirm request',
     'appealAdmin.note.alreadyProcessed':
         'This appeal has already been processed and cannot be reviewed again.',
     'appealAdmin.note.adminApprovalOnly':
@@ -3245,16 +3258,31 @@ class AppTranslations extends Translations {
     'appealAdmin.result.approved': '\u7533\u8bc9\u5df2\u901a\u8fc7',
     'appealAdmin.success.approved':
         '\u7533\u8bc9\u5df2\u5ba1\u6279\u901a\u8fc7',
-    'appealAdmin.success.rejected':
-        '\u7533\u8bc9\u5df2\u9a73\u56de\uff0c\u7528\u6237\u53ef\u91cd\u65b0\u63d0\u4ea4',
+    'appealAdmin.success.acceptanceRejected':
+        '\u7533\u8bc9\u672a\u88ab\u53d7\u7406\uff0c\u7528\u6237\u4fee\u6539\u540e\u53ef\u91cd\u65b0\u63d0\u4ea4',
+    'appealAdmin.success.supplementRequested':
+        '\u5df2\u8981\u6c42\u7533\u8bc9\u4eba\u8865\u5145\u6750\u6599',
+    'appealAdmin.success.supplementCompleted':
+        '\u5df2\u6807\u8bb0\u8865\u5145\u5b8c\u6210\uff0c\u7533\u8bc9\u5df2\u9000\u56de\u5f85\u53d7\u7406',
+    'appealAdmin.success.resubmitted':
+        '\u7533\u8bc9\u5df2\u91cd\u65b0\u63d0\u4ea4\u5f85\u53d7\u7406',
+    'appealAdmin.success.finalRejected':
+        '\u7533\u8bc9\u7ec8\u5ba1\u5df2\u9a73\u56de',
     'appealAdmin.dialog.rejectTitle': '\u9a73\u56de\u7533\u8bc9',
+    'appealAdmin.dialog.requestSupplementTitle':
+        '\u8981\u6c42\u8865\u5145\u6750\u6599',
     'appealAdmin.field.rejectionReason': '\u9a73\u56de\u539f\u56e0',
+    'appealAdmin.field.supplementReason':
+        '\u8865\u5145\u8981\u6c42\u8bf4\u660e',
     'appealAdmin.validation.rejectionReasonRequired':
         '\u8bf7\u586b\u5199\u9a73\u56de\u539f\u56e0',
+    'appealAdmin.validation.supplementReasonRequired':
+        '\u8bf7\u586b\u5199\u9700\u8981\u8865\u5145\u7684\u6750\u6599\u8bf4\u660e',
     'appealAdmin.action.approve': '\u901a\u8fc7',
     'appealAdmin.action.reject': '\u9a73\u56de',
     'appealAdmin.action.relogin': '\u91cd\u65b0\u767b\u5f55',
     'appealAdmin.action.confirmReject': '\u786e\u8ba4\u9a73\u56de',
+    'appealAdmin.action.confirmRequestSupplement': '\u786e\u8ba4\u8981\u6c42',
     'appealAdmin.note.alreadyProcessed':
         '\u6b64\u7533\u8bc9\u5df2\u5904\u7406\uff0c\u65e0\u6cd5\u518d\u6b21\u5ba1\u6279',
     'appealAdmin.note.adminApprovalOnly':

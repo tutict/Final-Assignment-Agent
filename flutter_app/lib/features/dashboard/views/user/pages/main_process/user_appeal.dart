@@ -1,6 +1,5 @@
 // ignore_for_file: use_build_context_synchronously
 import 'dart:convert';
-import 'package:final_assignment_front/features/dashboard/controllers/progress_controller.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -10,10 +9,12 @@ import 'package:final_assignment_front/features/api/driver_information_controlle
 import 'package:final_assignment_front/features/api/offense_information_controller_api.dart';
 import 'package:final_assignment_front/features/api/user_management_controller_api.dart';
 import 'package:final_assignment_front/features/model/driver_information.dart';
+import 'package:final_assignment_front/features/model/offense_information.dart';
 import 'package:final_assignment_front/features/model/user_management.dart';
 import 'package:final_assignment_front/i18n/appeal_localizers.dart';
-import 'package:final_assignment_front/i18n/progress_localizers.dart';
+import 'package:final_assignment_front/i18n/personal_field_localizers.dart';
 import 'package:final_assignment_front/i18n/status_localizers.dart';
+import 'package:final_assignment_front/utils/helpers/role_utils.dart';
 import 'package:get/get.dart';
 import 'package:final_assignment_front/features/dashboard/controllers/user_dashboard_screen_controller.dart';
 import 'package:final_assignment_front/features/dashboard/views/shared/widgets/dashboard_page_template.dart';
@@ -31,6 +32,8 @@ class UserAppealPage extends StatefulWidget {
 }
 
 class _UserAppealPageState extends State<UserAppealPage> {
+  static const int _pageSize = 100;
+
   late AppealManagementControllerApi appealApi;
   late DriverInformationControllerApi driverApi;
   final OffenseInformationControllerApi offenseApi =
@@ -42,7 +45,7 @@ class _UserAppealPageState extends State<UserAppealPage> {
   bool _isUser = false;
   String _errorMessage = '';
   late ScrollController _scrollController;
-  List<dynamic> _offenseCache = [];
+  List<OffenseInformation> _offenseCache = [];
   String? _currentDriverName;
 
   DateTime? _startTime;
@@ -82,20 +85,20 @@ class _UserAppealPageState extends State<UserAppealPage> {
       await offenseApi.initializeWithJwt();
       await userApi.initializeWithJwt();
 
-      _currentDriverName = prefs.getString('driverName');
-      if (_currentDriverName == null) {
-        _currentDriverName = await _fetchDriverName(jwtToken);
-        if (_currentDriverName == null) {
-          throw Exception('appeal.error.driverNameMissingRelogin'.tr);
-        }
+      _currentDriverName = await _fetchDriverName();
+      if (_currentDriverName != null && _currentDriverName!.isNotEmpty) {
         await prefs.setString('driverName', _currentDriverName!);
+        await prefs.setString('displayName', _currentDriverName!);
         developer.log('Fetched and stored driver name: $_currentDriverName');
+      } else {
+        _currentDriverName = prefs.getString('driverName') ??
+            prefs.getString('displayName') ??
+            prefs.getString('userName');
       }
       developer.log('Current Driver Name: $_currentDriverName');
 
       final decodedJwt = _decodeJwt(jwtToken);
-      final roles = decodedJwt['roles']?.toString().split(',') ?? [];
-      _isUser = roles.contains('USER');
+      _isUser = hasAnyRole(decodedJwt['roles'], const ['USER']);
       if (!_isUser) {
         throw Exception('appeal.error.userOnly'.tr);
       }
@@ -123,47 +126,16 @@ class _UserAppealPageState extends State<UserAppealPage> {
     }
   }
 
-  Future<String?> _fetchDriverName(String jwtToken) async {
+  Future<String?> _fetchDriverName() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final storedUsername = prefs.getString('userName');
-      Map<String, dynamic>? decoded;
-      try {
-        decoded = _decodeJwt(jwtToken);
-      } catch (_) {}
-      final username = storedUsername?.isNotEmpty == true
-          ? storedUsername!
-          : decoded?['sub']?.toString();
-      if (username == null || username.isEmpty) {
-        throw Exception('appeal.error.currentUserMissing'.tr);
-      }
-      await userApi.initializeWithJwt();
-      final userData =
-          await userApi.apiUsersSearchUsernameGet(username: username);
-      if (userData == null || userData.userId == null) {
-        throw Exception('personal.error.currentUserNotFound'.tr);
-      }
-      final int userId = userData.userId!;
-
-      await driverApi.initializeWithJwt();
-      var driverInfo = await driverApi.apiDriversDriverIdGet(driverId: userId);
-      if (driverInfo == null) {
-        driverInfo = DriverInformation(
-          driverId: userId,
-          name: userData.username ?? 'common.unknown'.tr,
-          contactNumber: userData.contactNumber ?? '',
-          idCardNumber: '',
-          driverLicenseNumber:
-              '${DateTime.now().millisecondsSinceEpoch.toString().substring(6)}${(1000 + (DateTime.now().millisecondsSinceEpoch % 9000)).toString()}',
-        );
-        await driverApi.apiDriversPost(
-          driverInformation: driverInfo,
-          idempotencyKey: generateIdempotencyKey(),
-        );
-        driverInfo = await driverApi.apiDriversDriverIdGet(driverId: userId);
-      }
-      final driverName =
-          driverInfo?.name ?? userData.username ?? 'common.unknown'.tr;
+      final userData = await userApi.apiUsersMeGet();
+      final driverInfo = await driverApi.apiDriversMeGet();
+      final driverName = driverInfo?.name ??
+          prefs.getString('displayName') ??
+          prefs.getString('driverName') ??
+          userData?.realName ??
+          userData?.username;
       developer.log('Driver name from API: $driverName');
       return driverName;
     } catch (e) {
@@ -174,17 +146,10 @@ class _UserAppealPageState extends State<UserAppealPage> {
 
   Future<void> _checkUserOffenses() async {
     try {
-      if (_currentDriverName == null) {
-        throw Exception('appeal.error.driverNameNotFound'.tr);
-      }
-      final offenses = await offenseApi.apiOffensesByDriverNameGet(
-        query: _currentDriverName!,
-        page: 1,
-        size: 20,
-      );
+      final offenses = await _fetchAllUserOffenses();
       developer.log('Fetched offenses: ${offenses.length}');
       setState(() {
-        _offenseCache = offenses.map((o) => o.toJson()).toList();
+        _offenseCache = offenses;
       });
     } catch (e) {
       developer.log('Error checking user offenses: $e');
@@ -195,42 +160,32 @@ class _UserAppealPageState extends State<UserAppealPage> {
     }
   }
 
-  Future<List<dynamic>> _fetchUserOffenses() async {
+  Future<List<OffenseInformation>> _fetchUserOffenses() async {
     try {
-      if (_currentDriverName == null) {
-        throw Exception('appeal.error.driverNameNotFound'.tr);
+      if (_offenseCache.isNotEmpty) {
+        return _offenseCache;
       }
-      _offenseCache = await offenseApi.apiOffensesByDriverNameGet(
-        query: _currentDriverName!,
-        page: 1,
-        size: 20,
-      );
+      _offenseCache = await _fetchAllUserOffenses();
       developer.log('Fetched offenses for dialog: $_offenseCache');
-      return _offenseCache.map((o) => o.toJson()).toList();
+      return _offenseCache;
     } catch (e) {
       developer.log('Error fetching user offenses: $e');
-      return [];
+      return const [];
     }
   }
 
   Future<UserManagement?> _fetchUserManagement() async {
     try {
-      await userApi.initializeWithJwt();
-      final prefs = await SharedPreferences.getInstance();
-      final storedUsername = prefs.getString('userName');
-      if (storedUsername == null || storedUsername.isEmpty) {
-        throw Exception('appeal.error.usernameMissing'.tr);
-      }
-      return await userApi.apiUsersSearchUsernameGet(username: storedUsername);
+      return await userApi.apiUsersMeGet();
     } catch (e) {
       developer.log('Failed to fetch user info: $e');
       return null;
     }
   }
 
-  Future<DriverInformation?> _fetchDriverInformation(int userId) async {
+  Future<DriverInformation?> _fetchDriverInformation() async {
     try {
-      return await driverApi.apiDriversDriverIdGet(driverId: userId);
+      return await driverApi.apiDriversMeGet();
     } catch (e) {
       developer.log('Failed to fetch driver info: $e');
       return null;
@@ -243,10 +198,6 @@ class _UserAppealPageState extends State<UserAppealPage> {
       _errorMessage = '';
     });
     try {
-      if (_currentDriverName == null) {
-        throw Exception('appeal.error.driverNameNotFound'.tr);
-      }
-
       if (resetFilters) {
         _startTime = null;
         _endTime = null;
@@ -254,7 +205,7 @@ class _UserAppealPageState extends State<UserAppealPage> {
       }
 
       final offenseIds =
-          _offenseCache.map((o) => o['offenseId']).whereType<int>().toSet();
+          _offenseCache.map((o) => o.offenseId).whereType<int>().toSet();
       if (offenseIds.isEmpty) {
         setState(() {
           _appeals = [];
@@ -263,21 +214,12 @@ class _UserAppealPageState extends State<UserAppealPage> {
         });
         return;
       }
-      final List<AppealRecordModel> fetched = [];
-      for (final id in offenseIds) {
-        try {
-          final records =
-              await appealApi.apiAppealsGet(offenseId: id, page: 1, size: 50);
-          fetched.addAll(records);
-        } catch (e) {
-          developer.log('Failed to fetch appeals for offense $id: $e');
-        }
-      }
+      final fetched = await _fetchAllUserAppeals();
 
       final searchText = _searchController.text.trim().toLowerCase();
       final filtered = fetched.where((appeal) {
-        final matchesName = appeal.appellantName == null ||
-            appeal.appellantName == _currentDriverName;
+        final matchesOffense =
+            appeal.offenseId != null && offenseIds.contains(appeal.offenseId);
         final matchesSearch = searchText.isEmpty
             ? true
             : (appeal.appealReason ?? '').toLowerCase().contains(searchText);
@@ -288,7 +230,7 @@ class _UserAppealPageState extends State<UserAppealPage> {
               !time.isBefore(_startTime!) &&
               !time.isAfter(_endTime!);
         }
-        return matchesName && matchesSearch && matchesRange;
+        return matchesOffense && matchesSearch && matchesRange;
       }).toList();
 
       setState(() {
@@ -310,6 +252,40 @@ class _UserAppealPageState extends State<UserAppealPage> {
     }
   }
 
+  Future<List<OffenseInformation>> _fetchAllUserOffenses() async {
+    final offenses = <OffenseInformation>[];
+    var page = 1;
+    while (true) {
+      final pageItems = await offenseApi.apiOffensesMeGet(
+        page: page,
+        size: _pageSize,
+      );
+      offenses.addAll(pageItems);
+      if (pageItems.length < _pageSize) {
+        break;
+      }
+      page++;
+    }
+    return offenses;
+  }
+
+  Future<List<AppealRecordModel>> _fetchAllUserAppeals() async {
+    final appeals = <AppealRecordModel>[];
+    var page = 1;
+    while (true) {
+      final pageItems = await appealApi.apiAppealsMeGet(
+        page: page,
+        size: _pageSize,
+      );
+      appeals.addAll(pageItems);
+      if (pageItems.length < _pageSize) {
+        break;
+      }
+      page++;
+    }
+    return appeals;
+  }
+
   Future<List<String>> _fetchAutocompleteSuggestions(String prefix) async {
     final lowerPrefix = prefix.toLowerCase();
     return _appeals
@@ -318,11 +294,21 @@ class _UserAppealPageState extends State<UserAppealPage> {
         .toList();
   }
 
+  String _resolveDisplayStatus(AppealRecordModel appeal) {
+    final acceptance = normalizeAppealStatusCode(appeal.acceptanceStatus);
+    if (acceptance == appealPendingStatusCode() ||
+        acceptance == appealRejectedStatusCode() ||
+        acceptance == 'Need_Supplement') {
+      return localizeAppealStatus(appeal.acceptanceStatus);
+    }
+    return localizeAppealStatus(appeal.processStatus);
+  }
+
   Future<void> _submitAppeal(
       AppealRecordModel appeal, String idempotencyKey) async {
     try {
       developer.log('Submitting appeal with idempotencyKey: $idempotencyKey');
-      await appealApi.apiAppealsPost(
+      await appealApi.apiAppealsMePost(
           appealRecord: appeal, idempotencyKey: idempotencyKey);
       developer.log('Appeal submitted successfully: ${appeal.toJson()}');
       _showSnackBar('appeal.success.submitted'.tr);
@@ -341,16 +327,16 @@ class _UserAppealPageState extends State<UserAppealPage> {
     final TextEditingController nameController =
         TextEditingController(text: _currentDriverName ?? '');
     final user = await _fetchUserManagement();
-    final int? userId = user?.userId;
-    final driverInfo =
-        userId != null ? await _fetchDriverInformation(userId) : null;
+    final driverInfo = await _fetchDriverInformation();
     final TextEditingController idCardController =
         TextEditingController(text: driverInfo?.idCardNumber ?? '');
     final TextEditingController contactController = TextEditingController(
         text: driverInfo?.contactNumber ?? user?.contactNumber ?? '');
     final TextEditingController reasonController = TextEditingController();
+    final formKey = GlobalKey<FormState>();
     int? selectedOffenseId;
     bool isSubmitting = false;
+    AutovalidateMode autovalidateMode = AutovalidateMode.disabled;
 
     final bool isNameReadOnly = nameController.text.isNotEmpty;
     final bool isIdCardReadOnly = idCardController.text.isNotEmpty;
@@ -367,236 +353,268 @@ class _UserAppealPageState extends State<UserAppealPage> {
       builder: (ctx) => Obx(() {
         final themeData =
             controller?.currentBodyTheme.value ?? Theme.of(context);
-        return Dialog(
-          backgroundColor: themeData.colorScheme.surfaceContainer,
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16.0)),
-          child: ConstrainedBox(
-            constraints:
-                const BoxConstraints(maxWidth: 300.0, minHeight: 200.0),
-            child: Padding(
-              padding: const EdgeInsets.all(12.0),
-              child: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Text(
-                      'appeal.dialog.submitTitle'.tr,
-                      style: themeData.textTheme.titleMedium?.copyWith(
-                        color: themeData.colorScheme.onSurface,
-                        fontWeight: FontWeight.bold,
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 12.0),
-                    DropdownButtonFormField<int>(
-                      decoration: InputDecoration(
-                        labelText: 'appeal.form.offense'.tr,
-                        labelStyle: TextStyle(
-                            color: themeData.colorScheme.onSurfaceVariant),
-                        filled: true,
-                        fillColor: themeData.colorScheme.surfaceContainerLowest,
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8.0),
-                          borderSide: BorderSide(
-                              color: themeData.colorScheme.outline
-                                  .withValues(alpha: 0.3)),
-                        ),
-                      ),
-                      items: offenses.map((offense) {
-                        return DropdownMenuItem<int>(
-                          value: offense['offenseId'],
-                          child: Text('appeal.form.offenseOption'.trParams({
-                            'id': '${offense['offenseId']}',
-                            'type':
-                                '${offense['offenseType'] ?? 'appeal.value.noDescription'.tr}',
-                          })),
-                        );
-                      }).toList(),
-                      onChanged: (value) => selectedOffenseId = value,
-                      validator: (value) => value == null
-                          ? 'appeal.validation.offenseRequired'.tr
-                          : null,
-                    ),
-                    const SizedBox(height: 12.0),
-                    TextField(
-                      controller: nameController,
-                      readOnly: isNameReadOnly,
-                      decoration: InputDecoration(
-                        labelText: 'appeal.form.appellantName'.tr,
-                        labelStyle: TextStyle(
-                            color: themeData.colorScheme.onSurfaceVariant),
-                        filled: true,
-                        fillColor: isNameReadOnly
-                            ? themeData.colorScheme.surfaceContainerHighest
-                                .withValues(alpha: 0.5)
-                            : themeData.colorScheme.surfaceContainerLowest,
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8.0),
-                          borderSide: BorderSide(
-                              color: themeData.colorScheme.outline
-                                  .withValues(alpha: 0.3)),
-                        ),
-                        suffixIcon: isNameReadOnly
-                            ? Icon(Icons.lock,
-                                size: 18, color: themeData.colorScheme.primary)
-                            : null,
-                      ),
-                      style: TextStyle(color: themeData.colorScheme.onSurface),
-                    ),
-                    const SizedBox(height: 12.0),
-                    TextField(
-                      controller: idCardController,
-                      readOnly: isIdCardReadOnly,
-                      decoration: InputDecoration(
-                        labelText: 'appeal.form.idCard'.tr,
-                        labelStyle: TextStyle(
-                            color: themeData.colorScheme.onSurfaceVariant),
-                        filled: true,
-                        fillColor: isIdCardReadOnly
-                            ? themeData.colorScheme.surfaceContainerHighest
-                                .withValues(alpha: 0.5)
-                            : themeData.colorScheme.surfaceContainerLowest,
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8.0),
-                          borderSide: BorderSide(
-                              color: themeData.colorScheme.outline
-                                  .withValues(alpha: 0.3)),
-                        ),
-                        suffixIcon: isIdCardReadOnly
-                            ? Icon(Icons.lock,
-                                size: 18, color: themeData.colorScheme.primary)
-                            : null,
-                      ),
-                      keyboardType: TextInputType.number,
-                      style: TextStyle(color: themeData.colorScheme.onSurface),
-                    ),
-                    const SizedBox(height: 12.0),
-                    TextField(
-                      controller: contactController,
-                      readOnly: isContactReadOnly,
-                      decoration: InputDecoration(
-                        labelText: 'appeal.form.contact'.tr,
-                        labelStyle: TextStyle(
-                            color: themeData.colorScheme.onSurfaceVariant),
-                        filled: true,
-                        fillColor: isContactReadOnly
-                            ? themeData.colorScheme.surfaceContainerHighest
-                                .withValues(alpha: 0.5)
-                            : themeData.colorScheme.surfaceContainerLowest,
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8.0),
-                          borderSide: BorderSide(
-                              color: themeData.colorScheme.outline
-                                  .withValues(alpha: 0.3)),
-                        ),
-                        suffixIcon: isContactReadOnly
-                            ? Icon(Icons.lock,
-                                size: 18, color: themeData.colorScheme.primary)
-                            : null,
-                      ),
-                      keyboardType: TextInputType.phone,
-                      style: TextStyle(color: themeData.colorScheme.onSurface),
-                    ),
-                    const SizedBox(height: 12.0),
-                    TextField(
-                      controller: reasonController,
-                      decoration: InputDecoration(
-                        labelText: 'appeal.form.reason'.tr,
-                        labelStyle: TextStyle(
-                            color: themeData.colorScheme.onSurfaceVariant),
-                        filled: true,
-                        fillColor: themeData.colorScheme.surfaceContainerLowest,
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8.0),
-                          borderSide: BorderSide(
-                              color: themeData.colorScheme.outline
-                                  .withValues(alpha: 0.3)),
-                        ),
-                      ),
-                      maxLines: 3,
-                      style: TextStyle(color: themeData.colorScheme.onSurface),
-                    ),
-                    const SizedBox(height: 16.0),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        return StatefulBuilder(
+          builder: (context, dialogSetState) => Dialog(
+            backgroundColor: themeData.colorScheme.surfaceContainer,
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16.0)),
+            child: ConstrainedBox(
+              constraints:
+                  const BoxConstraints(maxWidth: 300.0, minHeight: 200.0),
+              child: Padding(
+                padding: const EdgeInsets.all(12.0),
+                child: Form(
+                  key: formKey,
+                  autovalidateMode: autovalidateMode,
+                  child: SingleChildScrollView(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        TextButton(
-                          onPressed: () => Navigator.pop(ctx),
-                          child: Text(
-                            'common.cancel'.tr,
-                            style: themeData.textTheme.labelMedium?.copyWith(
-                              color: themeData.colorScheme.onSurface,
+                        Text(
+                          'appeal.dialog.submitTitle'.tr,
+                          style: themeData.textTheme.titleMedium?.copyWith(
+                            color: themeData.colorScheme.onSurface,
+                            fontWeight: FontWeight.bold,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 12.0),
+                        DropdownButtonFormField<int>(
+                          initialValue: selectedOffenseId,
+                          decoration: InputDecoration(
+                            labelText: 'appeal.form.offense'.tr,
+                            labelStyle: TextStyle(
+                                color: themeData.colorScheme.onSurfaceVariant),
+                            filled: true,
+                            fillColor:
+                                themeData.colorScheme.surfaceContainerLowest,
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8.0),
+                              borderSide: BorderSide(
+                                  color: themeData.colorScheme.outline
+                                      .withValues(alpha: 0.3)),
                             ),
                           ),
+                          items: offenses.map((offense) {
+                            return DropdownMenuItem<int>(
+                              value: offense.offenseId,
+                              child: Text('appeal.form.offenseOption'.trParams({
+                                'id': '${offense.offenseId}',
+                                'type': offense.offenseType ??
+                                    'appeal.value.noDescription'.tr,
+                              })),
+                            );
+                          }).toList(),
+                          onChanged: (value) {
+                            dialogSetState(() => selectedOffenseId = value);
+                          },
+                          validator: (value) => value == null
+                              ? 'appeal.validation.offenseRequired'.tr
+                              : null,
                         ),
-                        ElevatedButton(
-                          onPressed: isSubmitting
-                              ? null
-                              : () async {
-                                  setState(() => isSubmitting = true);
-                                  final String name =
-                                      nameController.text.trim();
-                                  final String idCard =
-                                      idCardController.text.trim();
-                                  final String contact =
-                                      contactController.text.trim();
-                                  final String reason =
-                                      reasonController.text.trim();
-
-                                  if (selectedOffenseId == null ||
-                                      name.isEmpty ||
-                                      idCard.isEmpty ||
-                                      contact.isEmpty ||
-                                      reason.isEmpty) {
-                                    _showSnackBar(
-                                        'appeal.validation.requiredFields'.tr,
-                                        isError: true);
-                                    setState(() => isSubmitting = false);
-                                    return;
-                                  }
-
-                                  final newAppeal = AppealRecordModel(
-                                    offenseId: selectedOffenseId,
-                                    appellantName: name,
-                                    appellantIdCard: idCard,
-                                    appellantContact: contact,
-                                    appealReason: reason,
-                                    appealTime: DateTime.now(),
-                                    processStatus: appealPendingStatusCode(),
-                                    processResult: '',
-                                  );
-                                  final idempotencyKey =
-                                      generateIdempotencyKey();
-                                  developer.log(
-                                      'Preparing to submit appeal with key: $idempotencyKey');
-                                  await _submitAppeal(
-                                      newAppeal, idempotencyKey);
-                                  setState(() => isSubmitting = false);
-                                  if (mounted) Navigator.pop(ctx);
-                                },
-                          style: themeData.elevatedButtonTheme.style?.copyWith(
-                            backgroundColor: WidgetStateProperty.all(
-                                themeData.colorScheme.primary),
-                            foregroundColor: WidgetStateProperty.all(
-                                themeData.colorScheme.onPrimary),
+                        const SizedBox(height: 12.0),
+                        TextFormField(
+                          controller: nameController,
+                          readOnly: isNameReadOnly,
+                          decoration: InputDecoration(
+                            labelText: 'appeal.form.appellantName'.tr,
+                            labelStyle: TextStyle(
+                                color: themeData.colorScheme.onSurfaceVariant),
+                            filled: true,
+                            fillColor: isNameReadOnly
+                                ? themeData.colorScheme.surfaceContainerHighest
+                                    .withValues(alpha: 0.5)
+                                : themeData.colorScheme.surfaceContainerLowest,
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8.0),
+                              borderSide: BorderSide(
+                                  color: themeData.colorScheme.outline
+                                      .withValues(alpha: 0.3)),
+                            ),
+                            suffixIcon: isNameReadOnly
+                                ? Icon(Icons.lock,
+                                    size: 18,
+                                    color: themeData.colorScheme.primary)
+                                : null,
                           ),
-                          child: isSubmitting
-                              ? const SizedBox(
-                                  width: 20,
-                                  height: 20,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    valueColor: AlwaysStoppedAnimation<Color>(
-                                        Colors.white),
-                                  ),
-                                )
-                              : Text('common.submit'.tr),
+                          validator: (value) => validatePersonalField(
+                            'name',
+                            value: value ?? '',
+                            required: true,
+                          ),
+                          style:
+                              TextStyle(color: themeData.colorScheme.onSurface),
+                        ),
+                        const SizedBox(height: 12.0),
+                        TextFormField(
+                          controller: idCardController,
+                          readOnly: isIdCardReadOnly,
+                          decoration: InputDecoration(
+                            labelText: 'appeal.form.idCard'.tr,
+                            labelStyle: TextStyle(
+                                color: themeData.colorScheme.onSurfaceVariant),
+                            filled: true,
+                            fillColor: isIdCardReadOnly
+                                ? themeData.colorScheme.surfaceContainerHighest
+                                    .withValues(alpha: 0.5)
+                                : themeData.colorScheme.surfaceContainerLowest,
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8.0),
+                              borderSide: BorderSide(
+                                  color: themeData.colorScheme.outline
+                                      .withValues(alpha: 0.3)),
+                            ),
+                            suffixIcon: isIdCardReadOnly
+                                ? Icon(Icons.lock,
+                                    size: 18,
+                                    color: themeData.colorScheme.primary)
+                                : null,
+                          ),
+                          keyboardType: TextInputType.number,
+                          validator: (value) => validatePersonalField(
+                            'idCardNumber',
+                            value: value ?? '',
+                            required: true,
+                          ),
+                          style:
+                              TextStyle(color: themeData.colorScheme.onSurface),
+                        ),
+                        const SizedBox(height: 12.0),
+                        TextFormField(
+                          controller: contactController,
+                          readOnly: isContactReadOnly,
+                          decoration: InputDecoration(
+                            labelText: 'appeal.form.contact'.tr,
+                            labelStyle: TextStyle(
+                                color: themeData.colorScheme.onSurfaceVariant),
+                            filled: true,
+                            fillColor: isContactReadOnly
+                                ? themeData.colorScheme.surfaceContainerHighest
+                                    .withValues(alpha: 0.5)
+                                : themeData.colorScheme.surfaceContainerLowest,
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8.0),
+                              borderSide: BorderSide(
+                                  color: themeData.colorScheme.outline
+                                      .withValues(alpha: 0.3)),
+                            ),
+                            suffixIcon: isContactReadOnly
+                                ? Icon(Icons.lock,
+                                    size: 18,
+                                    color: themeData.colorScheme.primary)
+                                : null,
+                          ),
+                          keyboardType: TextInputType.phone,
+                          validator: (value) => validatePersonalField(
+                            'contactNumber',
+                            value: value ?? '',
+                            required: true,
+                          ),
+                          style:
+                              TextStyle(color: themeData.colorScheme.onSurface),
+                        ),
+                        const SizedBox(height: 12.0),
+                        TextFormField(
+                          controller: reasonController,
+                          decoration: InputDecoration(
+                            labelText: 'appeal.form.reason'.tr,
+                            labelStyle: TextStyle(
+                                color: themeData.colorScheme.onSurfaceVariant),
+                            filled: true,
+                            fillColor:
+                                themeData.colorScheme.surfaceContainerLowest,
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8.0),
+                              borderSide: BorderSide(
+                                  color: themeData.colorScheme.outline
+                                      .withValues(alpha: 0.3)),
+                            ),
+                          ),
+                          maxLength: 500,
+                          maxLines: 3,
+                          validator: (value) =>
+                              validateAppealReasonField(value, required: true),
+                          style:
+                              TextStyle(color: themeData.colorScheme.onSurface),
+                        ),
+                        const SizedBox(height: 16.0),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                          children: [
+                            TextButton(
+                              onPressed: () => Navigator.pop(ctx),
+                              child: Text(
+                                'common.cancel'.tr,
+                                style:
+                                    themeData.textTheme.labelMedium?.copyWith(
+                                  color: themeData.colorScheme.onSurface,
+                                ),
+                              ),
+                            ),
+                            ElevatedButton(
+                              onPressed: isSubmitting
+                                  ? null
+                                  : () async {
+                                      final currentForm = formKey.currentState;
+                                      final isValid =
+                                          currentForm?.validate() ?? false;
+                                      if (!isValid) {
+                                        dialogSetState(() {
+                                          autovalidateMode = AutovalidateMode
+                                              .onUserInteraction;
+                                        });
+                                        return;
+                                      }
+
+                                      dialogSetState(() => isSubmitting = true);
+                                      final newAppeal = AppealRecordModel(
+                                        offenseId: selectedOffenseId,
+                                        appellantName:
+                                            nameController.text.trim(),
+                                        appellantIdCard:
+                                            idCardController.text.trim(),
+                                        appellantContact:
+                                            contactController.text.trim(),
+                                        appealReason:
+                                            reasonController.text.trim(),
+                                        appealTime: DateTime.now(),
+                                      );
+                                      final idempotencyKey =
+                                          generateIdempotencyKey();
+                                      developer.log(
+                                          'Preparing to submit appeal with key: $idempotencyKey');
+                                      await _submitAppeal(
+                                          newAppeal, idempotencyKey);
+                                      dialogSetState(
+                                          () => isSubmitting = false);
+                                      if (mounted) Navigator.pop(ctx);
+                                    },
+                              style:
+                                  themeData.elevatedButtonTheme.style?.copyWith(
+                                backgroundColor: WidgetStateProperty.all(
+                                    themeData.colorScheme.primary),
+                                foregroundColor: WidgetStateProperty.all(
+                                    themeData.colorScheme.onPrimary),
+                              ),
+                              child: isSubmitting
+                                  ? const SizedBox(
+                                      width: 20,
+                                      height: 20,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        valueColor:
+                                            AlwaysStoppedAnimation<Color>(
+                                                Colors.white),
+                                      ),
+                                    )
+                                  : Text('common.submit'.tr),
+                            ),
+                          ],
                         ),
                       ],
                     ),
-                  ],
+                  ),
                 ),
               ),
             ),
@@ -608,7 +626,6 @@ class _UserAppealPageState extends State<UserAppealPage> {
       idCardController.dispose();
       contactController.dispose();
       reasonController.dispose();
-      setState(() => isSubmitting = false);
     });
   }
 
@@ -885,8 +902,8 @@ class _UserAppealPageState extends State<UserAppealPage> {
                                             'appeal.card.summary'.trParams({
                                               'reason': appeal.appealReason ??
                                                   'common.none'.tr,
-                                              'status': localizeAppealStatus(
-                                                  appeal.processStatus),
+                                              'status':
+                                                  _resolveDisplayStatus(appeal),
                                               'time': formatAppealDateTime(
                                                 appeal.appealTime,
                                               ),
@@ -933,30 +950,13 @@ class UserAppealDetailPage extends StatefulWidget {
 }
 
 class _UserAppealDetailPageState extends State<UserAppealDetailPage> {
-  final ProgressController progressController = Get.find<ProgressController>();
-  bool _isLoadingProgress = false;
-
   final UserDashboardController? controller =
       Get.isRegistered<UserDashboardController>()
           ? Get.find<UserDashboardController>()
           : null;
 
-  @override
-  void initState() {
-    super.initState();
-    _fetchProgress();
-  }
-
-  Future<void> _fetchProgress() async {
-    setState(() => _isLoadingProgress = true);
-    try {
-      await progressController.fetchProgress();
-    } finally {
-      if (mounted) setState(() => _isLoadingProgress = false);
-    }
-  }
-
-  Widget _buildDetailRow(String label, String value, ThemeData themeData) {
+  Widget _buildDetailRow(String label, String value, ThemeData themeData,
+      {Color? valueColor}) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8.0),
       child: Row(
@@ -973,133 +973,13 @@ class _UserAppealDetailPageState extends State<UserAppealDetailPage> {
             child: Text(
               value,
               style: themeData.textTheme.bodyMedium?.copyWith(
-                color: themeData.colorScheme.onSurfaceVariant,
+                color: valueColor ?? themeData.colorScheme.onSurfaceVariant,
               ),
             ),
           ),
         ],
       ),
     );
-  }
-
-  void _showSubmitProgressDialog() {
-    final TextEditingController titleController = TextEditingController();
-    final TextEditingController detailsController = TextEditingController();
-
-    showDialog(
-      context: context,
-      builder: (ctx) => Obx(() {
-        final themeData =
-            controller?.currentBodyTheme.value ?? Theme.of(context);
-        return AlertDialog(
-          backgroundColor: themeData.colorScheme.surfaceContainer,
-          title: Text(
-            'appeal.progress.submitTitle'.tr,
-            style: themeData.textTheme.titleLarge?.copyWith(
-              color: themeData.colorScheme.onSurface,
-            ),
-          ),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: titleController,
-                  style: TextStyle(color: themeData.colorScheme.onSurface),
-                  decoration: InputDecoration(
-                    labelText: 'appeal.progress.title'.tr,
-                    labelStyle: TextStyle(
-                        color: themeData.colorScheme.onSurfaceVariant),
-                    filled: true,
-                    fillColor: themeData.colorScheme.surfaceContainerLowest,
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    enabledBorder: OutlineInputBorder(
-                      borderSide: BorderSide(
-                          color: themeData.colorScheme.outline
-                              .withValues(alpha: 0.3)),
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderSide: BorderSide(
-                          color: themeData.colorScheme.primary, width: 1.5),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: detailsController,
-                  style: TextStyle(color: themeData.colorScheme.onSurface),
-                  decoration: InputDecoration(
-                    labelText: 'appeal.progress.detailsOptional'.tr,
-                    labelStyle: TextStyle(
-                        color: themeData.colorScheme.onSurfaceVariant),
-                    filled: true,
-                    fillColor: themeData.colorScheme.surfaceContainerLowest,
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    enabledBorder: OutlineInputBorder(
-                      borderSide: BorderSide(
-                          color: themeData.colorScheme.outline
-                              .withValues(alpha: 0.3)),
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderSide: BorderSide(
-                          color: themeData.colorScheme.primary, width: 1.5),
-                    ),
-                  ),
-                  maxLines: 3,
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: Text(
-                'common.cancel'.tr,
-                style: themeData.textTheme.labelMedium?.copyWith(
-                  color: themeData.colorScheme.onSurface,
-                ),
-              ),
-            ),
-            ElevatedButton(
-              onPressed: () async {
-                if (titleController.text.isEmpty) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('appeal.progress.titleRequired'.tr),
-                      backgroundColor: themeData.colorScheme.error,
-                    ),
-                  );
-                  return;
-                }
-                await progressController.submitProgress(
-                  titleController.text,
-                  detailsController.text.isNotEmpty
-                      ? detailsController.text
-                      : null,
-                  appealId: widget.appeal.appealId,
-                );
-                Navigator.pop(ctx);
-                _fetchProgress();
-              },
-              style: themeData.elevatedButtonTheme.style?.copyWith(
-                backgroundColor:
-                    WidgetStateProperty.all(themeData.colorScheme.primary),
-                foregroundColor:
-                    WidgetStateProperty.all(themeData.colorScheme.onPrimary),
-              ),
-              child: Text('common.submit'.tr),
-            ),
-          ],
-        );
-      }),
-    ).whenComplete(() {
-      titleController.dispose();
-      detailsController.dispose();
-    });
   }
 
   @override
@@ -1111,16 +991,8 @@ class _UserAppealDetailPageState extends State<UserAppealDetailPage> {
         title: 'appeal.detail.title'.tr,
         pageType: DashboardPageType.user,
         onThemeToggle: controller?.toggleBodyTheme,
-        onRefresh: _fetchProgress,
         bodyIsScrollable: true,
         padding: EdgeInsets.zero,
-        floatingActionButton: FloatingActionButton(
-          onPressed: _showSubmitProgressDialog,
-          backgroundColor: themeData.colorScheme.primary,
-          foregroundColor: themeData.colorScheme.onPrimary,
-          tooltip: 'appeal.progress.submitAction'.tr,
-          child: const Icon(Icons.add),
-        ),
         body: Padding(
           padding: const EdgeInsets.all(16.0),
           child: CupertinoScrollbar(
@@ -1168,12 +1040,30 @@ class _UserAppealDetailPageState extends State<UserAppealDetailPage> {
                             formatAppealDateTime(widget.appeal.appealTime),
                             themeData),
                         _buildDetailRow(
+                          'appeal.detail.acceptanceStatus'.tr,
+                          localizeAppealStatus(widget.appeal.acceptanceStatus),
+                          themeData,
+                          valueColor: isRejectedAppealStatus(
+                                  widget.appeal.acceptanceStatus)
+                              ? themeData.colorScheme.error
+                              : themeData.colorScheme.onSurfaceVariant,
+                        ),
+                        _buildDetailRow(
                             'appeal.detail.status'.tr,
                             localizeAppealStatus(widget.appeal.processStatus),
-                            themeData),
+                            themeData,
+                            valueColor: isApprovedAppealStatus(
+                                    widget.appeal.processStatus)
+                                ? Colors.green
+                                : isRejectedAppealStatus(
+                                        widget.appeal.processStatus)
+                                    ? themeData.colorScheme.error
+                                    : themeData.colorScheme.onSurfaceVariant),
                         _buildDetailRow(
                             'appeal.detail.result'.tr,
-                            widget.appeal.processResult ?? 'common.none'.tr,
+                            widget.appeal.processResult ??
+                                widget.appeal.rejectionReason ??
+                                'common.none'.tr,
                             themeData),
                       ],
                     ),
@@ -1198,54 +1088,12 @@ class _UserAppealDetailPageState extends State<UserAppealDetailPage> {
                           ),
                         ),
                         const SizedBox(height: 12),
-                        _isLoadingProgress
-                            ? const Center(child: CircularProgressIndicator())
-                            : Obx(() {
-                                final relatedProgress = progressController
-                                    .progressItems
-                                    .where((p) =>
-                                        p.appealId == widget.appeal.appealId)
-                                    .toList();
-                                if (relatedProgress.isEmpty) {
-                                  return Text(
-                                    'appeal.progress.empty'.tr,
-                                    style: themeData.textTheme.bodyMedium
-                                        ?.copyWith(
-                                      color: themeData
-                                          .colorScheme.onSurfaceVariant,
-                                    ),
-                                  );
-                                }
-                                return Column(
-                                  children: relatedProgress
-                                      .map((item) => ListTile(
-                                            title: Text(
-                                              item.title,
-                                              style:
-                                                  themeData.textTheme.bodyLarge,
-                                            ),
-                                            subtitle: Text(
-                                              'appeal.progress.summary'
-                                                  .trParams({
-                                                'status':
-                                                    localizeProgressStatus(
-                                                        item.status),
-                                                'time': formatProgressDateTime(
-                                                  item.submitTime,
-                                                ),
-                                              }),
-                                              style: themeData
-                                                  .textTheme.bodyMedium,
-                                            ),
-                                            trailing: const Icon(
-                                                Icons.arrow_forward_ios),
-                                            onTap: () => Get.toNamed(
-                                                '/progressDetail',
-                                                arguments: item),
-                                          ))
-                                      .toList(),
-                                );
-                              }),
+                        Text(
+                          'appeal.note.readonly'.tr,
+                          style: themeData.textTheme.bodyMedium?.copyWith(
+                            color: themeData.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
                       ],
                     ),
                   ),

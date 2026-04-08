@@ -1,23 +1,23 @@
 // ignore_for_file: use_build_context_synchronously
-import 'dart:convert';
+import 'dart:async';
 import 'dart:developer' as developer;
 
 import 'package:final_assignment_front/config/routes/app_routes.dart';
 import 'package:final_assignment_front/features/api/appeal_management_controller_api.dart';
-import 'package:final_assignment_front/features/api/offense_information_controller_api.dart';
 import 'package:final_assignment_front/features/dashboard/controllers/manager_dashboard_controller.dart';
 import 'package:final_assignment_front/features/dashboard/views/shared/widgets/dashboard_page_template.dart';
 import 'package:final_assignment_front/features/model/appeal_record.dart';
+import 'package:final_assignment_front/features/model/appeal_review.dart';
 import 'package:final_assignment_front/i18n/appeal_localizers.dart';
 import 'package:final_assignment_front/i18n/status_localizers.dart';
 import 'package:final_assignment_front/utils/helpers/api_exception.dart';
+import 'package:final_assignment_front/utils/helpers/role_utils.dart';
 import 'package:final_assignment_front/utils/services/auth_token_store.dart';
+import 'package:final_assignment_front/utils/services/session_helper.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import 'package:http/http.dart' as http;
 import 'package:jwt_decoder/jwt_decoder.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 
 String generateIdempotencyKey() {
@@ -32,34 +32,46 @@ class AppealManagementAdmin extends StatefulWidget {
 }
 
 class _AppealManagementAdminState extends State<AppealManagementAdmin> {
+  static const int _appealPageSize = 50;
+
   final AppealManagementControllerApi appealApi =
       AppealManagementControllerApi();
-  final OffenseInformationControllerApi offenseApi =
-      OffenseInformationControllerApi();
+  final SessionHelper _sessionHelper = SessionHelper();
   final TextEditingController _searchController = TextEditingController();
-  List<AppealRecordModel> _appeals = [];
+  final ScrollController _scrollController = ScrollController();
+  final List<AppealRecordModel> _appeals = [];
   List<AppealRecordModel> _filteredAppeals = [];
   String _searchType = kAppealSearchTypeAppealReason;
+  String _activeQuery = '';
   DateTime? _startTime;
   DateTime? _endTime;
+  int _currentPage = 1;
+  bool _hasMore = true;
   bool _isLoading = false;
   bool _isAdmin = false;
   String _errorMessage = '';
-  static const int _maxOffenseBatch = 20;
+  Timer? _searchDebounce;
   final DashboardController controller = Get.find<DashboardController>();
 
   @override
   void initState() {
     super.initState();
     _initialize();
-    _searchController.addListener(() {
-      _applyFilters(_searchController.text);
+    _scrollController.addListener(() {
+      if (_scrollController.position.pixels >=
+              _scrollController.position.maxScrollExtent - 200 &&
+          _hasMore &&
+          !_isLoading) {
+        _loadAppeals();
+      }
     });
   }
 
   @override
   void dispose() {
+    _searchDebounce?.cancel();
     _searchController.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
 
@@ -100,32 +112,13 @@ class _AppealManagementAdminState extends State<AppealManagementAdmin> {
   }
 
   Future<String?> _refreshJwtToken() async {
-    final prefs = await SharedPreferences.getInstance();
-    final refreshToken = prefs.getString('refreshToken');
-    if (refreshToken == null) {
-      developer.log('No refresh token found');
-      return null;
+    final newJwt = await _sessionHelper.refreshJwtToken();
+    if (newJwt != null) {
+      developer.log('JWT token refreshed successfully');
+    } else {
+      developer.log('Failed to refresh JWT token');
     }
-    try {
-      final response = await http.post(
-        Uri.parse('http://localhost:8081/api/auth/refresh'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'refreshToken': refreshToken}),
-      );
-      if (response.statusCode == 200) {
-        final newJwt = jsonDecode(response.body)['jwtToken'];
-        await AuthTokenStore.instance.setJwtToken(newJwt);
-        developer.log('JWT token refreshed successfully');
-        return newJwt;
-      }
-      developer.log(
-          'Refresh token request failed: ${response.statusCode} - ${response.body}');
-      return null;
-    } catch (e) {
-      developer.log('Error refreshing JWT token: $e',
-          stackTrace: StackTrace.current);
-      return null;
-    }
+    return newJwt;
   }
 
   Future<void> _initialize() async {
@@ -136,7 +129,6 @@ class _AppealManagementAdminState extends State<AppealManagementAdmin> {
         return;
       }
       await appealApi.initializeWithJwt();
-      await offenseApi.initializeWithJwt();
       await _checkUserRole();
       if (_isAdmin) {
         await _loadAppeals(reset: true);
@@ -160,78 +152,24 @@ class _AppealManagementAdminState extends State<AppealManagementAdmin> {
         Get.offAllNamed(Routes.login);
         return;
       }
-      final jwtToken = (await AuthTokenStore.instance.getJwtToken())!;
-
-      // Try backend API first
-      try {
-        final response = await http.get(
-          Uri.parse('http://localhost:8081/api/users/me'),
-          headers: {
-            'Authorization': 'Bearer $jwtToken',
-            'Content-Type': 'application/json',
-          },
-        );
-        if (response.statusCode == 200) {
-          final userData = jsonDecode(utf8.decode(response.bodyBytes));
-          developer.log('User data from /api/users/me: $userData');
-          final roles = (userData['roles'] as List<dynamic>?)
-              ?.map((r) => r.toString().toUpperCase())
-              .toList();
-          if (roles != null && roles.contains('ADMIN')) {
-            setState(() => _isAdmin = true);
-            return;
-          }
-          developer.log(
-              'No valid roles in /api/users/me response, falling back to JWT');
-        } else {
-          developer.log(
-              'Failed to fetch user roles: ${response.statusCode} - ${response.body}');
+      final roles = await _sessionHelper.fetchCurrentRoles();
+      final hasAdminAccess = hasAnyRole(roles, const [
+        'SUPER_ADMIN',
+        'ADMIN',
+        'APPEAL_REVIEWER',
+      ]);
+      setState(() {
+        _isAdmin = hasAdminAccess;
+        if (!hasAdminAccess) {
+          _errorMessage = 'appealAdmin.error.adminOnly'.tr;
         }
-      } catch (e) {
-        developer.log('Error fetching user roles from API: $e');
-      }
-
-      // Fallback to JWTSwe token roles
-      await _checkRolesFromJwt();
+      });
     } catch (e) {
       setState(
           () => _errorMessage = 'appealAdmin.error.roleCheckFailed'.trParams({
                 'error': formatAppealErrorDetail(e),
               }));
       developer.log('Role check failed: $e', stackTrace: StackTrace.current);
-    }
-  }
-
-  Future<void> _checkRolesFromJwt() async {
-    try {
-      final jwtToken = (await AuthTokenStore.instance.getJwtToken())!;
-      final decodedToken = JwtDecoder.decode(jwtToken);
-      developer.log('JWT decoded: $decodedToken');
-      final rawRoles = decodedToken['roles'];
-      List<String> roles;
-      if (rawRoles is String) {
-        roles = rawRoles
-            .split(',')
-            .map((role) => role.trim().toUpperCase())
-            .toList();
-      } else if (rawRoles is List<dynamic>) {
-        roles = rawRoles.map((role) => role.toString().toUpperCase()).toList();
-      } else {
-        roles = [];
-      }
-      setState(() => _isAdmin = roles.contains('ADMIN'));
-      if (!_isAdmin) {
-        setState(() => _errorMessage = 'appealAdmin.error.jwtAdminOnly'
-            .trParams({'roles': roles.join(', ')}));
-      }
-      developer.log('Roles from JWT: $roles, isAdmin: $_isAdmin');
-    } catch (e) {
-      setState(() =>
-          _errorMessage = 'appealAdmin.error.jwtRoleCheckFailed'.trParams({
-            'error': formatAppealErrorDetail(e),
-          }));
-      developer.log('JWT role check failed: $e',
-          stackTrace: StackTrace.current);
     }
   }
 
@@ -261,39 +199,18 @@ class _AppealManagementAdminState extends State<AppealManagementAdmin> {
         .toList();
   }
 
-  Future<List<AppealRecordModel>> _fetchAllAppeals({int pageSize = 50}) async {
-    if (!await _validateJwtToken()) {
-      Get.offAllNamed(Routes.login);
-      return [];
-    }
-    await appealApi.initializeWithJwt();
-    await offenseApi.initializeWithJwt();
-    final offenses = await offenseApi.apiOffensesGet();
-    final List<AppealRecordModel> results = [];
-    for (final offense in offenses.take(_maxOffenseBatch)) {
-      final offenseId = offense.offenseId;
-      if (offenseId == null) continue;
-      try {
-        final subset = await appealApi.apiAppealsGet(
-          offenseId: offenseId,
-          page: 1,
-          size: pageSize,
-        );
-        results.addAll(subset);
-      } catch (e) {
-        developer.log('Failed to load appeals for offense $offenseId: $e',
-            name: 'AppealManagement');
-      }
-    }
-    return results;
-  }
-
   Future<void> _loadAppeals({bool reset = false, String? query}) async {
     if (!_isAdmin) return;
 
     if (reset) {
+      _currentPage = 1;
+      _hasMore = true;
+      _activeQuery = (query ?? _searchController.text).trim();
       _appeals.clear();
       _filteredAppeals.clear();
+    }
+    if (!reset && (_isLoading || !_hasMore)) {
+      return;
     }
 
     setState(() {
@@ -302,16 +219,18 @@ class _AppealManagementAdminState extends State<AppealManagementAdmin> {
     });
 
     try {
-      final appeals = await _fetchAllAppeals();
+      if (!await _validateJwtToken()) {
+        Get.offAllNamed(Routes.login);
+        return;
+      }
+      await appealApi.initializeWithJwt();
+      final appeals =
+          await _loadAppealPage(page: _currentPage, query: _activeQuery);
       setState(() {
-        _appeals = appeals;
-        _applyFilters(query ?? _searchController.text);
-        if (_filteredAppeals.isEmpty) {
-          _errorMessage = (_searchController.text.isNotEmpty ||
-                  (_startTime != null && _endTime != null))
-              ? 'appeal.empty.filtered'.tr
-              : 'appeal.empty'.tr;
-        }
+        _appeals.addAll(appeals);
+        _rebuildVisibleAppeals();
+        _hasMore = appeals.length == _appealPageSize;
+        _currentPage++;
       });
       developer.log('Loaded appeals: ${_appeals.length}');
     } catch (e) {
@@ -333,63 +252,83 @@ class _AppealManagementAdminState extends State<AppealManagementAdmin> {
     }
   }
 
-  void _applyFilters(String query) {
-    final searchQuery = query.trim().toLowerCase();
-    setState(() {
-      _filteredAppeals = _appeals.where((appeal) {
-        final reason = (appeal.appealReason ?? '').toLowerCase();
-        final name = (appeal.appellantName ?? '').toLowerCase();
-        final status = localizeAppealStatus(appeal.processStatus)
-            .toLowerCase(); // Use Chinese status for filtering
-        final appealTime = appeal.appealTime;
+  Future<List<AppealRecordModel>> _loadAppealPage({
+    required int page,
+    required String query,
+  }) {
+    if (_searchType == kAppealSearchTypeTimeRange &&
+        _startTime != null &&
+        _endTime != null) {
+      return appealApi.apiAppealsSearchTimeRangeGet(
+        startTime: _startTime!.toIso8601String(),
+        endTime: _endTime!.add(const Duration(days: 1)).toIso8601String(),
+        page: page,
+        size: _appealPageSize,
+      );
+    }
+    if (query.isEmpty) {
+      return appealApi.apiAppealsGet(page: page, size: _appealPageSize);
+    }
+    switch (_searchType) {
+      case kAppealSearchTypeAppellantName:
+        return appealApi.apiAppealsSearchAppellantNameFuzzyGet(
+          appellantName: query,
+          page: page,
+          size: _appealPageSize,
+        );
+      case kAppealSearchTypeProcessStatus:
+        return appealApi.apiAppealsSearchProcessStatusGet(
+          processStatus: normalizeAppealStatusCode(query),
+          page: page,
+          size: _appealPageSize,
+        );
+      case kAppealSearchTypeAppealReason:
+      default:
+        return appealApi.apiAppealsSearchReasonFuzzyGet(
+          appealReason: query,
+          page: page,
+          size: _appealPageSize,
+        );
+    }
+  }
 
-        bool matchesQuery = true;
-        if (searchQuery.isNotEmpty) {
-          if (_searchType == kAppealSearchTypeAppealReason) {
-            matchesQuery = reason.contains(searchQuery);
-          } else if (_searchType == kAppealSearchTypeAppellantName) {
-            matchesQuery = name.contains(searchQuery);
-          } else if (_searchType == kAppealSearchTypeProcessStatus) {
-            matchesQuery = status.contains(searchQuery);
-          }
-        }
-
-        bool matchesDateRange = true;
-        if (_startTime != null && _endTime != null && appealTime != null) {
-          matchesDateRange = appealTime.isAfter(_startTime!) &&
-              appealTime.isBefore(_endTime!.add(const Duration(days: 1)));
-        } else if (_startTime != null &&
-            _endTime != null &&
-            appealTime == null) {
-          matchesDateRange = false;
-        }
-
-        return matchesQuery && matchesDateRange;
-      }).toList();
-
-      if (_filteredAppeals.isEmpty && _appeals.isNotEmpty) {
-        _errorMessage = 'appeal.empty.filtered'.tr;
-      } else {
-        _errorMessage = _filteredAppeals.isEmpty && _appeals.isEmpty
-            ? 'appeal.empty'.tr
-            : '';
-      }
-    });
+  void _rebuildVisibleAppeals() {
+    _filteredAppeals = List<AppealRecordModel>.from(_appeals);
+    if (_filteredAppeals.isEmpty) {
+      _errorMessage =
+          _activeQuery.isNotEmpty || (_startTime != null && _endTime != null)
+              ? 'appeal.empty.filtered'.tr
+              : 'appeal.empty'.tr;
+    } else {
+      _errorMessage = '';
+    }
   }
 
   Future<void> _refreshAppeals({String? query}) async {
+    _searchDebounce?.cancel();
+    final effectiveQuery = (query ?? _searchController.text).trim();
     setState(() {
       _appeals.clear();
       _filteredAppeals.clear();
+      _currentPage = 1;
+      _hasMore = true;
       _isLoading = true;
-      if (query == null) {
-        _searchController.clear();
-        _startTime = null;
-        _endTime = null;
-        _searchType = kAppealSearchTypeAppealReason;
-      }
+      _searchController.value = TextEditingValue(
+        text: effectiveQuery,
+        selection: TextSelection.collapsed(offset: effectiveQuery.length),
+      );
     });
-    await _loadAppeals(reset: true, query: query);
+    await _loadAppeals(reset: true, query: effectiveQuery);
+  }
+
+  void _scheduleSearchRefresh(String value) {
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(const Duration(milliseconds: 350), () {
+      if (!mounted) {
+        return;
+      }
+      _refreshAppeals(query: value);
+    });
   }
 
   void _goToDetailPage(AppealRecordModel appeal) {
@@ -402,7 +341,12 @@ class _AppealManagementAdminState extends State<AppealManagementAdmin> {
               if (index != -1) {
                 _appeals[index] = updatedAppeal;
               }
-              _applyFilters(_searchController.text);
+              final visibleIndex = _filteredAppeals
+                  .indexWhere((a) => a.appealId == updatedAppeal.appealId);
+              if (visibleIndex != -1) {
+                _filteredAppeals[visibleIndex] = updatedAppeal;
+              }
+              _rebuildVisibleAppeals();
             });
           },
         ))?.then((value) {
@@ -458,7 +402,7 @@ class _AppealManagementAdminState extends State<AppealManagementAdmin> {
                     },
                     onSelected: (String selection) {
                       _searchController.text = selection;
-                      _applyFilters(selection);
+                      _refreshAppeals(query: selection);
                     },
                     fieldViewBuilder:
                         (context, controller, focusNode, onFieldSubmitted) {
@@ -489,7 +433,7 @@ class _AppealManagementAdminState extends State<AppealManagementAdmin> {
                                       _searchType =
                                           kAppealSearchTypeAppealReason;
                                     });
-                                    _applyFilters('');
+                                    _refreshAppeals(query: '');
                                   },
                                 )
                               : null,
@@ -502,8 +446,11 @@ class _AppealManagementAdminState extends State<AppealManagementAdmin> {
                           contentPadding: const EdgeInsets.symmetric(
                               vertical: 14.0, horizontal: 16.0),
                         ),
-                        onChanged: (value) => _applyFilters(value),
-                        onSubmitted: (value) => _applyFilters(value),
+                        onChanged: (value) {
+                          setState(() {});
+                          _scheduleSearchRefresh(value);
+                        },
+                        onSubmitted: (value) => _refreshAppeals(query: value),
                         enabled: _searchType != kAppealSearchTypeTimeRange,
                       );
                     },
@@ -518,8 +465,8 @@ class _AppealManagementAdminState extends State<AppealManagementAdmin> {
                       _searchController.clear();
                       _startTime = null;
                       _endTime = null;
-                      _applyFilters('');
                     });
+                    _refreshAppeals(query: '');
                   },
                   items: <String>[
                     kAppealSearchTypeAppealReason,
@@ -599,7 +546,7 @@ class _AppealManagementAdminState extends State<AppealManagementAdmin> {
                         _searchType = kAppealSearchTypeTimeRange;
                         _searchController.clear();
                       });
-                      _applyFilters('');
+                      _refreshAppeals(query: '');
                     }
                   },
                 ),
@@ -615,7 +562,7 @@ class _AppealManagementAdminState extends State<AppealManagementAdmin> {
                         _searchType = kAppealSearchTypeAppealReason;
                         _searchController.clear();
                       });
-                      _applyFilters('');
+                      _refreshAppeals(query: '');
                     },
                   ),
               ],
@@ -627,6 +574,14 @@ class _AppealManagementAdminState extends State<AppealManagementAdmin> {
   }
 
   Widget _buildAppealCard(AppealRecordModel appeal, ThemeData themeData) {
+    final acceptance = normalizeAppealStatusCode(appeal.acceptanceStatus);
+    final displayStatus = acceptance == appealPendingStatusCode() ||
+            acceptance == appealRejectedStatusCode() ||
+            acceptance == 'Need_Supplement'
+        ? localizeAppealStatus(appeal.acceptanceStatus)
+        : localizeAppealStatus(appeal.processStatus);
+    final isRejected = isRejectedAppealStatus(appeal.acceptanceStatus) ||
+        isRejectedAppealStatus(appeal.processStatus);
     return Card(
       elevation: 4,
       color: themeData.colorScheme.surfaceContainerLowest,
@@ -660,12 +615,12 @@ class _AppealManagementAdminState extends State<AppealManagementAdmin> {
               ),
               Text(
                 'appealAdmin.card.status'.trParams({
-                  'value': localizeAppealStatus(appeal.processStatus),
+                  'value': displayStatus,
                 }),
                 style: themeData.textTheme.bodyMedium?.copyWith(
                   color: isApprovedAppealStatus(appeal.processStatus)
                       ? Colors.green
-                      : isRejectedAppealStatus(appeal.processStatus)
+                      : isRejected
                           ? Colors.red
                           : themeData.colorScheme.onSurfaceVariant,
                 ),
@@ -721,7 +676,7 @@ class _AppealManagementAdminState extends State<AppealManagementAdmin> {
               _buildSearchBar(themeData),
               const SizedBox(height: 20),
               Expanded(
-                child: _isLoading
+                child: _isLoading && _appeals.isEmpty
                     ? Center(
                         child: CupertinoActivityIndicator(
                           color: themeData.colorScheme.primary,
@@ -801,6 +756,7 @@ class _AppealManagementAdminState extends State<AppealManagementAdmin> {
                                 ),
                               )
                             : CupertinoScrollbar(
+                                controller: _scrollController,
                                 thumbVisibility: true,
                                 thickness: 6.0,
                                 thicknessWhileDragging: 10.0,
@@ -810,8 +766,20 @@ class _AppealManagementAdminState extends State<AppealManagementAdmin> {
                                   backgroundColor:
                                       themeData.colorScheme.surfaceContainer,
                                   child: ListView.builder(
-                                    itemCount: _filteredAppeals.length,
+                                    controller: _scrollController,
+                                    itemCount: _filteredAppeals.length +
+                                        ((_isLoading && _appeals.isNotEmpty)
+                                            ? 1
+                                            : 0),
                                     itemBuilder: (context, index) {
+                                      if (index >= _filteredAppeals.length) {
+                                        return const Padding(
+                                          padding: EdgeInsets.all(8.0),
+                                          child: Center(
+                                            child: CupertinoActivityIndicator(),
+                                          ),
+                                        );
+                                      }
                                       final appeal = _filteredAppeals[index];
                                       return _buildAppealCard(
                                           appeal, themeData);
@@ -842,6 +810,7 @@ class AppealDetailPage extends StatefulWidget {
 class _AppealDetailPageState extends State<AppealDetailPage> {
   final AppealManagementControllerApi appealApi =
       AppealManagementControllerApi();
+  final SessionHelper _sessionHelper = SessionHelper();
   final TextEditingController _rejectionReasonController =
       TextEditingController();
   bool _isLoading = false;
@@ -898,32 +867,13 @@ class _AppealDetailPageState extends State<AppealDetailPage> {
   }
 
   Future<String?> _refreshJwtToken() async {
-    final prefs = await SharedPreferences.getInstance();
-    final refreshToken = prefs.getString('refreshToken');
-    if (refreshToken == null) {
-      developer.log('No refresh token found');
-      return null;
+    final newJwt = await _sessionHelper.refreshJwtToken();
+    if (newJwt != null) {
+      developer.log('JWT token refreshed successfully');
+    } else {
+      developer.log('Failed to refresh JWT token');
     }
-    try {
-      final response = await http.post(
-        Uri.parse('http://localhost:8081/api/auth/refresh'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'refreshToken': refreshToken}),
-      );
-      if (response.statusCode == 200) {
-        final newJwt = jsonDecode(response.body)['jwtToken'];
-        await AuthTokenStore.instance.setJwtToken(newJwt);
-        developer.log('JWT token refreshed successfully');
-        return newJwt;
-      }
-      developer.log(
-          'Refresh token request failed: ${response.statusCode} - ${response.body}');
-      return null;
-    } catch (e) {
-      developer.log('Error refreshing JWT token: $e',
-          stackTrace: StackTrace.current);
-      return null;
-    }
+    return newJwt;
   }
 
   Future<void> _initialize() async {
@@ -952,39 +902,18 @@ class _AppealDetailPageState extends State<AppealDetailPage> {
         Get.offAllNamed(Routes.login);
         return;
       }
-      final jwtToken = (await AuthTokenStore.instance.getJwtToken())!;
-
-      // Try backend API first
-      try {
-        final response = await http.get(
-          Uri.parse('http://localhost:8081/api/users/me'),
-          headers: {
-            'Authorization': 'Bearer $jwtToken',
-            'Content-Type': 'application/json',
-          },
-        );
-        if (response.statusCode == 200) {
-          final userData = jsonDecode(utf8.decode(response.bodyBytes));
-          developer.log('User data from /api/users/me: $userData');
-          final roles = (userData['roles'] as List<dynamic>?)
-              ?.map((r) => r.toString().toUpperCase())
-              .toList();
-          if (roles != null && roles.contains('ADMIN')) {
-            setState(() => _isAdmin = true);
-            return;
-          }
-          developer.log(
-              'No valid roles in /api/users/me response, falling back to JWT');
-        } else {
-          developer.log(
-              'Failed to fetch user roles: ${response.statusCode} - ${response.body}');
+      final roles = await _sessionHelper.fetchCurrentRoles();
+      final hasAdminAccess = hasAnyRole(roles, const [
+        'SUPER_ADMIN',
+        'ADMIN',
+        'APPEAL_REVIEWER',
+      ]);
+      setState(() {
+        _isAdmin = hasAdminAccess;
+        if (!hasAdminAccess) {
+          _errorMessage = 'appealAdmin.error.adminOnly'.tr;
         }
-      } catch (e) {
-        developer.log('Error fetching user roles from API: $e');
-      }
-
-      // Fallback to JWT token roles
-      await _checkRolesFromJwt();
+      });
     } catch (e) {
       setState(
           () => _errorMessage = 'appealAdmin.error.roleCheckFailed'.trParams({
@@ -994,73 +923,97 @@ class _AppealDetailPageState extends State<AppealDetailPage> {
     }
   }
 
-  Future<void> _checkRolesFromJwt() async {
-    try {
-      final jwtToken = (await AuthTokenStore.instance.getJwtToken())!;
-      final decodedToken = JwtDecoder.decode(jwtToken);
-      developer.log('JWT decoded: $decodedToken');
-      final rawRoles = decodedToken['roles'];
-      List<String> roles;
-      if (rawRoles is String) {
-        roles = rawRoles
-            .split(',')
-            .map((role) => role.trim().toUpperCase())
-            .toList();
-      } else if (rawRoles is List<dynamic>) {
-        roles = rawRoles.map((role) => role.toString().toUpperCase()).toList();
-      } else {
-        roles = [];
-      }
-      setState(() => _isAdmin = roles.contains('ADMIN'));
-      if (!_isAdmin) {
-        setState(() => _errorMessage = 'appealAdmin.error.jwtAdminOnly'
-            .trParams({'roles': roles.join(', ')}));
-      }
-      developer.log('Roles from JWT: $roles, isAdmin: $_isAdmin');
-    } catch (e) {
-      setState(() =>
-          _errorMessage = 'appealAdmin.error.jwtRoleCheckFailed'.trParams({
-            'error': formatAppealErrorDetail(e),
-          }));
-      developer.log('JWT role check failed: $e',
-          stackTrace: StackTrace.current);
-    }
-  }
-
   Future<void> _approveAppeal(int appealId) async {
-    if (widget.appeal.appealId == null) {
-      _showSnackBar('appealAdmin.error.invalidAppealId'.tr, isError: true);
-      return;
-    }
-    setState(() => _isLoading = true);
-    try {
-      final updatedAppeal = widget.appeal.copyWith(
-        processStatus: appealApprovedStatusCode(),
-        processResult: 'appealAdmin.result.approved'.tr,
+    await _submitFinalReview(
+      appealId: appealId,
+      reviewResult: 'Approved',
+      successMessage: 'appealAdmin.success.approved'.tr,
+    );
+  }
+
+  Future<void> _acceptAppeal(int appealId) async {
+    await _triggerAcceptanceEvent(
+      appealId: appealId,
+      event: 'ACCEPT',
+      successMessage: 'lookup.appealAcceptanceEventType.accept'.tr,
+    );
+  }
+
+  Future<void> _requestSupplement(int appealId) async {
+    await _showAcceptanceReasonDialog(
+      appealId: appealId,
+      titleKey: 'appealAdmin.dialog.requestSupplementTitle',
+      fieldLabelKey: 'appealAdmin.field.supplementReason',
+      validationMessageKey: 'appealAdmin.validation.supplementReasonRequired',
+      confirmLabelKey: 'appealAdmin.action.confirmRequestSupplement',
+      event: 'REQUEST_SUPPLEMENT',
+      successMessage: 'appealAdmin.success.supplementRequested'.tr,
+    );
+  }
+
+  Future<void> _markSupplementComplete(int appealId) async {
+    final confirmed = await _showConfirmationDialog(
+      title: 'lookup.appealAcceptanceEventType.supplementComplete'.tr,
+      content: 'lookup.appealAcceptanceEventType.supplementComplete'.tr,
+      confirmLabel: 'lookup.appealAcceptanceEventType.supplementComplete'.tr,
+    );
+    if (confirmed == true) {
+      await _triggerAcceptanceEvent(
+        appealId: appealId,
+        event: 'SUPPLEMENT_COMPLETE',
+        successMessage: 'appealAdmin.success.supplementCompleted'.tr,
       );
-      developer.log(
-          'Approving appeal ID: $appealId, Payload: ${updatedAppeal.toJson()}');
-      await appealApi
-          .apiAppealsAppealIdPut(
-            appealId: appealId,
-            appealRecord: updatedAppeal,
-            idempotencyKey: generateIdempotencyKey(),
-          )
-          .timeout(const Duration(seconds: 5));
-      _showSnackBar('appealAdmin.success.approved'.tr);
-      widget.onAppealUpdated?.call(updatedAppeal);
-      if (mounted) Navigator.pop(context, true);
-    } catch (e) {
-      developer.log('Error approving appeal: $e',
-          stackTrace: StackTrace.current);
-      _showSnackBar(formatAppealAdminError(e), isError: true);
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  Future<void> _rejectAppeal(int appealId) async {
+  Future<void> _resubmitAppeal(int appealId) async {
+    final confirmed = await _showConfirmationDialog(
+      title: 'lookup.appealAcceptanceEventType.resubmit'.tr,
+      content: 'lookup.appealAcceptanceEventType.resubmit'.tr,
+      confirmLabel: 'lookup.appealAcceptanceEventType.resubmit'.tr,
+    );
+    if (confirmed == true) {
+      await _triggerAcceptanceEvent(
+        appealId: appealId,
+        event: 'RESUBMIT',
+        successMessage: 'appealAdmin.success.resubmitted'.tr,
+      );
+    }
+  }
+
+  Future<void> _startReview(int appealId) async {
+    await _triggerProcessEvent(
+      appealId: appealId,
+      event: 'START_REVIEW',
+      successMessage: 'lookup.appealProcessEventType.startReview'.tr,
+    );
+  }
+
+  Future<void> _rejectAcceptedAppeal(int appealId) async {
+    await _showAcceptanceReasonDialog(
+      appealId: appealId,
+      titleKey: 'appealAdmin.dialog.rejectTitle',
+      fieldLabelKey: 'appealAdmin.field.rejectionReason',
+      validationMessageKey: 'appealAdmin.validation.rejectionReasonRequired',
+      confirmLabelKey: 'appealAdmin.action.confirmReject',
+      event: 'REJECT',
+      successMessage: 'appealAdmin.success.acceptanceRejected'.tr,
+      useErrorStyle: true,
+    );
+  }
+
+  Future<void> _showAcceptanceReasonDialog({
+    required int appealId,
+    required String titleKey,
+    required String fieldLabelKey,
+    required String validationMessageKey,
+    required String confirmLabelKey,
+    required String event,
+    required String successMessage,
+    bool useErrorStyle = false,
+  }) async {
     final themeData = controller.currentBodyTheme.value;
+    _rejectionReasonController.clear();
     showDialog(
       context: context,
       builder: (ctx) => Theme(
@@ -1076,7 +1029,7 @@ class _AppealDetailPageState extends State<AppealDetailPage> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Text(
-                  'appealAdmin.dialog.rejectTitle'.tr,
+                  titleKey.tr,
                   style: themeData.textTheme.titleLarge?.copyWith(
                     color: themeData.colorScheme.onSurface,
                     fontWeight: FontWeight.bold,
@@ -1087,7 +1040,7 @@ class _AppealDetailPageState extends State<AppealDetailPage> {
                 TextField(
                   controller: _rejectionReasonController,
                   decoration: InputDecoration(
-                    labelText: 'appealAdmin.field.rejectionReason'.tr,
+                    labelText: fieldLabelKey.tr,
                     labelStyle: themeData.textTheme.bodyMedium?.copyWith(
                       color: themeData.colorScheme.onSurfaceVariant,
                     ),
@@ -1129,7 +1082,7 @@ class _AppealDetailPageState extends State<AppealDetailPage> {
                         final reason = _rejectionReasonController.text.trim();
                         if (reason.isEmpty) {
                           _showSnackBar(
-                            'appealAdmin.validation.rejectionReasonRequired'.tr,
+                            validationMessageKey.tr,
                             isError: true,
                           );
                           return;
@@ -1142,49 +1095,36 @@ class _AppealDetailPageState extends State<AppealDetailPage> {
                           Navigator.pop(ctx);
                           return;
                         }
-                        setState(() => _isLoading = true);
-                        try {
-                          final updatedAppeal = widget.appeal.copyWith(
-                            processStatus: appealRejectedStatusCode(),
-                            // Keep English for backend
-                            processResult: reason,
-                          );
-                          developer.log(
-                              'Rejecting appeal ID: $appealId, Payload: ${updatedAppeal.toJson()}');
-                          await appealApi
-                              .apiAppealsAppealIdPut(
-                                appealId: appealId,
-                                appealRecord: updatedAppeal,
-                                idempotencyKey: generateIdempotencyKey(),
-                              )
-                              .timeout(const Duration(seconds: 5));
-                          _showSnackBar('appealAdmin.success.rejected'.tr);
-                          widget.onAppealUpdated?.call(updatedAppeal);
+                        final didUpdate = await _triggerAcceptanceEvent(
+                          appealId: appealId,
+                          event: event,
+                          rejectionReason: reason,
+                          successMessage: successMessage,
+                          closePage: false,
+                        );
+                        if (didUpdate && mounted) {
                           Navigator.pop(ctx);
-                          if (mounted) Navigator.pop(context, true);
-                        } catch (e) {
-                          developer.log('Error rejecting appeal: $e',
-                              stackTrace: StackTrace.current);
-                          _showSnackBar(
-                            formatAppealAdminError(e),
-                            isError: true,
-                          );
-                        } finally {
-                          if (mounted) setState(() => _isLoading = false);
+                          Navigator.pop(context, true);
                         }
                       },
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: themeData.colorScheme.error,
-                        foregroundColor: themeData.colorScheme.onError,
+                        backgroundColor: useErrorStyle
+                            ? themeData.colorScheme.error
+                            : themeData.colorScheme.primary,
+                        foregroundColor: useErrorStyle
+                            ? themeData.colorScheme.onError
+                            : themeData.colorScheme.onPrimary,
                         shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12.0)),
                         padding: const EdgeInsets.symmetric(
                             horizontal: 20.0, vertical: 12.0),
                       ),
                       child: Text(
-                        'appealAdmin.action.confirmReject'.tr,
+                        confirmLabelKey.tr,
                         style: themeData.textTheme.labelLarge?.copyWith(
-                          color: themeData.colorScheme.onError,
+                          color: useErrorStyle
+                              ? themeData.colorScheme.onError
+                              : themeData.colorScheme.onPrimary,
                           fontWeight: FontWeight.bold,
                         ),
                       ),
@@ -1197,6 +1137,200 @@ class _AppealDetailPageState extends State<AppealDetailPage> {
         ),
       ),
     );
+  }
+
+  Future<void> _rejectReviewedAppeal(int appealId) async {
+    final confirmed = await _showConfirmationDialog(
+      title: 'lookup.appealProcessEventType.reject'.tr,
+      content: 'lookup.appealProcessEventType.reject'.tr,
+      confirmLabel: 'lookup.appealProcessEventType.reject'.tr,
+      useErrorStyle: true,
+    );
+    if (confirmed == true) {
+      await _submitFinalReview(
+        appealId: appealId,
+        reviewResult: 'Rejected',
+        successMessage: 'appealAdmin.success.finalRejected'.tr,
+      );
+    }
+  }
+
+  Future<bool?> _showConfirmationDialog({
+    required String title,
+    required String content,
+    required String confirmLabel,
+    bool useErrorStyle = false,
+  }) {
+    final themeData = controller.currentBodyTheme.value;
+    return showDialog<bool>(
+      context: context,
+      builder: (ctx) => Theme(
+        data: themeData,
+        child: AlertDialog(
+          backgroundColor: themeData.colorScheme.surfaceContainerLowest,
+          title: Text(title),
+          content: Text(content),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: Text('common.cancel'.tr),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: useErrorStyle
+                    ? themeData.colorScheme.error
+                    : themeData.colorScheme.primary,
+                foregroundColor: useErrorStyle
+                    ? themeData.colorScheme.onError
+                    : themeData.colorScheme.onPrimary,
+              ),
+              child: Text(confirmLabel),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _submitFinalReview({
+    required int appealId,
+    required String reviewResult,
+    required String successMessage,
+    String? reviewOpinion,
+  }) async {
+    if (widget.appeal.appealId == null) {
+      _showSnackBar('appealAdmin.error.invalidAppealId'.tr, isError: true);
+      return;
+    }
+    setState(() => _isLoading = true);
+    try {
+      final review = AppealReviewModel(
+        appealId: appealId,
+        reviewLevel: 'Final',
+        reviewResult: reviewResult,
+        reviewOpinion: reviewOpinion == null || reviewOpinion.trim().isEmpty
+            ? null
+            : reviewOpinion.trim(),
+      );
+      await appealApi
+          .apiAppealsAppealIdReviewsPost(
+            appealId: appealId,
+            review: review,
+            idempotencyKey: generateIdempotencyKey(),
+          )
+          .timeout(const Duration(seconds: 5));
+      final refreshedAppeal =
+          await appealApi.apiAppealsAppealIdGet(appealId: appealId);
+      _showSnackBar(successMessage);
+      if (refreshedAppeal != null) {
+        widget.onAppealUpdated?.call(refreshedAppeal);
+      }
+      if (mounted) Navigator.pop(context, true);
+    } catch (e) {
+      developer.log('Error submitting final appeal review $reviewResult: $e',
+          stackTrace: StackTrace.current);
+      _showSnackBar(formatAppealAdminError(e), isError: true);
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<bool> _triggerAcceptanceEvent({
+    required int appealId,
+    required String event,
+    required String successMessage,
+    String? rejectionReason,
+    bool closePage = true,
+  }) async {
+    if (widget.appeal.appealId == null) {
+      _showSnackBar('appealAdmin.error.invalidAppealId'.tr, isError: true);
+      return false;
+    }
+    setState(() => _isLoading = true);
+    try {
+      final updatedAppeal = await appealApi
+          .apiWorkflowAppealsAppealIdAcceptanceEventsEventPost(
+            appealId: appealId,
+            event: event,
+            rejectionReason: rejectionReason,
+            idempotencyKey: generateIdempotencyKey(),
+          )
+          .timeout(const Duration(seconds: 5));
+      _showSnackBar(successMessage);
+      widget.onAppealUpdated?.call(updatedAppeal);
+      if (closePage && mounted) {
+        Navigator.pop(context, true);
+      }
+      return true;
+    } catch (e) {
+      developer.log('Error triggering appeal acceptance event $event: $e',
+          stackTrace: StackTrace.current);
+      _showSnackBar(formatAppealAdminError(e), isError: true);
+      return false;
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _triggerProcessEvent({
+    required int appealId,
+    required String event,
+    required String successMessage,
+  }) async {
+    if (widget.appeal.appealId == null) {
+      _showSnackBar('appealAdmin.error.invalidAppealId'.tr, isError: true);
+      return;
+    }
+    setState(() => _isLoading = true);
+    try {
+      final updatedAppeal = await appealApi
+          .apiWorkflowAppealsAppealIdEventsEventPost(
+            appealId: appealId,
+            event: event,
+            idempotencyKey: generateIdempotencyKey(),
+          )
+          .timeout(const Duration(seconds: 5));
+      _showSnackBar(successMessage);
+      widget.onAppealUpdated?.call(updatedAppeal);
+      if (mounted) Navigator.pop(context, true);
+    } catch (e) {
+      developer.log('Error triggering appeal process event $event: $e',
+          stackTrace: StackTrace.current);
+      _showSnackBar(formatAppealAdminError(e), isError: true);
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  bool _isAcceptancePending() {
+    return normalizeAppealStatusCode(widget.appeal.acceptanceStatus) ==
+        appealPendingStatusCode();
+  }
+
+  bool _isAcceptanceAccepted() {
+    return normalizeAppealStatusCode(widget.appeal.acceptanceStatus) ==
+        'Accepted';
+  }
+
+  bool _isAcceptanceRejected() {
+    return normalizeAppealStatusCode(widget.appeal.acceptanceStatus) ==
+        appealRejectedStatusCode();
+  }
+
+  bool _isAcceptanceNeedSupplement() {
+    return normalizeAppealStatusCode(widget.appeal.acceptanceStatus) ==
+        'Need_Supplement';
+  }
+
+  bool _isProcessUnprocessed() {
+    return normalizeAppealStatusCode(widget.appeal.processStatus) ==
+        'Unprocessed';
+  }
+
+  bool _isProcessUnderReview() {
+    return normalizeAppealStatusCode(widget.appeal.processStatus) ==
+        'Under_Review';
   }
 
   void _showSnackBar(String message, {bool isError = false}) {
@@ -1262,8 +1396,12 @@ class _AppealDetailPageState extends State<AppealDetailPage> {
       final contact = widget.appeal.appellantContact ?? 'common.notFilled'.tr;
       final reason = widget.appeal.appealReason ?? 'common.notFilled'.tr;
       final time = formatAppealDateTime(widget.appeal.appealTime);
-      final status = localizeAppealStatus(widget.appeal.processStatus);
-      final result = widget.appeal.processResult ?? 'common.notFilled'.tr;
+      final acceptanceStatus =
+          localizeAppealStatus(widget.appeal.acceptanceStatus);
+      final processStatus = localizeAppealStatus(widget.appeal.processStatus);
+      final result = widget.appeal.processResult ??
+          widget.appeal.rejectionReason ??
+          'common.notFilled'.tr;
 
       return DashboardPageTemplate(
         theme: themeData,
@@ -1372,8 +1510,18 @@ class _AppealDetailPageState extends State<AppealDetailPage> {
                                       time,
                                       themeData,
                                     ),
+                                    _buildDetailRow(
+                                      'appeal.detail.acceptanceStatus'.tr,
+                                      acceptanceStatus,
+                                      themeData,
+                                      valueColor: isRejectedAppealStatus(
+                                              widget.appeal.acceptanceStatus)
+                                          ? Colors.red
+                                          : themeData
+                                              .colorScheme.onSurfaceVariant,
+                                    ),
                                     _buildDetailRow('appeal.detail.status'.tr,
-                                        status, themeData,
+                                        processStatus, themeData,
                                         valueColor: isApprovedAppealStatus(
                                                 widget.appeal.processStatus)
                                             ? Colors.green
@@ -1392,21 +1540,20 @@ class _AppealDetailPageState extends State<AppealDetailPage> {
                               ),
                             ),
                             const SizedBox(height: 24),
-                            if (_isAdmin &&
-                                isPendingAppealStatus(
-                                  widget.appeal.processStatus,
-                                )) ...[
-                              Row(
-                                mainAxisAlignment:
-                                    MainAxisAlignment.spaceEvenly,
+                            if (_isAdmin && _isAcceptancePending()) ...[
+                              Wrap(
+                                alignment: WrapAlignment.center,
+                                spacing: 12.0,
+                                runSpacing: 12.0,
                                 children: [
                                   ElevatedButton.icon(
-                                    onPressed: () => _approveAppeal(
+                                    onPressed: () => _acceptAppeal(
                                         widget.appeal.appealId ?? 0),
                                     icon: const Icon(CupertinoIcons.checkmark,
                                         size: 20),
-                                    label:
-                                        Text('appealAdmin.action.approve'.tr),
+                                    label: Text(
+                                        'lookup.appealAcceptanceEventType.accept'
+                                            .tr),
                                     style: ElevatedButton.styleFrom(
                                       backgroundColor: Colors.green,
                                       foregroundColor: Colors.white,
@@ -1419,11 +1566,32 @@ class _AppealDetailPageState extends State<AppealDetailPage> {
                                     ),
                                   ),
                                   ElevatedButton.icon(
-                                    onPressed: () => _rejectAppeal(
+                                    onPressed: () => _requestSupplement(
+                                        widget.appeal.appealId ?? 0),
+                                    icon: const Icon(CupertinoIcons.doc_text,
+                                        size: 20),
+                                    label: Text(
+                                        'lookup.appealAcceptanceEventType.requestSupplement'
+                                            .tr),
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: Colors.orange,
+                                      foregroundColor: Colors.white,
+                                      shape: RoundedRectangleBorder(
+                                          borderRadius:
+                                              BorderRadius.circular(12.0)),
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 20.0, vertical: 12.0),
+                                      elevation: 2,
+                                    ),
+                                  ),
+                                  ElevatedButton.icon(
+                                    onPressed: () => _rejectAcceptedAppeal(
                                         widget.appeal.appealId ?? 0),
                                     icon: const Icon(CupertinoIcons.xmark,
                                         size: 20),
-                                    label: Text('appealAdmin.action.reject'.tr),
+                                    label: Text(
+                                        'lookup.appealAcceptanceEventType.reject'
+                                            .tr),
                                     style: ElevatedButton.styleFrom(
                                       backgroundColor:
                                           themeData.colorScheme.error,
@@ -1435,6 +1603,100 @@ class _AppealDetailPageState extends State<AppealDetailPage> {
                                       padding: const EdgeInsets.symmetric(
                                           horizontal: 20.0, vertical: 12.0),
                                       elevation: 2,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ] else if (_isAdmin &&
+                                _isAcceptanceNeedSupplement()) ...[
+                              Center(
+                                child: ElevatedButton.icon(
+                                  onPressed: () => _markSupplementComplete(
+                                      widget.appeal.appealId ?? 0),
+                                  icon: const Icon(
+                                      CupertinoIcons.arrow_clockwise,
+                                      size: 20),
+                                  label: Text(
+                                      'lookup.appealAcceptanceEventType.supplementComplete'
+                                          .tr),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor:
+                                        themeData.colorScheme.primary,
+                                    foregroundColor:
+                                        themeData.colorScheme.onPrimary,
+                                  ),
+                                ),
+                              ),
+                            ] else if (_isAdmin && _isAcceptanceRejected()) ...[
+                              Center(
+                                child: ElevatedButton.icon(
+                                  onPressed: () => _resubmitAppeal(
+                                      widget.appeal.appealId ?? 0),
+                                  icon: const Icon(CupertinoIcons.refresh,
+                                      size: 20),
+                                  label: Text(
+                                      'lookup.appealAcceptanceEventType.resubmit'
+                                          .tr),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor:
+                                        themeData.colorScheme.primary,
+                                    foregroundColor:
+                                        themeData.colorScheme.onPrimary,
+                                  ),
+                                ),
+                              ),
+                            ] else if (_isAdmin &&
+                                _isAcceptanceAccepted() &&
+                                _isProcessUnprocessed()) ...[
+                              Center(
+                                child: ElevatedButton.icon(
+                                  onPressed: () =>
+                                      _startReview(widget.appeal.appealId ?? 0),
+                                  icon: const Icon(CupertinoIcons.play_arrow,
+                                      size: 20),
+                                  label: Text(
+                                      'lookup.appealProcessEventType.startReview'
+                                          .tr),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor:
+                                        themeData.colorScheme.primary,
+                                    foregroundColor:
+                                        themeData.colorScheme.onPrimary,
+                                  ),
+                                ),
+                              ),
+                            ] else if (_isAdmin && _isProcessUnderReview()) ...[
+                              Wrap(
+                                alignment: WrapAlignment.center,
+                                spacing: 12.0,
+                                runSpacing: 12.0,
+                                children: [
+                                  ElevatedButton.icon(
+                                    onPressed: () => _approveAppeal(
+                                        widget.appeal.appealId ?? 0),
+                                    icon: const Icon(CupertinoIcons.checkmark,
+                                        size: 20),
+                                    label: Text(
+                                        'lookup.appealProcessEventType.approve'
+                                            .tr),
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: Colors.green,
+                                      foregroundColor: Colors.white,
+                                    ),
+                                  ),
+                                  ElevatedButton.icon(
+                                    onPressed: () => _rejectReviewedAppeal(
+                                        widget.appeal.appealId ?? 0),
+                                    icon: const Icon(CupertinoIcons.xmark,
+                                        size: 20),
+                                    label: Text(
+                                        'lookup.appealProcessEventType.reject'
+                                            .tr),
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor:
+                                          themeData.colorScheme.error,
+                                      foregroundColor:
+                                          themeData.colorScheme.onError,
                                     ),
                                   ),
                                 ],
