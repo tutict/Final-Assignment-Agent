@@ -1,16 +1,47 @@
-# final_assignment_front
+# Traffic Management Flutter App
 
-A new Flutter project.
+## 项目简介
 
-## Getting Started
+这是交通违法业务处理系统的 Flutter 客户端，面向普通用户和后台管理人员提供统一的业务入口。应用覆盖违法查询、罚款缴纳、申诉处理、车辆管理、办理进度跟踪和个人信息维护等核心场景，用于配合后端完成完整的交通违法闭环处理流程。
 
-This project is a starting point for a Flutter application.
+## 核心能力
 
-A few resources to get you started if this is your first Flutter project:
+- 用户端：查看违法记录、缴纳罚款、提交和撤回申诉、查询办理进度、维护个人与驾驶人信息
+- 管理端：查看业务数据、处理违法与罚款记录、管理日志与系统配置
+- 统一鉴权：基于 JWT 的登录态管理和接口访问控制
+- 多语言支持：内置中英文文案映射
+- 主题能力：支持页面主题切换和统一 Dashboard 布局
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+## 目录说明
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+- `lib/features/`：业务页面、接口封装、数据模型
+- `lib/config/`：路由、主题和应用级配置
+- `lib/i18n/`：国际化文案与本地化格式化工具
+- `lib/utils/`：通用工具、鉴权存储、网络请求封装
+
+## 运行方式
+
+1. 安装 Flutter 依赖
+
+```bash
+flutter pub get
+```
+
+2. 启动应用
+
+```bash
+flutter run
+```
+
+3. 进行静态检查
+
+```bash
+flutter analyze
+```
+
+## 开发说明
+
+- 默认通过 `features/api/` 中的接口类与后端通信
+- 登录令牌保存在本地存储中，应用启动后会根据令牌恢复登录状态
+- 页面主要通过 GetX 控制器组织状态和路由跳转
+- 国际化文案集中维护在 `lib/i18n/app_translations.dart`
