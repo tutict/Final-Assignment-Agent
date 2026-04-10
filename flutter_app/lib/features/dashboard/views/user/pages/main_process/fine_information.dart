@@ -8,6 +8,7 @@ import 'package:final_assignment_front/features/model/fine_information.dart';
 import 'package:final_assignment_front/features/model/payment_record.dart';
 import 'package:final_assignment_front/i18n/api_error_localizers.dart';
 import 'package:final_assignment_front/i18n/fine_localizers.dart';
+import 'package:final_assignment_front/i18n/i18n_utils.dart';
 import 'package:final_assignment_front/i18n/status_localizers.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
@@ -223,10 +224,158 @@ class _FineInformationPageState extends State<FineInformationPage> {
     }
   }
 
+  Future<List<PaymentRecordModel>> _loadPaymentHistory(int? fineId) async {
+    if (fineId == null) {
+      return const [];
+    }
+    try {
+      final payments = <PaymentRecordModel>[];
+      var page = 1;
+      while (true) {
+        final pageItems = await paymentApi.apiPaymentsMeGet(
+          fineId: fineId,
+          page: page,
+          size: _pageSize,
+        );
+        payments.addAll(pageItems);
+        if (pageItems.length < _pageSize) {
+          break;
+        }
+        page++;
+      }
+      return payments;
+    } catch (e) {
+      developer.log('Error loading payment history for fine $fineId: $e');
+      rethrow;
+    }
+  }
+
+  String _formatPaymentDateTime(DateTime? value) {
+    return formatLocalizedDateTime(
+      value,
+      includeSeconds: false,
+      emptyKey: 'common.none',
+    );
+  }
+
+  Widget _buildPaymentHistorySection(
+    ThemeData themeData,
+    Future<List<PaymentRecordModel>> paymentHistoryFuture,
+  ) {
+    return FutureBuilder<List<PaymentRecordModel>>(
+      future: paymentHistoryFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Padding(
+            padding: EdgeInsets.symmetric(vertical: 12),
+            child: Center(child: CircularProgressIndicator()),
+          );
+        }
+        if (snapshot.hasError) {
+          return Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(
+              'fine.paymentHistory.loadFailed'.trParams({
+                'error': localizeApiErrorDetail(snapshot.error),
+              }),
+              style: themeData.textTheme.bodyMedium?.copyWith(
+                color: themeData.colorScheme.error,
+              ),
+            ),
+          );
+        }
+        final payments = snapshot.data ?? const <PaymentRecordModel>[];
+        if (payments.isEmpty) {
+          return Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(
+              'fine.paymentHistory.empty'.tr,
+              style: themeData.textTheme.bodyMedium?.copyWith(
+                color: themeData.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          );
+        }
+        return Column(
+          children: payments
+              .map((payment) => Card(
+                    margin: const EdgeInsets.only(top: 12),
+                    color: themeData.colorScheme.surfaceContainerLowest,
+                    child: Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'fine.paymentHistory.recordTitle'.trParams({
+                              'amount': (payment.paymentAmount ?? 0)
+                                  .toStringAsFixed(2),
+                            }),
+                            style: themeData.textTheme.titleSmall?.copyWith(
+                              color: themeData.colorScheme.onSurface,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          _buildDetailRow(
+                            'fine.paymentHistory.status'.tr,
+                            localizePaymentStatus(payment.paymentStatus),
+                            themeData,
+                          ),
+                          _buildDetailRow(
+                            'fine.paymentHistory.time'.tr,
+                            _formatPaymentDateTime(
+                              payment.paymentTime ?? payment.createdAt,
+                            ),
+                            themeData,
+                          ),
+                          _buildDetailRow(
+                            'fine.paymentHistory.method'.tr,
+                            payment.paymentMethod ?? 'common.none'.tr,
+                            themeData,
+                          ),
+                          _buildDetailRow(
+                            'fine.paymentHistory.channel'.tr,
+                            payment.paymentChannel ?? 'common.none'.tr,
+                            themeData,
+                          ),
+                          _buildDetailRow(
+                            'fine.paymentHistory.paymentNumber'.tr,
+                            payment.paymentNumber ?? 'common.none'.tr,
+                            themeData,
+                          ),
+                          _buildDetailRow(
+                            'fine.paymentHistory.transactionId'.tr,
+                            payment.transactionId ?? 'common.none'.tr,
+                            themeData,
+                          ),
+                          if (payment.refundAmount != null &&
+                              payment.refundAmount! > 0)
+                            _buildDetailRow(
+                              'fine.paymentHistory.refund'.tr,
+                              'fine.paymentHistory.refundValue'.trParams({
+                                'amount':
+                                    payment.refundAmount!.toStringAsFixed(2),
+                                'time':
+                                    _formatPaymentDateTime(payment.refundTime),
+                              }),
+                              themeData,
+                            ),
+                        ],
+                      ),
+                    ),
+                  ))
+              .toList(),
+        );
+      },
+    );
+  }
+
   void _showFineDetailsDialog(FineInformation fine) {
     final themeData = controller.currentBodyTheme.value;
     final outstandingAmount = _resolveOutstandingAmount(fine);
     final canSubmitPayment = _canSubmitPayment(fine);
+    final paymentHistoryFuture = _loadPaymentHistory(fine.fineId);
 
     showDialog(
       context: context,
@@ -266,6 +415,15 @@ class _FineInformationPageState extends State<FineInformationPage> {
                   '\$${outstandingAmount.toStringAsFixed(2)}', themeData),
               _buildDetailRow('fine.detail.remarks'.tr,
                   fine.remarks ?? 'common.none'.tr, themeData),
+              const SizedBox(height: 16),
+              Text(
+                'fine.paymentHistory.title'.tr,
+                style: themeData.textTheme.titleMedium?.copyWith(
+                  color: themeData.colorScheme.onSurface,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              _buildPaymentHistorySection(themeData, paymentHistoryFuture),
               if (canSubmitPayment) ...[
                 const SizedBox(height: 16),
                 SizedBox(

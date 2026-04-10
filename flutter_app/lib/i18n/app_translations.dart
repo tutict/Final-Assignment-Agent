@@ -523,6 +523,7 @@ class AppTranslations extends Translations {
     'business.menu.offenseDetail': 'Offense details',
     'business.menu.finePayment': 'Fine payment',
     'business.menu.userAppeal': 'User appeal',
+    'business.menu.onlineProcessingProgress': 'Processing progress',
     'business.menu.vehicleManagement': 'Vehicle registration management',
     'loginLog.page.title': 'Login logs',
     'loginLog.error.unauthorized': 'Unauthorized. Please sign in again.',
@@ -1083,6 +1084,18 @@ class AppTranslations extends Translations {
     'fine.detail.status': 'Status',
     'fine.detail.outstanding': 'Outstanding amount',
     'fine.detail.remarks': 'Remarks',
+    'fine.paymentHistory.title': 'Payment history',
+    'fine.paymentHistory.empty': 'No payment records yet.',
+    'fine.paymentHistory.loadFailed': 'Failed to load payment history: @error',
+    'fine.paymentHistory.recordTitle': 'Payment amount: \$@amount',
+    'fine.paymentHistory.status': 'Payment status',
+    'fine.paymentHistory.time': 'Payment time',
+    'fine.paymentHistory.method': 'Payment method',
+    'fine.paymentHistory.channel': 'Payment channel',
+    'fine.paymentHistory.paymentNumber': 'Payment number',
+    'fine.paymentHistory.transactionId': 'Transaction ID',
+    'fine.paymentHistory.refund': 'Refund information',
+    'fine.paymentHistory.refundValue': '\$@amount at @time',
     'fine.qr.alipayHint': 'Scan the QR code below with Alipay to pay',
     'fine.action.close': 'Close',
     'fine.action.payNow': 'Pay now (\$@amount)',
@@ -1255,6 +1268,7 @@ class AppTranslations extends Translations {
     'appeal.action.submit': 'Submit appeal',
     'appeal.action.supplementComplete': 'Submit supplemental materials',
     'appeal.action.resubmit': 'Resubmit appeal',
+    'appeal.action.withdraw': 'Withdraw appeal',
     'appeal.empty.byAppellant': 'No appeal records matched appellant @name',
     'appeal.card.title': 'Appellant: @name (ID: @id)',
     'appeal.card.summary': 'Reason: @reason\nStatus: @status\nTime: @time',
@@ -1290,10 +1304,13 @@ class AppTranslations extends Translations {
         'Note: users cannot edit or delete appeals. Contact an administrator for changes.',
     'appeal.note.awaitingUserAction':
         'This appeal is waiting for your action before acceptance can continue.',
+    'appeal.note.withdrawable':
+        'You can withdraw this appeal before the review process is completed.',
     'appeal.success.supplementCompleted':
         'Your supplemental materials were submitted for acceptance review.',
     'appeal.success.resubmitted':
         'Your appeal has been resubmitted for acceptance review.',
+    'appeal.success.withdrawn': 'Your appeal has been withdrawn successfully.',
     'appealAdmin.page.title': 'Appeal review management',
     'appealAdmin.error.unauthorizedMissing':
         'Unauthorized: login information was not found. Please sign in again.',
@@ -2411,6 +2428,7 @@ class AppTranslations extends Translations {
     'business.menu.offenseDetail': '\u8fdd\u6cd5\u8be6\u60c5',
     'business.menu.finePayment': '\u7f5a\u6b3e\u7f34\u7eb3',
     'business.menu.userAppeal': '\u7528\u6237\u7533\u8bc9',
+    'business.menu.onlineProcessingProgress': '\u529e\u7406\u8fdb\u5ea6',
     'business.menu.vehicleManagement': '\u8f66\u8f86\u767b\u8bb0\u7ba1\u7406',
     'loginLog.page.title': '\u767b\u5f55\u65e5\u5fd7',
     'loginLog.error.unauthorized':
@@ -3006,6 +3024,20 @@ class AppTranslations extends Translations {
     'fine.detail.status': '\u72b6\u6001',
     'fine.detail.outstanding': '\u5f85\u7f34\u91d1\u989d',
     'fine.detail.remarks': '\u5907\u6ce8',
+    'fine.paymentHistory.title': '\u652f\u4ed8\u8bb0\u5f55',
+    'fine.paymentHistory.empty': '\u6682\u65e0\u652f\u4ed8\u8bb0\u5f55',
+    'fine.paymentHistory.loadFailed':
+        '\u652f\u4ed8\u8bb0\u5f55\u52a0\u8f7d\u5931\u8d25\uff1a@error',
+    'fine.paymentHistory.recordTitle':
+        '\u652f\u4ed8\u91d1\u989d\uff1a\$@amount',
+    'fine.paymentHistory.status': '\u652f\u4ed8\u72b6\u6001',
+    'fine.paymentHistory.time': '\u652f\u4ed8\u65f6\u95f4',
+    'fine.paymentHistory.method': '\u652f\u4ed8\u65b9\u5f0f',
+    'fine.paymentHistory.channel': '\u652f\u4ed8\u6e20\u9053',
+    'fine.paymentHistory.paymentNumber': '\u652f\u4ed8\u5355\u53f7',
+    'fine.paymentHistory.transactionId': '\u4ea4\u6613\u6d41\u6c34\u53f7',
+    'fine.paymentHistory.refund': '\u9000\u6b3e\u4fe1\u606f',
+    'fine.paymentHistory.refundValue': '\$@amount\uff0c\u65f6\u95f4\uff1a@time',
     'fine.qr.alipayHint':
         '\u8bf7\u4f7f\u7528\u652f\u4ed8\u5b9d\u626b\u63cf\u4e0b\u65b9\u4e8c\u7ef4\u7801\u5b8c\u6210\u652f\u4ed8',
     'fine.action.close': '\u5173\u95ed',
@@ -3208,6 +3240,7 @@ class AppTranslations extends Translations {
     'appeal.action.submit': '\u63d0\u4ea4\u7533\u8bc9',
     'appeal.action.supplementComplete': '\u63d0\u4ea4\u8865\u5145\u6750\u6599',
     'appeal.action.resubmit': '\u91cd\u65b0\u63d0\u4ea4\u7533\u8bc9',
+    'appeal.action.withdraw': '\u64a4\u56de\u7533\u8bc9',
     'appeal.empty.byAppellant':
         '\u6682\u65e0\u4e0e\u7533\u8bc9\u4eba @name \u5339\u914d\u7684\u7533\u8bc9\u8bb0\u5f55',
     'appeal.card.title': '\u7533\u8bc9\u4eba: @name (ID: @id)',
@@ -3246,10 +3279,13 @@ class AppTranslations extends Translations {
         '\u6ce8\u610f\uff1a\u7528\u6237\u65e0\u6cd5\u4fee\u6539\u6216\u5220\u9664\u7533\u8bc9\uff0c\u8bf7\u8054\u7cfb\u7ba1\u7406\u5458\u5904\u7406\u3002',
     'appeal.note.awaitingUserAction':
         '\u5f53\u524d\u7533\u8bc9\u9700\u8981\u4f60\u5148\u5b8c\u6210\u540e\u7eed\u64cd\u4f5c\uff0c\u624d\u80fd\u7ee7\u7eed\u53d7\u7406\u3002',
+    'appeal.note.withdrawable':
+        '\u5728\u5ba1\u6838\u7ed3\u675f\u524d\uff0c\u4f60\u53ef\u4ee5\u4e3b\u52a8\u64a4\u56de\u8fd9\u6761\u7533\u8bc9\u3002',
     'appeal.success.supplementCompleted':
         '\u8865\u5145\u6750\u6599\u5df2\u63d0\u4ea4\uff0c\u7533\u8bc9\u5df2\u9001\u56de\u5f85\u53d7\u7406',
     'appeal.success.resubmitted':
         '\u7533\u8bc9\u5df2\u91cd\u65b0\u63d0\u4ea4\u5f85\u53d7\u7406',
+    'appeal.success.withdrawn': '\u7533\u8bc9\u5df2\u6210\u529f\u64a4\u56de',
     'appealAdmin.page.title': '\u7533\u8bc9\u5ba1\u6279\u7ba1\u7406',
     'appealAdmin.error.unauthorizedMissing':
         '\u672a\u6388\u6743\uff1a\u672a\u627e\u5230\u767b\u5f55\u4fe1\u606f\uff0c\u8bf7\u91cd\u65b0\u767b\u5f55',

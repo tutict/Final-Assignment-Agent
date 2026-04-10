@@ -1,6 +1,7 @@
 package com.tutict.finalassignmentbackend.controller;
 
 import com.tutict.finalassignmentbackend.config.statemachine.events.AppealAcceptanceEvent;
+import com.tutict.finalassignmentbackend.config.statemachine.events.AppealProcessEvent;
 import com.tutict.finalassignmentbackend.entity.AppealRecord;
 import com.tutict.finalassignmentbackend.entity.AppealReview;
 import com.tutict.finalassignmentbackend.service.CurrentUserTrafficSupportService;
@@ -30,7 +31,7 @@ import java.util.logging.Logger;
 
 @RestController
 @RequestMapping("/api/appeals")
-@Tag(name = "Appeal Management", description = "违法申诉记录及复核管理接口")
+@Tag(name = "Appeal Management", description = "Appeal Management endpoints")
 @SecurityRequirement(name = "bearerAuth")
 @RolesAllowed({"SUPER_ADMIN", "ADMIN", "APPEAL_REVIEWER"})
 public class AppealManagementController {
@@ -51,7 +52,7 @@ public class AppealManagementController {
 
     @GetMapping("/me")
     @RolesAllowed({"USER"})
-    @Operation(summary = "查询当前登录用户申诉记录")
+    @Operation(summary = "List Current User Appeals")
     public ResponseEntity<List<AppealRecord>> listCurrentUserAppeals(@RequestParam(defaultValue = "1") int page,
                                                                      @RequestParam(defaultValue = "20") int size) {
         try {
@@ -66,7 +67,7 @@ public class AppealManagementController {
 
     @PostMapping("/me")
     @RolesAllowed({"USER"})
-    @Operation(summary = "创建当前登录用户申诉记录")
+    @Operation(summary = "Create Current User Appeal")
     public ResponseEntity<AppealRecord> createCurrentUserAppeal(@RequestBody AppealRecord request,
                                                                 @RequestHeader(value = "Idempotency-Key", required = false)
                                                                 String idempotencyKey) {
@@ -100,7 +101,7 @@ public class AppealManagementController {
 
     @PostMapping("/me/{appealId}/acceptance-events/{event}")
     @RolesAllowed({"USER"})
-    @Operation(summary = "Current user triggers a self-service appeal acceptance event")
+    @Operation(summary = "Trigger Current User Appeal Acceptance Event")
     public ResponseEntity<AppealRecord> triggerCurrentUserAppealAcceptanceEvent(@PathVariable Long appealId,
                                                                                 @PathVariable AppealAcceptanceEvent event,
                                                                                 @RequestBody(required = false)
@@ -123,8 +124,28 @@ public class AppealManagementController {
         }
     }
 
+    @PostMapping("/me/{appealId}/process-events/{event}")
+    @RolesAllowed({"USER"})
+    @Operation(summary = "Trigger Current User Appeal Process Event")
+    public ResponseEntity<AppealRecord> triggerCurrentUserAppealProcessEvent(@PathVariable Long appealId,
+                                                                             @PathVariable AppealProcessEvent event) {
+        try {
+            return ResponseEntity.ok(
+                    currentUserTrafficSupportService.triggerCurrentUserAppealProcessEvent(appealId, event));
+        } catch (IllegalArgumentException ex) {
+            LOG.log(Level.WARNING, "Current user appeal process event rejected", ex);
+            return ResponseEntity.badRequest().build();
+        } catch (IllegalStateException ex) {
+            LOG.log(Level.WARNING, "Current user appeal process transition failed", ex);
+            return ResponseEntity.status(HttpStatus.CONFLICT).build();
+        } catch (Exception ex) {
+            LOG.log(Level.SEVERE, "Current user appeal process transition failed unexpectedly", ex);
+            return ResponseEntity.status(resolveStatus(ex)).build();
+        }
+    }
+
     @PostMapping
-    @Operation(summary = "创建申诉记录")
+    @Operation(summary = "Create Appeal")
     public ResponseEntity<AppealRecord> createAppeal(@RequestBody AppealRecord request,
                                                      @RequestHeader(value = "Idempotency-Key", required = false)
                                                      String idempotencyKey) {
@@ -152,7 +173,7 @@ public class AppealManagementController {
     }
 
     @PutMapping("/{appealId}")
-    @Operation(summary = "更新申诉记录")
+    @Operation(summary = "Update Appeal")
     public ResponseEntity<AppealRecord> updateAppeal(@PathVariable Long appealId,
                                                      @RequestBody AppealRecord request,
                                                      @RequestHeader(value = "Idempotency-Key", required = false)
@@ -161,13 +182,13 @@ public class AppealManagementController {
     }
 
     @DeleteMapping("/{appealId}")
-    @Operation(summary = "删除申诉记录")
+    @Operation(summary = "Delete Appeal")
     public ResponseEntity<Void> deleteAppeal(@PathVariable Long appealId) {
         return ResponseEntity.status(HttpStatus.METHOD_NOT_ALLOWED).build();
     }
 
     @GetMapping("/{appealId}")
-    @Operation(summary = "查询申诉详情")
+    @Operation(summary = "Get Appeal")
     public ResponseEntity<AppealRecord> getAppeal(@PathVariable Long appealId) {
         try {
             AppealRecord record = appealRecordService.getAppealById(appealId);
@@ -179,7 +200,7 @@ public class AppealManagementController {
     }
 
     @GetMapping
-    @Operation(summary = "按违法记录分页查询申诉")
+    @Operation(summary = "List Appeals")
     public ResponseEntity<List<AppealRecord>> listAppeals(@RequestParam(required = false) Long offenseId,
                                                           @RequestParam(defaultValue = "1") int page,
                                                           @RequestParam(defaultValue = "20") int size) {
@@ -194,7 +215,7 @@ public class AppealManagementController {
     }
 
     @GetMapping("/search/number/prefix")
-    @Operation(summary = "Search appeals by number prefix")
+    @Operation(summary = "Search By Number Prefix")
     public ResponseEntity<List<AppealRecord>> searchByNumberPrefix(@RequestParam String appealNumber,
                                                                    @RequestParam(defaultValue = "1") int page,
                                                                    @RequestParam(defaultValue = "20") int size) {
@@ -202,7 +223,7 @@ public class AppealManagementController {
     }
 
     @GetMapping("/search/number/fuzzy")
-    @Operation(summary = "Search appeals by number (legacy exact match)")
+    @Operation(summary = "Search By Number Fuzzy")
     public ResponseEntity<List<AppealRecord>> searchByNumberFuzzy(@RequestParam String appealNumber,
                                                                   @RequestParam(defaultValue = "1") int page,
                                                                   @RequestParam(defaultValue = "20") int size) {
@@ -210,7 +231,7 @@ public class AppealManagementController {
     }
 
     @GetMapping("/search/reason/fuzzy")
-    @Operation(summary = "Search appeals by reason fuzzy")
+    @Operation(summary = "Search By Reason Fuzzy")
     public ResponseEntity<List<AppealRecord>> searchByReasonFuzzy(@RequestParam String appealReason,
                                                                   @RequestParam(defaultValue = "1") int page,
                                                                   @RequestParam(defaultValue = "20") int size) {
@@ -218,7 +239,7 @@ public class AppealManagementController {
     }
 
     @GetMapping("/search/appellant/name/prefix")
-    @Operation(summary = "Search appeals by appellant name prefix")
+    @Operation(summary = "Search By Appellant Name Prefix")
     public ResponseEntity<List<AppealRecord>> searchByAppellantNamePrefix(@RequestParam String appellantName,
                                                                           @RequestParam(defaultValue = "1") int page,
                                                                           @RequestParam(defaultValue = "20") int size) {
@@ -226,7 +247,7 @@ public class AppealManagementController {
     }
 
     @GetMapping("/search/appellant/name/fuzzy")
-    @Operation(summary = "Search appeals by appellant name fuzzy")
+    @Operation(summary = "Search By Appellant Name Fuzzy")
     public ResponseEntity<List<AppealRecord>> searchByAppellantNameFuzzy(@RequestParam String appellantName,
                                                                          @RequestParam(defaultValue = "1") int page,
                                                                          @RequestParam(defaultValue = "20") int size) {
@@ -234,7 +255,7 @@ public class AppealManagementController {
     }
 
     @GetMapping("/search/appellant/id-card")
-    @Operation(summary = "Search appeals by appellant ID card")
+    @Operation(summary = "Search By Appellant Id Card")
     public ResponseEntity<List<AppealRecord>> searchByAppellantIdCard(@RequestParam String appellantIdCard,
                                                                       @RequestParam(defaultValue = "1") int page,
                                                                       @RequestParam(defaultValue = "20") int size) {
@@ -242,7 +263,7 @@ public class AppealManagementController {
     }
 
     @GetMapping("/search/acceptance-status")
-    @Operation(summary = "Search appeals by acceptance status")
+    @Operation(summary = "Search By Acceptance Status")
     public ResponseEntity<List<AppealRecord>> searchByAcceptanceStatus(@RequestParam String acceptanceStatus,
                                                                        @RequestParam(defaultValue = "1") int page,
                                                                        @RequestParam(defaultValue = "20") int size) {
@@ -250,7 +271,7 @@ public class AppealManagementController {
     }
 
     @GetMapping("/search/process-status")
-    @Operation(summary = "Search appeals by process status")
+    @Operation(summary = "Search By Process Status")
     public ResponseEntity<List<AppealRecord>> searchByProcessStatus(@RequestParam String processStatus,
                                                                     @RequestParam(defaultValue = "1") int page,
                                                                     @RequestParam(defaultValue = "20") int size) {
@@ -258,7 +279,7 @@ public class AppealManagementController {
     }
 
     @GetMapping("/search/time-range")
-    @Operation(summary = "Search appeals by appeal time range")
+    @Operation(summary = "Search By Time Range")
     public ResponseEntity<List<AppealRecord>> searchByTimeRange(@RequestParam String startTime,
                                                                 @RequestParam String endTime,
                                                                 @RequestParam(defaultValue = "1") int page,
@@ -267,7 +288,7 @@ public class AppealManagementController {
     }
 
     @GetMapping("/search/handler")
-    @Operation(summary = "Search appeals by acceptance handler")
+    @Operation(summary = "Search By Handler")
     public ResponseEntity<List<AppealRecord>> searchByHandler(@RequestParam String acceptanceHandler,
                                                               @RequestParam(defaultValue = "1") int page,
                                                               @RequestParam(defaultValue = "20") int size) {
@@ -275,7 +296,7 @@ public class AppealManagementController {
     }
 
     @PostMapping("/{appealId}/reviews")
-    @Operation(summary = "创建复核记录")
+    @Operation(summary = "Create Review")
     public ResponseEntity<AppealReview> createReview(@PathVariable Long appealId,
                                                      @RequestBody AppealReview review,
                                                      @RequestHeader(value = "Idempotency-Key", required = false)
@@ -305,7 +326,7 @@ public class AppealManagementController {
     }
 
     @PutMapping("/reviews/{reviewId}")
-    @Operation(summary = "更新复核记录")
+    @Operation(summary = "Update Review")
     public ResponseEntity<AppealReview> updateReview(@PathVariable Long reviewId,
                                                      @RequestBody AppealReview review,
                                                      @RequestHeader(value = "Idempotency-Key", required = false)
@@ -314,13 +335,13 @@ public class AppealManagementController {
     }
 
     @DeleteMapping("/reviews/{reviewId}")
-    @Operation(summary = "删除复核记录")
+    @Operation(summary = "Delete Review")
     public ResponseEntity<Void> deleteReview(@PathVariable Long reviewId) {
         return ResponseEntity.status(HttpStatus.METHOD_NOT_ALLOWED).build();
     }
 
     @GetMapping("/reviews/{reviewId}")
-    @Operation(summary = "查询复核详情")
+    @Operation(summary = "Get Review")
     public ResponseEntity<AppealReview> getReview(@PathVariable Long reviewId) {
         try {
             AppealReview review = appealReviewService.findById(reviewId);
@@ -332,7 +353,7 @@ public class AppealManagementController {
     }
 
     @GetMapping("/reviews")
-    @Operation(summary = "查询全部复核记录")
+    @Operation(summary = "List Reviews")
     public ResponseEntity<List<AppealReview>> listReviews(@RequestParam(defaultValue = "1") int page,
                                                           @RequestParam(defaultValue = "20") int size) {
         try {
@@ -344,7 +365,7 @@ public class AppealManagementController {
     }
 
     @GetMapping("/reviews/search/reviewer")
-    @Operation(summary = "Search appeal reviews by reviewer")
+    @Operation(summary = "Search Reviews By Reviewer")
     public ResponseEntity<List<AppealReview>> searchReviewsByReviewer(@RequestParam String reviewer,
                                                                       @RequestParam(defaultValue = "1") int page,
                                                                       @RequestParam(defaultValue = "20") int size) {
@@ -352,7 +373,7 @@ public class AppealManagementController {
     }
 
     @GetMapping("/reviews/search/reviewer-dept")
-    @Operation(summary = "Search appeal reviews by reviewer department")
+    @Operation(summary = "Search Reviews By Reviewer Dept")
     public ResponseEntity<List<AppealReview>> searchReviewsByReviewerDept(@RequestParam String reviewerDept,
                                                                           @RequestParam(defaultValue = "1") int page,
                                                                           @RequestParam(defaultValue = "20") int size) {
@@ -360,7 +381,7 @@ public class AppealManagementController {
     }
 
     @GetMapping("/reviews/search/time-range")
-    @Operation(summary = "Search appeal reviews by review time range")
+    @Operation(summary = "Search Reviews By Time Range")
     public ResponseEntity<List<AppealReview>> searchReviewsByTimeRange(@RequestParam String startTime,
                                                                        @RequestParam String endTime,
                                                                        @RequestParam(defaultValue = "1") int page,
@@ -369,7 +390,7 @@ public class AppealManagementController {
     }
 
     @GetMapping("/reviews/count")
-    @Operation(summary = "按复核级别统计数量")
+    @Operation(summary = "Count Reviews")
     public ResponseEntity<Map<String, Object>> countReviews(@RequestParam("level") String reviewLevel) {
         try {
             long total = appealReviewService.countByReviewLevel(reviewLevel);

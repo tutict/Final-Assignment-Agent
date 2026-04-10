@@ -210,6 +210,26 @@ class AppealManagementControllerApi {
     return AppealRecordModel.fromJson(jsonDecode(body) as Map<String, dynamic>);
   }
 
+  Future<AppealRecordModel> apiAppealsMeAppealIdProcessEventsEventPost({
+    required int appealId,
+    required String event,
+    String? idempotencyKey,
+  }) async {
+    final response = await apiClient.invokeAPI(
+      '/api/appeals/me/$appealId/process-events/$event',
+      'POST',
+      const [],
+      null,
+      await _getHeaders(idempotencyKey: idempotencyKey),
+      const {},
+      'application/json',
+      ['bearerAuth'],
+    );
+    _ensureSuccess(response);
+    final body = _decodeBodyBytes(response);
+    return AppealRecordModel.fromJson(jsonDecode(body) as Map<String, dynamic>);
+  }
+
   /// GET /api/appeals/search/number/prefix
   Future<List<AppealRecordModel>> apiAppealsSearchNumberPrefixGet({
     required String appealNumber,

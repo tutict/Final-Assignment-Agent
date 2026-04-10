@@ -27,7 +27,7 @@ import java.util.logging.Logger;
 
 @RestController
 @RequestMapping("/api/payments")
-@Tag(name = "Payment Management", description = "罚款支付记录管理接口")
+@Tag(name = "", description = " endpoints")
 @SecurityRequirement(name = "bearerAuth")
 @RolesAllowed({"SUPER_ADMIN", "ADMIN", "FINANCE"})
 public class PaymentRecordController {
@@ -45,7 +45,7 @@ public class PaymentRecordController {
 
     @PostMapping("/me")
     @RolesAllowed({"SUPER_ADMIN", "ADMIN", "FINANCE", "USER"})
-    @Operation(summary = "Create a payment record for the current user")
+    @Operation(summary = "Create Current User Payment")
     public ResponseEntity<PaymentRecord> createCurrentUserPayment(@RequestBody PaymentRecord request,
                                                                   @RequestHeader(value = "Idempotency-Key", required = false)
                                                                   String idempotencyKey) {
@@ -71,8 +71,24 @@ public class PaymentRecordController {
         }
     }
 
+    @GetMapping("/me")
+    @RolesAllowed({"USER"})
+    @Operation(summary = "List Current User Payments")
+    public ResponseEntity<List<PaymentRecord>> listCurrentUserPayments(@RequestParam(defaultValue = "1") int page,
+                                                                       @RequestParam(defaultValue = "20") int size,
+                                                                       @RequestParam(required = false) Long fineId) {
+        try {
+            return ResponseEntity.ok(fineId == null
+                    ? currentUserTrafficSupportService.listCurrentUserPayments(page, size)
+                    : currentUserTrafficSupportService.listCurrentUserPaymentsByFineId(fineId, page, size));
+        } catch (Exception ex) {
+            LOG.log(Level.WARNING, "List current user payments failed", ex);
+            return ResponseEntity.status(resolveStatus(ex)).build();
+        }
+    }
+
     @PostMapping
-    @Operation(summary = "创建支付记录")
+    @Operation(summary = "Create Payment")
     public ResponseEntity<PaymentRecord> createPayment(@RequestBody PaymentRecord request,
                                                        @RequestHeader(value = "Idempotency-Key", required = false)
                                                        String idempotencyKey) {
@@ -99,7 +115,7 @@ public class PaymentRecordController {
     }
 
     @PutMapping("/{paymentId}")
-    @Operation(summary = "更新支付记录")
+    @Operation(summary = "Update Payment")
     public ResponseEntity<PaymentRecord> updatePayment(@PathVariable Long paymentId,
                                                        @RequestBody PaymentRecord request,
                                                        @RequestHeader(value = "Idempotency-Key", required = false)
@@ -108,27 +124,27 @@ public class PaymentRecordController {
     }
 
     @DeleteMapping("/{paymentId}")
-    @Operation(summary = "删除支付记录")
+    @Operation(summary = "Delete Payment")
     public ResponseEntity<Void> deletePayment(@PathVariable Long paymentId) {
         return ResponseEntity.status(HttpStatus.METHOD_NOT_ALLOWED).build();
     }
 
     @GetMapping("/{paymentId}")
-    @Operation(summary = "查询支付记录详情")
+    @Operation(summary = "Get Payment")
     public ResponseEntity<PaymentRecord> getPayment(@PathVariable Long paymentId) {
         PaymentRecord record = paymentRecordService.findById(paymentId);
         return record == null ? ResponseEntity.notFound().build() : ResponseEntity.ok(record);
     }
 
     @GetMapping
-    @Operation(summary = "查询全部支付记录")
+    @Operation(summary = "List Payments")
     public ResponseEntity<List<PaymentRecord>> listPayments(@RequestParam(defaultValue = "1") int page,
                                                             @RequestParam(defaultValue = "20") int size) {
         return ResponseEntity.ok(paymentRecordService.listPayments(page, size));
     }
 
     @GetMapping("/fine/{fineId}")
-    @Operation(summary = "按罚款记录分页查询支付记录")
+    @Operation(summary = "Find By Fine")
     public ResponseEntity<List<PaymentRecord>> findByFine(@PathVariable Long fineId,
                                                           @RequestParam(defaultValue = "1") int page,
                                                           @RequestParam(defaultValue = "20") int size) {
@@ -136,7 +152,7 @@ public class PaymentRecordController {
     }
 
     @GetMapping("/search/payer")
-    @Operation(summary = "按缴款人身份证搜索支付记录")
+    @Operation(summary = "Search By Payer")
     public ResponseEntity<List<PaymentRecord>> searchByPayer(@RequestParam("idCard") String idCard,
                                                              @RequestParam(defaultValue = "1") int page,
                                                              @RequestParam(defaultValue = "20") int size) {
@@ -144,7 +160,7 @@ public class PaymentRecordController {
     }
 
     @GetMapping("/search/status")
-    @Operation(summary = "按支付状态搜索支付记录")
+    @Operation(summary = "Search By Status")
     public ResponseEntity<List<PaymentRecord>> searchByStatus(@RequestParam String status,
                                                               @RequestParam(defaultValue = "1") int page,
                                                               @RequestParam(defaultValue = "20") int size) {
@@ -152,7 +168,7 @@ public class PaymentRecordController {
     }
 
     @GetMapping("/search/transaction")
-    @Operation(summary = "按交易流水号搜索支付记录")
+    @Operation(summary = "Search By Transaction")
     public ResponseEntity<List<PaymentRecord>> searchByTransaction(@RequestParam String transactionId,
                                                                    @RequestParam(defaultValue = "1") int page,
                                                                    @RequestParam(defaultValue = "20") int size) {
@@ -160,7 +176,7 @@ public class PaymentRecordController {
     }
 
     @GetMapping("/search/payment-number")
-    @Operation(summary = "Search payment records by payment number")
+    @Operation(summary = "Search By Payment Number")
     public ResponseEntity<List<PaymentRecord>> searchByPaymentNumber(@RequestParam String paymentNumber,
                                                                      @RequestParam(defaultValue = "1") int page,
                                                                      @RequestParam(defaultValue = "20") int size) {
@@ -168,7 +184,7 @@ public class PaymentRecordController {
     }
 
     @GetMapping("/search/payer-name")
-    @Operation(summary = "Search payment records by payer name")
+    @Operation(summary = "Search By Payer Name")
     public ResponseEntity<List<PaymentRecord>> searchByPayerName(@RequestParam String payerName,
                                                                  @RequestParam(defaultValue = "1") int page,
                                                                  @RequestParam(defaultValue = "20") int size) {
@@ -176,7 +192,7 @@ public class PaymentRecordController {
     }
 
     @GetMapping("/search/payment-method")
-    @Operation(summary = "Search payment records by payment method")
+    @Operation(summary = "Search By Payment Method")
     public ResponseEntity<List<PaymentRecord>> searchByPaymentMethod(@RequestParam String paymentMethod,
                                                                      @RequestParam(defaultValue = "1") int page,
                                                                      @RequestParam(defaultValue = "20") int size) {
@@ -184,7 +200,7 @@ public class PaymentRecordController {
     }
 
     @GetMapping("/search/payment-channel")
-    @Operation(summary = "Search payment records by payment channel")
+    @Operation(summary = "Search By Payment Channel")
     public ResponseEntity<List<PaymentRecord>> searchByPaymentChannel(@RequestParam String paymentChannel,
                                                                       @RequestParam(defaultValue = "1") int page,
                                                                       @RequestParam(defaultValue = "20") int size) {
@@ -192,7 +208,7 @@ public class PaymentRecordController {
     }
 
     @GetMapping("/search/time-range")
-    @Operation(summary = "Search payment records by payment time range")
+    @Operation(summary = "Search By Time Range")
     public ResponseEntity<List<PaymentRecord>> searchByTimeRange(@RequestParam String startTime,
                                                                  @RequestParam String endTime,
                                                                  @RequestParam(defaultValue = "1") int page,
@@ -201,7 +217,7 @@ public class PaymentRecordController {
     }
 
     @PutMapping("/{paymentId}/status/{state}")
-    @Operation(summary = "更新支付记录状态")
+    @Operation(summary = "Update Payment Status")
     public ResponseEntity<PaymentRecord> updatePaymentStatus(@PathVariable Long paymentId,
                                                              @PathVariable PaymentState state) {
         try {

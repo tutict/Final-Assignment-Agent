@@ -1,6 +1,7 @@
 import 'package:final_assignment_front/features/dashboard/controllers/user_dashboard_screen_controller.dart';
 import 'package:final_assignment_front/features/dashboard/views/shared/widgets/dashboard_page_template.dart';
 import 'package:final_assignment_front/features/dashboard/views/user/pages/main_process/fine_information.dart';
+import 'package:final_assignment_front/features/dashboard/views/user/pages/main_process/online_processing_progress.dart';
 import 'package:final_assignment_front/features/dashboard/views/user/pages/main_process/user_appeal.dart';
 import 'package:final_assignment_front/features/dashboard/views/user/pages/main_process/user_offense_list_page.dart';
 import 'package:final_assignment_front/features/dashboard/views/user/pages/main_process/vehicle_management.dart';
@@ -33,6 +34,11 @@ class _BusinessProgressPageState extends State<BusinessProgressPage> {
       'title': 'business.menu.userAppeal',
       'icon': Icons.gavel,
       'route': const UserAppealPage(),
+    },
+    {
+      'title': 'business.menu.onlineProcessingProgress',
+      'icon': Icons.timeline,
+      'route': const OnlineProcessingProgress(),
     },
     {
       'title': 'business.menu.vehicleManagement',

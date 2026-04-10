@@ -1,7 +1,9 @@
 package com.tutict.finalassignmentbackend.service;
 
 import com.tutict.finalassignmentbackend.config.statemachine.events.AppealAcceptanceEvent;
+import com.tutict.finalassignmentbackend.config.statemachine.events.AppealProcessEvent;
 import com.tutict.finalassignmentbackend.config.statemachine.states.AppealAcceptanceState;
+import com.tutict.finalassignmentbackend.config.statemachine.states.AppealProcessState;
 import com.tutict.finalassignmentbackend.entity.AppealRecord;
 import com.tutict.finalassignmentbackend.entity.DeductionRecord;
 import com.tutict.finalassignmentbackend.entity.DriverInformation;
@@ -185,6 +187,26 @@ public class CurrentUserTrafficSupportService {
         return appealRecordService.findByOffenseIds(offenseIds, page, size);
     }
 
+    public List<PaymentRecord> listCurrentUserPayments(int page, int size) {
+        return paymentRecordService.searchByPayerIdCard(requireCurrentUserIdCardNumber(), page, size);
+    }
+
+    public List<PaymentRecord> listCurrentUserPaymentsByFineId(Long fineId, int page, int size) {
+        if (fineId == null) {
+            return listCurrentUserPayments(page, size);
+        }
+        requireCurrentUserFine(fineId);
+        String currentUserIdCardNumber = requireCurrentUserIdCardNumber();
+        List<PaymentRecord> paymentRecords = paymentRecordService.findByFineId(fineId, page, size);
+        List<PaymentRecord> result = new ArrayList<>();
+        for (PaymentRecord paymentRecord : paymentRecords) {
+            if (Objects.equals(trimToNull(paymentRecord.getPayerIdCard()), trimToNull(currentUserIdCardNumber))) {
+                result.add(paymentRecord);
+            }
+        }
+        return result;
+    }
+
     public List<DeductionRecord> listCurrentUserDeductions(int page, int size) {
         return deductionRecordService.findByDriverIds(new ArrayList<>(resolveCandidateDriverIds()), page, size);
     }
@@ -338,6 +360,27 @@ public class CurrentUserTrafficSupportService {
         return appealRecordService.updateAcceptanceStatus(appealId, newState);
     }
 
+    @Transactional
+    public AppealRecord triggerCurrentUserAppealProcessEvent(Long appealId, AppealProcessEvent event) {
+        if (appealId == null || appealId <= 0) {
+            throw new IllegalArgumentException("Appeal ID must be greater than zero");
+        }
+        if (event == null) {
+            throw new IllegalArgumentException("Appeal process event must not be empty");
+        }
+        if (event != AppealProcessEvent.WITHDRAW) {
+            throw new IllegalArgumentException("Current user can only withdraw appeals");
+        }
+
+        AppealRecord appeal = requireCurrentUserAppeal(appealId);
+        AppealProcessState currentState = resolveAppealProcessState(appeal.getProcessStatus());
+        AppealProcessState newState = stateMachineService.processAppealState(appealId, currentState, event);
+        if (newState == currentState) {
+            throw new IllegalStateException("Appeal process state does not allow this event");
+        }
+        return appealRecordService.updateProcessStatus(appealId, newState);
+    }
+
     private DriverInformation resolveCurrentDriver() {
         return driverInformationService.findLinkedDriverForUser(requireCurrentUser());
     }
@@ -392,6 +435,11 @@ public class CurrentUserTrafficSupportService {
         return state != null ? state : AppealAcceptanceState.PENDING;
     }
 
+    private AppealProcessState resolveAppealProcessState(String code) {
+        AppealProcessState state = AppealProcessState.fromCode(code);
+        return state != null ? state : AppealProcessState.UNPROCESSED;
+    }
+
     private VehicleInformation requireCurrentUserVehicle(Long vehicleId) {
         if (vehicleId == null || vehicleId <= 0) {
             throw new IllegalArgumentException("Vehicle ID must be greater than zero");
@@ -405,6 +453,21 @@ public class CurrentUserTrafficSupportService {
             throw new IllegalStateException("Vehicle does not belong to current user");
         }
         return vehicle;
+    }
+
+    private FineRecord requireCurrentUserFine(Long fineId) {
+        if (fineId == null || fineId <= 0) {
+            throw new IllegalArgumentException("Fine ID must be greater than zero");
+        }
+        FineRecord fineRecord = fineRecordService.findById(fineId);
+        if (fineRecord == null) {
+            throw new IllegalStateException("Fine record not found");
+        }
+        OffenseRecord offense = offenseRecordService.findById(fineRecord.getOffenseId());
+        if (offense == null || !resolveCandidateDriverIds().contains(offense.getDriverId())) {
+            throw new IllegalStateException("Fine does not belong to current user");
+        }
+        return fineRecord;
     }
 
     private Set<Long> resolveCandidateDriverIds() {
@@ -432,7 +495,8 @@ public class CurrentUserTrafficSupportService {
         return null;
     }
 
-    private <T> T firstNonNull(T... candidates) {
+    @SafeVarargs
+    private final <T> T firstNonNull(T... candidates) {
         if (candidates == null) {
             return null;
         }

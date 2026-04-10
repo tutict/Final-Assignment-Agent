@@ -14,6 +14,7 @@ import com.tutict.finalassignmentbackend.config.statemachine.states.PaymentState
 import com.tutict.finalassignmentbackend.controller.DriverInformationController;
 import com.tutict.finalassignmentbackend.controller.OffenseInformationController;
 import com.tutict.finalassignmentbackend.controller.AppealManagementController;
+import com.tutict.finalassignmentbackend.controller.PaymentRecordController;
 import com.tutict.finalassignmentbackend.controller.TrafficViolationController;
 import com.tutict.finalassignmentbackend.controller.VehicleInformationController;
 import com.tutict.finalassignmentbackend.controller.WorkflowController;
@@ -35,6 +36,8 @@ import com.tutict.finalassignmentbackend.entity.SysRequestHistory;
 import com.tutict.finalassignmentbackend.entity.SysUser;
 import com.tutict.finalassignmentbackend.entity.SysUserRole;
 import com.tutict.finalassignmentbackend.entity.VehicleInformation;
+import com.tutict.finalassignmentbackend.enums.DataScope;
+import com.tutict.finalassignmentbackend.enums.RoleType;
 import com.tutict.finalassignmentbackend.controller.ProgressItemController;
 import com.tutict.finalassignmentbackend.mapper.AppealRecordMapper;
 import com.tutict.finalassignmentbackend.mapper.AppealReviewMapper;
@@ -1201,7 +1204,7 @@ class BusinessFlowConsistencyTest {
         paymentHistory.setBusinessId(300L);
         paymentHistory.setUpdatedAt(java.time.LocalDateTime.now());
 
-        ArgumentCaptor<Iterable<Long>> businessIdsCaptor = ArgumentCaptor.forClass(Iterable.class);
+        ArgumentCaptor<Iterable<Long>> businessIdsCaptor = iterableLongCaptor();
         when(sysRequestHistoryService.findByBusinessIds(any(), eq(1), eq(200)))
                 .thenReturn(List.of(paymentHistory));
 
@@ -1432,7 +1435,7 @@ class BusinessFlowConsistencyTest {
         deductionHistory.setBusinessId(400L);
         deductionHistory.setUpdatedAt(java.time.LocalDateTime.now());
 
-        ArgumentCaptor<Iterable<Long>> businessIdsCaptor = ArgumentCaptor.forClass(Iterable.class);
+        ArgumentCaptor<Iterable<Long>> businessIdsCaptor = iterableLongCaptor();
         when(sysRequestHistoryService.findByBusinessIds(any(), eq(1), eq(200)))
                 .thenReturn(List.of(deductionHistory));
 
@@ -2006,8 +2009,6 @@ class BusinessFlowConsistencyTest {
                 sysUserMapper,
                 requestHistoryMapper,
                 searchRepository,
-                kafkaTemplate,
-                new ObjectMapper(),
                 passwordEncoder,
                 cacheManager);
 
@@ -2046,8 +2047,6 @@ class BusinessFlowConsistencyTest {
                 sysUserMapper,
                 requestHistoryMapper,
                 searchRepository,
-                kafkaTemplate,
-                new ObjectMapper(),
                 passwordEncoder,
                 cacheManager);
 
@@ -2080,8 +2079,6 @@ class BusinessFlowConsistencyTest {
                 sysUserMapper,
                 requestHistoryMapper,
                 searchRepository,
-                kafkaTemplate,
-                new ObjectMapper(),
                 passwordEncoder,
                 cacheManager);
 
@@ -2111,8 +2108,6 @@ class BusinessFlowConsistencyTest {
                 sysUserMapper,
                 requestHistoryMapper,
                 searchRepository,
-                kafkaTemplate,
-                new ObjectMapper(),
                 passwordEncoder,
                 cacheManager);
 
@@ -2142,8 +2137,6 @@ class BusinessFlowConsistencyTest {
                 sysUserMapper,
                 requestHistoryMapper,
                 searchRepository,
-                kafkaTemplate,
-                new ObjectMapper(),
                 passwordEncoder,
                 cacheManager);
 
@@ -2157,6 +2150,38 @@ class BusinessFlowConsistencyTest {
         verify(sysUserMapper).selectPage(any(), wrapperCaptor.capture());
         String sqlSegment = wrapperCaptor.getValue().getSqlSegment();
         assertFalse(sqlSegment.toUpperCase().contains("LIKE"));
+    }
+
+    @Test
+    void beginPasswordChangeShouldReturnAlreadySucceededForMatchingFingerprint() {
+        SysUserMapper sysUserMapper = Mockito.mock(SysUserMapper.class);
+        SysRequestHistoryMapper requestHistoryMapper = Mockito.mock(SysRequestHistoryMapper.class);
+        SysUserSearchRepository searchRepository = Mockito.mock(SysUserSearchRepository.class);
+        PasswordEncoder passwordEncoder = Mockito.mock(PasswordEncoder.class);
+        CacheManager cacheManager = Mockito.mock(CacheManager.class);
+
+        SysUserService service = new SysUserService(
+                sysUserMapper,
+                requestHistoryMapper,
+                searchRepository,
+                passwordEncoder,
+                cacheManager);
+
+        SysRequestHistory history = new SysRequestHistory();
+        history.setIdempotencyKey("pwd-key");
+        history.setBusinessType("SYS_USER_PASSWORD_UPDATE");
+        history.setBusinessStatus("SUCCESS");
+        history.setUserId(88L);
+        history.setBusinessId(88L);
+        history.setRequestParams("userId=88,operation=PASSWORD_CHANGE,fingerprint=abc123");
+        when(requestHistoryMapper.selectByIdempotencyKey("pwd-key")).thenReturn(history);
+
+        SysUserService.PasswordChangeIdempotencyStatus status =
+                service.beginPasswordChange("pwd-key", 88L, "abc123");
+
+        assertEquals(SysUserService.PasswordChangeIdempotencyStatus.ALREADY_SUCCEEDED, status);
+        verify(requestHistoryMapper, never()).insert(any(SysRequestHistory.class));
+        verify(requestHistoryMapper, never()).updateById(any(SysRequestHistory.class));
     }
 
     @Test
@@ -3258,6 +3283,128 @@ class BusinessFlowConsistencyTest {
     }
 
     @Test
+    void listCurrentUserPaymentsByFineIdShouldOnlyReturnCurrentUserPayments() {
+        SysUserService sysUserService = Mockito.mock(SysUserService.class);
+        DriverInformationService driverInformationService = Mockito.mock(DriverInformationService.class);
+        OffenseRecordService offenseRecordService = Mockito.mock(OffenseRecordService.class);
+        FineRecordService fineRecordService = Mockito.mock(FineRecordService.class);
+        DeductionRecordService deductionRecordService = Mockito.mock(DeductionRecordService.class);
+        VehicleInformationService vehicleInformationService = Mockito.mock(VehicleInformationService.class);
+        AppealRecordService appealRecordService = Mockito.mock(AppealRecordService.class);
+        PaymentRecordService paymentRecordService = Mockito.mock(PaymentRecordService.class);
+        StateMachineService stateMachineService = Mockito.mock(StateMachineService.class);
+
+        CurrentUserTrafficSupportService service = new CurrentUserTrafficSupportService(
+                sysUserService,
+                driverInformationService,
+                offenseRecordService,
+                fineRecordService,
+                deductionRecordService,
+                vehicleInformationService,
+                appealRecordService,
+                paymentRecordService,
+                stateMachineService);
+
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken("carol", "n/a", Collections.emptyList()));
+
+        SysUser user = new SysUser();
+        user.setUserId(200L);
+        user.setUsername("carol");
+        user.setIdCardNumber("110101199001010033");
+        when(sysUserService.findByUsername("carol")).thenReturn(user);
+
+        DriverInformation driver = new DriverInformation();
+        driver.setDriverId(200L);
+        driver.setIdCardNumber("110101199001010033");
+        when(driverInformationService.findLinkedDriverForUser(any())).thenReturn(driver);
+
+        FineRecord fineRecord = new FineRecord();
+        fineRecord.setFineId(701L);
+        fineRecord.setOffenseId(702L);
+        when(fineRecordService.findById(701L)).thenReturn(fineRecord);
+
+        OffenseRecord offense = new OffenseRecord();
+        offense.setOffenseId(702L);
+        offense.setDriverId(200L);
+        when(offenseRecordService.findById(702L)).thenReturn(offense);
+
+        PaymentRecord ownPayment = new PaymentRecord();
+        ownPayment.setPaymentId(801L);
+        ownPayment.setFineId(701L);
+        ownPayment.setPayerIdCard("110101199001010033");
+
+        PaymentRecord otherPayment = new PaymentRecord();
+        otherPayment.setPaymentId(802L);
+        otherPayment.setFineId(701L);
+        otherPayment.setPayerIdCard("110101199001010099");
+
+        when(paymentRecordService.findByFineId(701L, 1, 20)).thenReturn(List.of(ownPayment, otherPayment));
+
+        List<PaymentRecord> result = service.listCurrentUserPaymentsByFineId(701L, 1, 20);
+
+        assertEquals(1, result.size());
+        assertEquals(801L, result.get(0).getPaymentId());
+    }
+
+    @Test
+    void triggerCurrentUserAppealProcessEventShouldWithdrawOwnedAppeal() {
+        SysUserService sysUserService = Mockito.mock(SysUserService.class);
+        DriverInformationService driverInformationService = Mockito.mock(DriverInformationService.class);
+        OffenseRecordService offenseRecordService = Mockito.mock(OffenseRecordService.class);
+        FineRecordService fineRecordService = Mockito.mock(FineRecordService.class);
+        DeductionRecordService deductionRecordService = Mockito.mock(DeductionRecordService.class);
+        VehicleInformationService vehicleInformationService = Mockito.mock(VehicleInformationService.class);
+        AppealRecordService appealRecordService = Mockito.mock(AppealRecordService.class);
+        PaymentRecordService paymentRecordService = Mockito.mock(PaymentRecordService.class);
+        StateMachineService stateMachineService = Mockito.mock(StateMachineService.class);
+
+        CurrentUserTrafficSupportService service = new CurrentUserTrafficSupportService(
+                sysUserService,
+                driverInformationService,
+                offenseRecordService,
+                fineRecordService,
+                deductionRecordService,
+                vehicleInformationService,
+                appealRecordService,
+                paymentRecordService,
+                stateMachineService);
+
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken("carol", "n/a", Collections.emptyList()));
+
+        SysUser user = new SysUser();
+        user.setUserId(200L);
+        user.setUsername("carol");
+        when(sysUserService.findByUsername("carol")).thenReturn(user);
+
+        DriverInformation driver = new DriverInformation();
+        driver.setDriverId(200L);
+        when(driverInformationService.findLinkedDriverForUser(any())).thenReturn(driver);
+
+        AppealRecord appeal = new AppealRecord();
+        appeal.setAppealId(501L);
+        appeal.setOffenseId(702L);
+        appeal.setProcessStatus(AppealProcessState.UNPROCESSED.getCode());
+        when(appealRecordService.getAppealById(501L)).thenReturn(appeal);
+        when(offenseRecordService.findIdsByDriverIds(any())).thenReturn(List.of(702L));
+        when(stateMachineService.processAppealState(
+                501L,
+                AppealProcessState.UNPROCESSED,
+                AppealProcessEvent.WITHDRAW)).thenReturn(AppealProcessState.WITHDRAWN);
+
+        AppealRecord updated = new AppealRecord();
+        updated.setAppealId(501L);
+        updated.setProcessStatus(AppealProcessState.WITHDRAWN.getCode());
+        when(appealRecordService.updateProcessStatus(501L, AppealProcessState.WITHDRAWN)).thenReturn(updated);
+
+        AppealRecord result = service.triggerCurrentUserAppealProcessEvent(501L, AppealProcessEvent.WITHDRAW);
+
+        assertEquals(AppealProcessState.WITHDRAWN.getCode(), result.getProcessStatus());
+        verify(appealRecordService).updateProcessStatus(501L, AppealProcessState.WITHDRAWN);
+    }
+
+    @Test
     void createCurrentUserAppealShouldMarkHistoryFailureForRejectedCurrentUserRequest() {
         AppealRecordService appealRecordService = Mockito.mock(AppealRecordService.class);
         AppealReviewService appealReviewService = Mockito.mock(AppealReviewService.class);
@@ -3305,6 +3452,29 @@ class BusinessFlowConsistencyTest {
                 501L,
                 AppealAcceptanceEvent.RESUBMIT,
                 null);
+
+        assertEquals(HttpStatus.CONFLICT, response.getStatusCode());
+    }
+
+    @Test
+    void currentUserAppealProcessEndpointShouldReturnConflictForInvalidSelfServiceTransition() {
+        AppealRecordService appealRecordService = Mockito.mock(AppealRecordService.class);
+        AppealReviewService appealReviewService = Mockito.mock(AppealReviewService.class);
+        CurrentUserTrafficSupportService currentUserTrafficSupportService =
+                Mockito.mock(CurrentUserTrafficSupportService.class);
+
+        AppealManagementController controller = new AppealManagementController(
+                appealRecordService,
+                appealReviewService,
+                currentUserTrafficSupportService);
+
+        when(currentUserTrafficSupportService.triggerCurrentUserAppealProcessEvent(
+                501L,
+                AppealProcessEvent.WITHDRAW)).thenThrow(new IllegalStateException("Appeal process state does not allow this event"));
+
+        ResponseEntity<AppealRecord> response = controller.triggerCurrentUserAppealProcessEvent(
+                501L,
+                AppealProcessEvent.WITHDRAW);
 
         assertEquals(HttpStatus.CONFLICT, response.getStatusCode());
     }
@@ -4120,7 +4290,9 @@ class BusinessFlowConsistencyTest {
         existingVehiclePrimary.setIsPrimary(true);
 
         when(driverVehicleMapper.selectList(any()))
-                .thenReturn(List.of(), List.of(), List.of(existingVehiclePrimary));
+                .thenReturn(List.of())
+                .thenReturn(List.of())
+                .thenReturn(List.of(existingVehiclePrimary));
         when(driverVehicleMapper.insert(any(DriverVehicle.class))).thenReturn(1);
 
         DriverVehicle request = new DriverVehicle();
@@ -4272,6 +4444,84 @@ class BusinessFlowConsistencyTest {
         inOrder.verify(sysUserService).createSysUser(any(SysUser.class));
         inOrder.verify(sysUserRoleService).createRelation(any(SysUserRole.class));
         inOrder.verify(sysUserService).markHistorySuccess("register-key", 88L);
+    }
+
+    @Test
+    void refreshTokenShouldReturnRefreshedAuthenticationPayload() {
+        TokenProvider tokenProvider = Mockito.mock(TokenProvider.class);
+        AuditLoginLogService auditLoginLogService = Mockito.mock(AuditLoginLogService.class);
+        SysUserService sysUserService = Mockito.mock(SysUserService.class);
+        SysRoleService sysRoleService = Mockito.mock(SysRoleService.class);
+        SysUserRoleService sysUserRoleService = Mockito.mock(SysUserRoleService.class);
+
+        AuthWsService service = new AuthWsService(
+                tokenProvider,
+                auditLoginLogService,
+                sysUserService,
+                sysRoleService,
+                sysUserRoleService);
+
+        SysUser user = new SysUser();
+        user.setUserId(42L);
+        user.setUsername("tester");
+        user.setRealName("Tester");
+
+        SysUserRole relation = new SysUserRole();
+        relation.setRoleId(7);
+
+        SysRole role = new SysRole();
+        role.setRoleId(7);
+        role.setRoleCode("USER");
+        role.setRoleName("USER");
+        role.setRoleType(RoleType.CUSTOM.getCode());
+        role.setDataScope(DataScope.SELF.getCode());
+
+        when(tokenProvider.validateToken("refresh-token")).thenReturn(true);
+        when(tokenProvider.isRefreshToken("refresh-token")).thenReturn(true);
+        when(tokenProvider.getUsernameFromToken("refresh-token")).thenReturn("tester");
+        when(sysUserService.findByUsername("tester")).thenReturn(user);
+        when(sysUserRoleService.findByUserId(42L, 1, 100)).thenReturn(List.of(relation));
+        when(sysRoleService.findById(7)).thenReturn(role);
+        when(tokenProvider.validateRoleClaims("USER", RoleType.CUSTOM.getCode(), DataScope.SELF.getCode()))
+                .thenReturn(true);
+        when(tokenProvider.createEnhancedToken("tester", "USER", RoleType.CUSTOM.getCode(), DataScope.SELF.getCode()))
+                .thenReturn("new-jwt");
+        when(tokenProvider.createRefreshToken("tester")).thenReturn("new-refresh");
+        when(tokenProvider.hasSystemRole("new-jwt")).thenReturn(false);
+        when(tokenProvider.hasBusinessRole("new-jwt")).thenReturn(false);
+        when(tokenProvider.hasDataScopePermission("new-jwt", DataScope.DEPARTMENT)).thenReturn(false);
+
+        Map<String, Object> payload = service.refreshToken("refresh-token");
+
+        assertEquals("new-jwt", payload.get("jwtToken"));
+        assertEquals("new-refresh", payload.get("refreshToken"));
+        assertEquals(List.of("USER"), payload.get("roleCodes"));
+        assertEquals(DataScope.SELF.getCode(), payload.get("dataScope"));
+    }
+
+    @Test
+    void refreshTokenShouldRejectAccessTokens() {
+        TokenProvider tokenProvider = Mockito.mock(TokenProvider.class);
+        AuditLoginLogService auditLoginLogService = Mockito.mock(AuditLoginLogService.class);
+        SysUserService sysUserService = Mockito.mock(SysUserService.class);
+        SysRoleService sysRoleService = Mockito.mock(SysRoleService.class);
+        SysUserRoleService sysUserRoleService = Mockito.mock(SysUserRoleService.class);
+
+        AuthWsService service = new AuthWsService(
+                tokenProvider,
+                auditLoginLogService,
+                sysUserService,
+                sysRoleService,
+                sysUserRoleService);
+
+        when(tokenProvider.validateToken("access-token")).thenReturn(true);
+        when(tokenProvider.isRefreshToken("access-token")).thenReturn(false);
+
+        RuntimeException ex = assertThrows(RuntimeException.class,
+                () -> service.refreshToken("access-token"));
+
+        assertEquals("Unsupported token type for refresh.", ex.getMessage());
+        verify(sysUserService, never()).findByUsername(any());
     }
 
     @Test
@@ -4761,6 +5011,9 @@ class BusinessFlowConsistencyTest {
     @Test
     void currentUserSelfServiceEndpointsShouldRemainUserOnly() throws Exception {
         assertRolesExactly(
+                PaymentRecordController.class.getMethod("listCurrentUserPayments", int.class, int.class, Long.class),
+                "USER");
+        assertRolesExactly(
                 AppealManagementController.class.getMethod("listCurrentUserAppeals", int.class, int.class),
                 "USER");
         assertRolesExactly(
@@ -4772,6 +5025,12 @@ class BusinessFlowConsistencyTest {
                         Long.class,
                         AppealAcceptanceEvent.class,
                         AppealManagementController.CurrentUserAppealSubmissionRequest.class),
+                "USER");
+        assertRolesExactly(
+                AppealManagementController.class.getMethod(
+                        "triggerCurrentUserAppealProcessEvent",
+                        Long.class,
+                        AppealProcessEvent.class),
                 "USER");
         assertRolesExactly(
                 ProgressItemController.class.getMethod("listCurrentUserProgress", int.class, int.class, Long.class),
@@ -4825,5 +5084,10 @@ class BusinessFlowConsistencyTest {
         assertNotNull(rolesAllowed, "Missing @RolesAllowed on method: " + method);
         assertEquals(List.of(expectedRoles), List.of(rolesAllowed.value()),
                 "Unexpected roles on method " + method);
+    }
+
+    @SuppressWarnings("unchecked")
+    private ArgumentCaptor<Iterable<Long>> iterableLongCaptor() {
+        return (ArgumentCaptor<Iterable<Long>>) (ArgumentCaptor<?>) ArgumentCaptor.forClass(Iterable.class);
     }
 }

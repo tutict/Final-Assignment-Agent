@@ -102,6 +102,34 @@ class PaymentRecordControllerApi {
         jsonDecode(_decodeBodyBytes(response)) as Map<String, dynamic>);
   }
 
+  /// GET /api/payments/me?page=&size=&fineId=
+  Future<List<PaymentRecordModel>> apiPaymentsMeGet({
+    int page = 1,
+    int size = 20,
+    int? fineId,
+  }) async {
+    final queryParams = <QueryParam>[
+      QueryParam('page', '$page'),
+      QueryParam('size', '$size'),
+      if (fineId != null) QueryParam('fineId', '$fineId'),
+    ];
+    final response = await apiClient.invokeAPI(
+      '/api/payments/me',
+      'GET',
+      queryParams,
+      null,
+      await _getHeaders(),
+      const {},
+      null,
+      ['bearerAuth'],
+    );
+    if (response.statusCode == 404) {
+      return [];
+    }
+    _ensureSuccess(response);
+    return _parseList(_decodeBodyBytes(response));
+  }
+
   /// GET /api/payments/{paymentId}
   Future<PaymentRecordModel?> apiPaymentsPaymentIdGet({
     required int paymentId,
