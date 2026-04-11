@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'dart:developer' as developer;
 
 import 'package:final_assignment_front/config/routes/app_routes.dart';
@@ -11,12 +10,11 @@ import 'package:final_assignment_front/i18n/system_log_localizers.dart';
 import 'package:final_assignment_front/utils/helpers/api_exception.dart';
 import 'package:final_assignment_front/utils/helpers/role_utils.dart';
 import 'package:final_assignment_front/utils/services/auth_token_store.dart';
+import 'package:final_assignment_front/utils/services/session_helper.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import 'package:http/http.dart' as http;
 import 'package:jwt_decoder/jwt_decoder.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 class SystemLogPage extends StatefulWidget {
   const SystemLogPage({super.key});
@@ -29,6 +27,7 @@ class _SystemLogPageState extends State<SystemLogPage> {
   final SystemLogsControllerApi logApi = SystemLogsControllerApi();
   final ScrollController _scrollController = ScrollController();
   final DashboardController controller = Get.find<DashboardController>();
+  final SessionHelper _sessionHelper = SessionHelper();
 
   Map<String, dynamic> _overviewData = {};
   List<LoginLog> _recentLoginLogs = [];
@@ -49,102 +48,94 @@ class _SystemLogPageState extends State<SystemLogPage> {
     super.dispose();
   }
 
+  void _setStateSafely(VoidCallback update) {
+    if (!mounted) return;
+    setState(update);
+  }
+
+  void _redirectToLogin() {
+    if (!mounted) return;
+    Get.offAllNamed(Routes.login);
+  }
+
   Future<bool> _validateJwtToken() async {
     String? jwtToken = (await AuthTokenStore.instance.getJwtToken());
     if (jwtToken == null || jwtToken.isEmpty) {
-      setState(() => _errorMessage = 'systemLog.error.unauthorized'.tr);
+      _setStateSafely(() => _errorMessage = 'systemLog.error.unauthorized'.tr);
       return false;
     }
     try {
       JwtDecoder.decode(jwtToken);
       if (JwtDecoder.isExpired(jwtToken)) {
         jwtToken = await _refreshJwtToken();
+        if (!mounted) return false;
         if (jwtToken == null || JwtDecoder.isExpired(jwtToken)) {
-          setState(() => _errorMessage = 'systemLog.error.expired'.tr);
+          _setStateSafely(() => _errorMessage = 'systemLog.error.expired'.tr);
           return false;
         }
         await AuthTokenStore.instance.setJwtToken(jwtToken);
         await logApi.initializeWithJwt();
+        if (!mounted) return false;
       }
       return true;
     } catch (_) {
-      setState(() => _errorMessage = 'systemLog.error.invalidLogin'.tr);
+      _setStateSafely(() => _errorMessage = 'systemLog.error.invalidLogin'.tr);
       return false;
     }
   }
 
   Future<String?> _refreshJwtToken() async {
-    final prefs = await SharedPreferences.getInstance();
-    final refreshToken = prefs.getString('refreshToken');
-    if (refreshToken == null) return null;
-    try {
-      final response = await http.post(
-        Uri.parse('http://localhost:8080/api/auth/refresh'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'refreshToken': refreshToken}),
-      );
-      if (response.statusCode == 200) {
-        final payload = jsonDecode(response.body) as Map<String, dynamic>;
-        final newJwt = payload['jwtToken'] as String?;
-        final refreshedToken = payload['refreshToken'] as String?;
-        if (newJwt != null) {
-          await AuthTokenStore.instance.setJwtToken(newJwt);
-        }
-        if (refreshedToken != null && refreshedToken.isNotEmpty) {
-          await prefs.setString('refreshToken', refreshedToken);
-        }
-        return newJwt;
-      }
-    } catch (e) {
-      developer.log('Failed to refresh JWT token: $e',
-          stackTrace: StackTrace.current);
-    }
-    return null;
+    return await _sessionHelper.refreshJwtToken();
   }
 
   Future<void> _initialize() async {
-    setState(() {
+    _setStateSafely(() {
       _isLoading = true;
       _errorMessage = '';
     });
     try {
-      if (!await _validateJwtToken()) {
-        Get.offAllNamed(Routes.login);
+      final isValid = await _validateJwtToken();
+      if (!mounted) return;
+      if (!isValid) {
+        _redirectToLogin();
         return;
       }
       await logApi.initializeWithJwt();
+      if (!mounted) return;
       await _checkUserRole();
+      if (!mounted) return;
       if (_isAdmin) {
         await _fetchSystemLogData(showLoader: false);
       } else {
-        setState(() => _errorMessage = 'systemLog.error.adminOnly'.tr);
+        _setStateSafely(() => _errorMessage = 'systemLog.error.adminOnly'.tr);
       }
     } catch (e) {
-      setState(() => _errorMessage = 'systemLog.error.initFailed'
+      _setStateSafely(() => _errorMessage = 'systemLog.error.initFailed'
           .trParams({'error': formatSystemLogError(e)}));
     } finally {
-      setState(() => _isLoading = false);
+      _setStateSafely(() => _isLoading = false);
     }
   }
 
   Future<void> _checkUserRole() async {
     try {
-      final jwtToken = (await AuthTokenStore.instance.getJwtToken());
-      if (jwtToken == null) {
-        setState(() => _isAdmin = false);
+      final isValid = await _validateJwtToken();
+      if (!mounted) return;
+      if (!isValid) {
+        _redirectToLogin();
         return;
       }
-      final decodedToken = JwtDecoder.decode(jwtToken);
-      final roles = decodedToken['roles'];
-      setState(() => _isAdmin = hasAnyRole(roles, const [
+      final roles = await _sessionHelper.fetchCurrentRoles();
+      if (!mounted) return;
+      _setStateSafely(() => _isAdmin = hasAnyRole(roles, const [
             'SUPER_ADMIN',
             'ADMIN',
           ]));
       if (!_isAdmin) {
-        _errorMessage = 'systemLog.error.adminOnly'.tr;
+        _setStateSafely(() => _errorMessage = 'systemLog.error.adminOnly'.tr);
       }
     } catch (e) {
-      setState(() => _errorMessage = 'systemLog.error.roleCheckFailed'
+      _setStateSafely(() => _errorMessage = 'systemLog.error.roleCheckFailed'
           .trParams({'error': formatSystemLogError(e)}));
       developer.log('Error checking user role: $e',
           stackTrace: StackTrace.current);
@@ -154,22 +145,28 @@ class _SystemLogPageState extends State<SystemLogPage> {
   Future<void> _fetchSystemLogData({bool showLoader = true}) async {
     if (!_isAdmin) return;
     if (showLoader) {
-      setState(() {
+      _setStateSafely(() {
         _isLoading = true;
         _errorMessage = '';
       });
     }
     try {
-      if (!await _validateJwtToken()) {
-        Get.offAllNamed(Routes.login);
+      final isValid = await _validateJwtToken();
+      if (!mounted) return;
+      if (!isValid) {
+        _redirectToLogin();
         return;
       }
       await logApi.initializeWithJwt();
+      if (!mounted) return;
       final overview = await logApi.apiSystemLogsOverviewGet();
+      if (!mounted) return;
       final loginLogs = await logApi.apiSystemLogsLoginRecentGet(limit: 20);
+      if (!mounted) return;
       final operationLogs =
           await logApi.apiSystemLogsOperationRecentGet(limit: 20);
-      setState(() {
+      if (!mounted) return;
+      _setStateSafely(() {
         _overviewData = overview;
         _recentLoginLogs = loginLogs;
         _recentOperationLogs = operationLogs;
@@ -178,18 +175,19 @@ class _SystemLogPageState extends State<SystemLogPage> {
     } catch (e) {
       developer.log('Failed to fetch system logs: $e',
           stackTrace: StackTrace.current);
-      setState(() {
-        if (e is ApiException && e.code == 403) {
-          _errorMessage = 'systemLog.error.unauthorized'.tr;
-          Get.offAllNamed(Routes.login);
-        } else {
+      if (e is ApiException && e.code == 403) {
+        _setStateSafely(
+            () => _errorMessage = 'systemLog.error.unauthorized'.tr);
+        _redirectToLogin();
+      } else {
+        _setStateSafely(() {
           _errorMessage = 'systemLog.error.loadFailed'
               .trParams({'error': formatSystemLogError(e)});
-        }
-      });
+        });
+      }
     } finally {
       if (showLoader) {
-        setState(() => _isLoading = false);
+        _setStateSafely(() => _isLoading = false);
       }
     }
   }

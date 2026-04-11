@@ -116,15 +116,16 @@ public class RunDocker implements ApplicationContextInitializer<ConfigurableAppl
     public void startManticoreSearch(ConfigurableApplicationContext applicationContext) {
         String manticoreImage = applicationContext.getEnvironment()
                 .getProperty("manticore.image", DEFAULT_MANTICORE_IMAGE);
-        try (GenericContainer<?> container = new GenericContainer<>(DockerImageName.parse(manticoreImage))
-                .withExposedPorts(9306, 9308)
-                .withEnv("EXTRA", "1")
-                .waitingFor(Wait.forHttp("/search")
-                        .forPort(9308)
-                        .withStartupTimeout(Duration.ofSeconds(120)))) {
-            container.start();
-
-            manticoreContainer = container;
+        try {
+            if (manticoreContainer == null || !manticoreContainer.isRunning()) {
+                manticoreContainer = new GenericContainer<>(DockerImageName.parse(manticoreImage))
+                        .withExposedPorts(9306, 9308)
+                        .withEnv("EXTRA", "1")
+                        .waitingFor(Wait.forHttp("/search")
+                                .forPort(9308)
+                                .withStartupTimeout(Duration.ofSeconds(120)));
+                manticoreContainer.start();
+            }
             String manticoreHost = manticoreContainer.getHost();
             Integer httpPort = manticoreContainer.getMappedPort(9308);
             String manticoreUrl = String.format("http://%s:%d", manticoreHost, httpPort);

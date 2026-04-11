@@ -92,11 +92,7 @@ public class AuthController {
                     ResponseEntity.status(HttpStatus.BAD_REQUEST)
                             .body(Map.of("error", ex.getMessage())));
         } catch (Exception ex) {
-            LOG.log(Level.SEVERE, "Login failed for username: {0}, error: {1}",
-                    new Object[]{username, ex.getMessage()});
-            return CompletableFuture.completedFuture(
-                    ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                            .body(Map.of("error", ex.getMessage())));
+            return CompletableFuture.completedFuture(loginExceptionResponse(username, ex));
         }
     }
 
@@ -112,9 +108,7 @@ public class AuthController {
         try {
             return ResponseEntity.ok(authWsService.refreshToken(refreshRequest.getRefreshToken()));
         } catch (Exception ex) {
-            LOG.log(Level.WARNING, "Refresh token failed: {0}", ex.getMessage());
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body(Map.of("error", ex.getMessage()));
+            return refreshExceptionResponse(ex);
         }
     }
 
@@ -172,11 +166,7 @@ public class AuthController {
                     ResponseEntity.status(HttpStatus.BAD_REQUEST)
                             .body(Map.of("error", ex.getMessage())));
         } catch (Exception ex) {
-            LOG.log(Level.WARNING, "Register failed for username: {0}, error: {1}",
-                    new Object[]{username, ex.getMessage()});
-            return CompletableFuture.completedFuture(
-                    ResponseEntity.status(HttpStatus.CONFLICT)
-                            .body(Map.of("error", ex.getMessage())));
+            return CompletableFuture.completedFuture(registerExceptionResponse(username, ex));
         }
     }
 
@@ -213,5 +203,77 @@ public class AuthController {
 
     private String safeUsername(String username) {
         return StringUtils.hasText(username) ? username.trim() : "<unknown>";
+    }
+
+    private ResponseEntity<Map<String, Object>> loginExceptionResponse(String username, Exception ex) {
+        if (isAuthenticationFailure(ex)) {
+            LOG.log(Level.WARNING, "Login rejected for username: {0}, error: {1}",
+                    new Object[]{username, ex.getMessage()});
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(Map.of("error", safeErrorMessage(ex, "Invalid username or password.")));
+        }
+
+        LOG.log(Level.SEVERE, "Login failed for username: " + username, ex);
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(Map.of("error", internalServerErrorMessage()));
+    }
+
+    private ResponseEntity<Map<String, Object>> refreshExceptionResponse(Exception ex) {
+        if (isRefreshFailure(ex)) {
+            LOG.log(Level.WARNING, "Refresh token rejected: {0}", ex.getMessage());
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(Map.of("error", safeErrorMessage(ex, "Invalid refresh token.")));
+        }
+
+        LOG.log(Level.SEVERE, "Refresh token failed", ex);
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(Map.of("error", internalServerErrorMessage()));
+    }
+
+    private ResponseEntity<Map<String, String>> registerExceptionResponse(String username, Exception ex) {
+        if (isRegistrationConflict(ex)) {
+            LOG.log(Level.WARNING, "Register conflict for username: {0}, error: {1}",
+                    new Object[]{username, ex.getMessage()});
+            return ResponseEntity.status(HttpStatus.CONFLICT)
+                    .body(Map.of("error", safeErrorMessage(ex, "Username already exists")));
+        }
+
+        LOG.log(Level.SEVERE, "Register failed for username: " + username, ex);
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(Map.of("error", internalServerErrorMessage()));
+    }
+
+    private boolean isAuthenticationFailure(Exception ex) {
+        String message = normalizedMessage(ex);
+        return message.contains("invalid username or password")
+                || message.contains("invalid username")
+                || message.contains("invalid password")
+                || message.contains("no roles assigned");
+    }
+
+    private boolean isRefreshFailure(Exception ex) {
+        String message = normalizedMessage(ex);
+        return message.contains("invalid refresh token")
+                || message.contains("unsupported token type")
+                || message.contains("refresh token user not found")
+                || message.contains("no roles assigned");
+    }
+
+    private boolean isRegistrationConflict(Exception ex) {
+        String message = normalizedMessage(ex);
+        return message.contains("username already exists")
+                || message.contains("duplicate request");
+    }
+
+    private String normalizedMessage(Exception ex) {
+        return safeErrorMessage(ex, "").toLowerCase();
+    }
+
+    private String safeErrorMessage(Exception ex, String fallback) {
+        return StringUtils.hasText(ex.getMessage()) ? ex.getMessage() : fallback;
+    }
+
+    private String internalServerErrorMessage() {
+        return "Internal server error";
     }
 }

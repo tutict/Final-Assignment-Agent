@@ -66,30 +66,90 @@ class _OffenseListPageState extends State<OffenseList> {
     super.dispose();
   }
 
+  void _setStateSafely(VoidCallback update) {
+    if (!mounted) return;
+    setState(update);
+  }
+
+  void _redirectToLogin() {
+    if (!mounted) return;
+    Get.offAllNamed(Routes.login);
+  }
+
+  List<OffenseInformation> _buildFilteredOffenseList(
+    Iterable<OffenseInformation> offenses,
+  ) {
+    final searchQuery = _activeQuery.trim().toLowerCase();
+
+    return offenses.where((offense) {
+      final driverName = (offense.driverName ?? '').toLowerCase();
+      final licensePlate = (offense.licensePlate ?? '').toLowerCase();
+      final offenseType = (offense.offenseType ?? '').toLowerCase();
+      final offenseTime = offense.offenseTime;
+
+      var matchesQuery = true;
+      if (searchQuery.isNotEmpty) {
+        if (_searchType == kOffenseSearchTypeDriverName) {
+          matchesQuery = driverName.contains(searchQuery);
+        } else if (_searchType == kOffenseSearchTypeLicensePlate) {
+          matchesQuery = licensePlate.contains(searchQuery);
+        } else if (_searchType == kOffenseSearchTypeOffenseType) {
+          matchesQuery = offenseType.contains(searchQuery);
+        }
+      }
+
+      var matchesDateRange = true;
+      if (_startDate != null && _endDate != null && offenseTime != null) {
+        matchesDateRange = offenseTime.isAfter(_startDate!) &&
+            offenseTime.isBefore(_endDate!.add(const Duration(days: 1)));
+      } else if (_startDate != null &&
+          _endDate != null &&
+          offenseTime == null) {
+        matchesDateRange = false;
+      }
+
+      return matchesQuery && matchesDateRange;
+    }).toList();
+  }
+
+  String _resolveOffenseListErrorMessage(
+    List<OffenseInformation> filteredOffenses,
+  ) {
+    if (filteredOffenses.isNotEmpty) return '';
+    return _hasActiveFilters
+        ? 'offenseAdmin.error.filteredEmpty'.tr
+        : 'offenseAdmin.empty.default'.tr;
+  }
+
   Future<bool> _validateJwtToken() async {
     String? jwtToken = (await AuthTokenStore.instance.getJwtToken());
     if (jwtToken == null || jwtToken.isEmpty) {
-      setState(() => _errorMessage = 'offenseAdmin.error.unauthorized'.tr);
+      _setStateSafely(
+          () => _errorMessage = 'offenseAdmin.error.unauthorized'.tr);
       return false;
     }
     try {
       if (JwtDecoder.isExpired(jwtToken)) {
         jwtToken = await _refreshJwtToken();
+        if (!mounted) return false;
         if (jwtToken == null) {
-          setState(() => _errorMessage = 'offenseAdmin.error.expired'.tr);
+          _setStateSafely(
+              () => _errorMessage = 'offenseAdmin.error.expired'.tr);
           return false;
         }
         await AuthTokenStore.instance.setJwtToken(jwtToken);
         if (JwtDecoder.isExpired(jwtToken)) {
-          setState(
+          _setStateSafely(
               () => _errorMessage = 'offenseAdmin.error.refreshedExpired'.tr);
           return false;
         }
         await offenseApi.initializeWithJwt();
+        if (!mounted) return false;
       }
       return true;
     } catch (e) {
-      setState(() => _errorMessage = 'offenseAdmin.error.invalidLogin'.tr);
+      _setStateSafely(
+          () => _errorMessage = 'offenseAdmin.error.invalidLogin'.tr);
       return false;
     }
   }
@@ -99,13 +159,16 @@ class _OffenseListPageState extends State<OffenseList> {
   }
 
   Future<void> _initialize() async {
-    setState(() => _isLoading = true);
+    _setStateSafely(() => _isLoading = true);
     try {
-      if (!await _validateJwtToken()) {
-        Navigator.pushReplacementNamed(context, Routes.login);
+      final isValid = await _validateJwtToken();
+      if (!mounted) return;
+      if (!isValid) {
+        _redirectToLogin();
         return;
       }
       await offenseApi.initializeWithJwt();
+      if (!mounted) return;
       final jwtToken = (await AuthTokenStore.instance.getJwtToken())!;
       final decodedToken = JwtDecoder.decode(jwtToken);
       _canManageOffenses = hasAnyRole(decodedToken['roles'], const [
@@ -116,27 +179,30 @@ class _OffenseListPageState extends State<OffenseList> {
       await _checkUserRole();
       await _fetchOffenses(reset: true);
     } catch (e) {
-      setState(() => _errorMessage = 'offenseAdmin.error.initFailed'
+      _setStateSafely(() => _errorMessage = 'offenseAdmin.error.initFailed'
           .trParams({'error': formatOffenseAdminError(e)}));
     } finally {
-      setState(() => _isLoading = false);
+      _setStateSafely(() => _isLoading = false);
     }
   }
 
   Future<void> _checkUserRole() async {
     try {
-      if (!await _validateJwtToken()) {
-        Get.offAllNamed(Routes.login);
+      final isValid = await _validateJwtToken();
+      if (!mounted) return;
+      if (!isValid) {
+        _redirectToLogin();
         return;
       }
       final roles = await _sessionHelper.fetchCurrentRoles();
+      if (!mounted) return;
       final hasReadAccess = hasAnyRole(roles, const [
         'SUPER_ADMIN',
         'ADMIN',
         'TRAFFIC_POLICE',
         'APPEAL_REVIEWER',
       ]);
-      setState(() {
+      _setStateSafely(() {
         _canManageOffenses = hasAnyRole(roles, const [
           'SUPER_ADMIN',
           'ADMIN',
@@ -147,13 +213,14 @@ class _OffenseListPageState extends State<OffenseList> {
         }
       });
     } catch (e) {
-      setState(() => _errorMessage = 'offenseAdmin.error.roleCheckFailed'
+      _setStateSafely(() => _errorMessage = 'offenseAdmin.error.roleCheckFailed'
           .trParams({'error': formatOffenseAdminError(e)}));
       developer.log('Role check failed: $e', stackTrace: StackTrace.current);
     }
   }
 
   Future<void> _fetchOffenses({bool reset = false, String? query}) async {
+    if (!reset && (_isLoading || !_hasMore)) return;
     if (reset) {
       _currentPage = 1;
       _hasMore = true;
@@ -161,51 +228,60 @@ class _OffenseListPageState extends State<OffenseList> {
       _offenseList.clear();
       _filteredOffenseList.clear();
     }
-    if (!_hasMore) return;
 
-    setState(() {
+    _setStateSafely(() {
       _isLoading = true;
       _errorMessage = '';
     });
 
     try {
-      if (!await _validateJwtToken()) {
-        Navigator.pushReplacementNamed(context, Routes.login);
+      final isValid = await _validateJwtToken();
+      if (!mounted) return;
+      if (!isValid) {
+        _redirectToLogin();
         return;
       }
       final offenses = await _loadOffensePage(
         page: _currentPage,
         query: _activeQuery,
       );
+      if (!mounted) return;
+      final updatedOffenses = <OffenseInformation>[
+        ..._offenseList,
+        ...offenses,
+      ];
+      final filteredOffenses = _buildFilteredOffenseList(updatedOffenses);
 
-      setState(() {
-        _offenseList.addAll(offenses);
+      _setStateSafely(() {
+        _offenseList
+          ..clear()
+          ..addAll(updatedOffenses);
         _hasMore = offenses.length == _pageSize;
-        _rebuildFilteredOffenseList();
-        if (_filteredOffenseList.isEmpty) {
-          _errorMessage = _hasActiveFilters
-              ? 'offenseAdmin.error.filteredEmpty'.tr
-              : 'offenseAdmin.empty.default'.tr;
-        }
+        _filteredOffenseList = filteredOffenses;
+        _errorMessage = _resolveOffenseListErrorMessage(filteredOffenses);
         _currentPage++;
       });
     } catch (e) {
-      setState(() {
-        if (e is ApiException && e.code == 403) {
+      if (e is ApiException && e.code == 403) {
+        _setStateSafely(() {
           _errorMessage = 'offenseAdmin.error.unauthorized'.tr;
-          Navigator.pushReplacementNamed(context, Routes.login);
-        } else if (e is ApiException && e.code == 404) {
+        });
+        _redirectToLogin();
+      } else if (e is ApiException && e.code == 404) {
+        _setStateSafely(() {
           _offenseList.clear();
           _filteredOffenseList.clear();
           _errorMessage = 'offenseAdmin.error.notFound'.tr;
           _hasMore = false;
-        } else {
+        });
+      } else {
+        _setStateSafely(() {
           _errorMessage = 'offenseAdmin.error.loadFailed'
               .trParams({'error': formatOffenseAdminError(e)});
-        }
-      });
+        });
+      }
     } finally {
-      setState(() => _isLoading = false);
+      _setStateSafely(() => _isLoading = false);
     }
   }
 
@@ -252,8 +328,10 @@ class _OffenseListPageState extends State<OffenseList> {
 
   Future<List<String>> _fetchAutocompleteSuggestions(String prefix) async {
     try {
-      if (!await _validateJwtToken()) {
-        Navigator.pushReplacementNamed(context, Routes.login);
+      final isValid = await _validateJwtToken();
+      if (!mounted) return [];
+      if (!isValid) {
+        _redirectToLogin();
         return [];
       }
       switch (_searchType) {
@@ -285,51 +363,10 @@ class _OffenseListPageState extends State<OffenseList> {
           return [];
       }
     } catch (e) {
-      setState(() => _errorMessage = 'offenseAdmin.error.suggestionFailed'
-          .trParams({'error': formatOffenseAdminError(e)}));
+      _setStateSafely(() => _errorMessage =
+          'offenseAdmin.error.suggestionFailed'
+              .trParams({'error': formatOffenseAdminError(e)}));
       return [];
-    }
-  }
-
-  void _rebuildFilteredOffenseList() {
-    final searchQuery = _activeQuery.trim().toLowerCase();
-    _filteredOffenseList.clear();
-    _filteredOffenseList = _offenseList.where((offense) {
-      final driverName = (offense.driverName ?? '').toLowerCase();
-      final licensePlate = (offense.licensePlate ?? '').toLowerCase();
-      final offenseType = (offense.offenseType ?? '').toLowerCase();
-      final offenseTime = offense.offenseTime;
-
-      bool matchesQuery = true;
-      if (searchQuery.isNotEmpty) {
-        if (_searchType == kOffenseSearchTypeDriverName) {
-          matchesQuery = driverName.contains(searchQuery);
-        } else if (_searchType == kOffenseSearchTypeLicensePlate) {
-          matchesQuery = licensePlate.contains(searchQuery);
-        } else if (_searchType == kOffenseSearchTypeOffenseType) {
-          matchesQuery = offenseType.contains(searchQuery);
-        }
-      }
-
-      bool matchesDateRange = true;
-      if (_startDate != null && _endDate != null && offenseTime != null) {
-        matchesDateRange = offenseTime.isAfter(_startDate!) &&
-            offenseTime.isBefore(_endDate!.add(const Duration(days: 1)));
-      } else if (_startDate != null &&
-          _endDate != null &&
-          offenseTime == null) {
-        matchesDateRange = false;
-      }
-
-      return matchesQuery && matchesDateRange;
-    }).toList();
-
-    if (_filteredOffenseList.isEmpty && _offenseList.isNotEmpty) {
-      _errorMessage = 'offenseAdmin.error.filteredEmpty'.tr;
-    } else {
-      _errorMessage = _filteredOffenseList.isEmpty && _offenseList.isEmpty
-          ? 'offenseAdmin.empty.default'.tr
-          : '';
     }
   }
 
@@ -341,7 +378,7 @@ class _OffenseListPageState extends State<OffenseList> {
   Future<void> _refreshOffenses({String? query}) async {
     _searchDebounce?.cancel();
     final effectiveQuery = (query ?? _searchController.text).trim();
-    setState(() {
+    _setStateSafely(() {
       _offenseList.clear();
       _filteredOffenseList.clear();
       _currentPage = 1;
@@ -385,7 +422,9 @@ class _OffenseListPageState extends State<OffenseList> {
       MaterialPageRoute(builder: (context) => const AddOffensePage()),
     ).then((value) {
       if (value == true) {
-        _refreshOffenses();
+        if (mounted) {
+          _refreshOffenses();
+        }
       }
     });
   }
@@ -420,19 +459,21 @@ class _OffenseListPageState extends State<OffenseList> {
     );
 
     if (confirm == true) {
-      setState(() => _isLoading = true);
+      _setStateSafely(() => _isLoading = true);
       try {
-        if (!await _validateJwtToken()) {
-          Navigator.pushReplacementNamed(context, Routes.login);
+        final isValid = await _validateJwtToken();
+        if (!mounted) return;
+        if (!isValid) {
+          _redirectToLogin();
           return;
         }
         await offenseApi.apiOffensesOffenseIdDelete(offenseId: offenseId);
         await _refreshOffenses();
       } catch (e) {
-        setState(() => _errorMessage = 'offenseAdmin.error.deleteFailed'
+        _setStateSafely(() => _errorMessage = 'offenseAdmin.error.deleteFailed'
             .trParams({'error': formatOffenseAdminError(e)}));
       } finally {
-        setState(() => _isLoading = false);
+        _setStateSafely(() => _isLoading = false);
       }
     }
   }
@@ -603,13 +644,12 @@ class _OffenseListPageState extends State<OffenseList> {
                       );
                     },
                   );
-                  if (range != null) {
-                    setState(() {
-                      _startDate = range.start;
-                      _endDate = range.end;
-                    });
-                    _refreshOffenses(query: _searchController.text.trim());
-                  }
+                  if (!mounted || range == null) return;
+                  _setStateSafely(() {
+                    _startDate = range.start;
+                    _endDate = range.end;
+                  });
+                  _refreshOffenses(query: _searchController.text.trim());
                 },
               ),
               if (_startDate != null && _endDate != null)
@@ -618,7 +658,7 @@ class _OffenseListPageState extends State<OffenseList> {
                       color: themeData.colorScheme.onSurfaceVariant),
                   tooltip: 'offenseAdmin.filter.clearDateRange'.tr,
                   onPressed: () {
-                    setState(() {
+                    _setStateSafely(() {
                       _startDate = null;
                       _endDate = null;
                     });
@@ -882,6 +922,16 @@ class _AddOffensePageState extends State<AddOffensePage> {
   bool _isLoading = false;
   final DashboardController controller = Get.find<DashboardController>();
 
+  void _setStateSafely(VoidCallback update) {
+    if (!mounted) return;
+    setState(update);
+  }
+
+  void _redirectToLogin() {
+    if (!mounted) return;
+    Navigator.pushReplacementNamed(context, Routes.login);
+  }
+
   Future<bool> _validateJwtToken() async {
     final jwtToken = (await AuthTokenStore.instance.getJwtToken());
     if (jwtToken == null || jwtToken.isEmpty) {
@@ -907,14 +957,17 @@ class _AddOffensePageState extends State<AddOffensePage> {
   }
 
   Future<void> _initialize() async {
-    setState(() => _isLoading = true);
+    _setStateSafely(() => _isLoading = true);
     try {
-      if (!await _validateJwtToken()) {
-        Navigator.pushReplacementNamed(context, Routes.login);
+      final isValid = await _validateJwtToken();
+      if (!mounted) return;
+      if (!isValid) {
+        _redirectToLogin();
         return;
       }
       await offenseApi.initializeWithJwt();
       await vehicleApi.initializeWithJwt(); // Initialize vehicle API
+      if (!mounted) return;
       _processStatusController.text =
           localizeOffenseProcessStatus(_defaultOffenseProcessStatus);
     } catch (e) {
@@ -924,7 +977,7 @@ class _AddOffensePageState extends State<AddOffensePage> {
         isError: true,
       );
     } finally {
-      setState(() => _isLoading = false);
+      _setStateSafely(() => _isLoading = false);
     }
   }
 
@@ -952,12 +1005,15 @@ class _AddOffensePageState extends State<AddOffensePage> {
 
   Future<List<String>> _fetchDriverNameSuggestions(String prefix) async {
     try {
-      if (!await _validateJwtToken()) {
-        Navigator.pushReplacementNamed(context, Routes.login);
+      final isValid = await _validateJwtToken();
+      if (!mounted) return const [];
+      if (!isValid) {
+        _redirectToLogin();
         return [];
       }
       final vehicles = await vehicleApi.apiVehiclesSearchGeneralGet(
           keywords: prefix, page: 1, size: 10);
+      if (!mounted) return const [];
       return vehicles
           .map((v) => v.ownerName ?? '')
           .where((name) => name.toLowerCase().contains(prefix.toLowerCase()))
@@ -975,11 +1031,16 @@ class _AddOffensePageState extends State<AddOffensePage> {
 
   Future<List<String>> _fetchLicensePlateSuggestions(String prefix) async {
     try {
-      if (!await _validateJwtToken()) {
-        Navigator.pushReplacementNamed(context, Routes.login);
+      final isValid = await _validateJwtToken();
+      if (!mounted) return const [];
+      if (!isValid) {
+        _redirectToLogin();
         return [];
       }
-      return await vehicleApi.apiVehiclesSearchLicenseGlobalGet(prefix: prefix);
+      final suggestions =
+          await vehicleApi.apiVehiclesSearchLicenseGlobalGet(prefix: prefix);
+      if (!mounted) return const [];
+      return suggestions;
     } catch (e) {
       _showSnackBar(
         'offenseAdmin.error.suggestionFailed'
@@ -992,11 +1053,13 @@ class _AddOffensePageState extends State<AddOffensePage> {
 
   Future<void> _submitOffense() async {
     if (!_formKey.currentState!.validate()) return;
-    if (!await _validateJwtToken()) {
-      Navigator.pushReplacementNamed(context, Routes.login);
+    final isValid = await _validateJwtToken();
+    if (!mounted) return;
+    if (!isValid) {
+      _redirectToLogin();
       return;
     }
-    setState(() => _isLoading = true);
+    _setStateSafely(() => _isLoading = true);
     try {
       final idempotencyKey = generateIdempotencyKey();
       final offensePayload = OffenseInformation(
@@ -1021,8 +1084,9 @@ class _AddOffensePageState extends State<AddOffensePage> {
         offenseInformation: offensePayload,
         idempotencyKey: idempotencyKey,
       );
+      if (!mounted) return;
       _showSnackBar('offenseAdmin.success.created'.tr);
-      if (mounted) Navigator.pop(context, true);
+      Navigator.pop(context, true);
     } catch (e) {
       _showSnackBar(
         'offenseAdmin.error.createFailed'
@@ -1030,7 +1094,7 @@ class _AddOffensePageState extends State<AddOffensePage> {
         isError: true,
       );
     } finally {
-      if (mounted) setState(() => _isLoading = false);
+      _setStateSafely(() => _isLoading = false);
     }
   }
 
@@ -1074,7 +1138,7 @@ class _AddOffensePageState extends State<AddOffensePage> {
       ),
     );
     if (pickedDate != null && mounted) {
-      setState(() => _setOffenseTime(pickedDate));
+      _setStateSafely(() => _setOffenseTime(pickedDate));
     }
   }
 
@@ -1319,20 +1383,32 @@ class _OffenseDetailPageState extends State<OffenseDetailPage> {
   String _errorMessage = '';
   final DashboardController controller = Get.find<DashboardController>();
 
+  void _setStateSafely(VoidCallback update) {
+    if (!mounted) return;
+    setState(update);
+  }
+
+  void _redirectToLogin() {
+    if (!mounted) return;
+    Navigator.pushReplacementNamed(context, Routes.login);
+  }
+
   Future<bool> _validateJwtToken() async {
     final jwtToken = (await AuthTokenStore.instance.getJwtToken());
     if (jwtToken == null || jwtToken.isEmpty) {
-      setState(() => _errorMessage = 'offenseAdmin.error.unauthorized'.tr);
+      _setStateSafely(
+          () => _errorMessage = 'offenseAdmin.error.unauthorized'.tr);
       return false;
     }
     try {
       if (JwtDecoder.isExpired(jwtToken)) {
-        setState(() => _errorMessage = 'offenseAdmin.error.expired'.tr);
+        _setStateSafely(() => _errorMessage = 'offenseAdmin.error.expired'.tr);
         return false;
       }
       return true;
     } catch (e) {
-      setState(() => _errorMessage = 'offenseAdmin.error.invalidLogin'.tr);
+      _setStateSafely(
+          () => _errorMessage = 'offenseAdmin.error.invalidLogin'.tr);
       return false;
     }
   }
@@ -1344,37 +1420,44 @@ class _OffenseDetailPageState extends State<OffenseDetailPage> {
   }
 
   Future<void> _initialize() async {
-    setState(() => _isLoading = true);
+    _setStateSafely(() => _isLoading = true);
     try {
-      if (!await _validateJwtToken()) {
-        Navigator.pushReplacementNamed(context, Routes.login);
+      final isValid = await _validateJwtToken();
+      if (!mounted) return;
+      if (!isValid) {
+        _redirectToLogin();
         return;
       }
       await offenseApi.initializeWithJwt();
+      if (!mounted) return;
       await _checkUserRole();
     } catch (e) {
-      setState(() => _errorMessage = 'offenseAdmin.error.initFailed'
+      _setStateSafely(() => _errorMessage = 'offenseAdmin.error.initFailed'
           .trParams({'error': formatOffenseAdminError(e)}));
     } finally {
-      setState(() => _isLoading = false);
+      _setStateSafely(() => _isLoading = false);
     }
   }
 
   Future<void> _checkUserRole() async {
     try {
-      if (!await _validateJwtToken()) {
-        Navigator.pushReplacementNamed(context, Routes.login);
+      final isValid = await _validateJwtToken();
+      if (!mounted) return;
+      if (!isValid) {
+        _redirectToLogin();
         return;
       }
       final roles = await _sessionHelper.fetchCurrentRoles();
-      setState(() => _isEditable = hasAnyRole(roles, const [
+      if (!mounted) return;
+      _setStateSafely(() => _isEditable = hasAnyRole(roles, const [
             'SUPER_ADMIN',
             'ADMIN',
             'TRAFFIC_POLICE',
           ]));
     } catch (e) {
-      setState(() => _errorMessage = 'offenseAdmin.error.permissionLoadFailed'
-          .trParams({'error': formatOffenseAdminError(e)}));
+      _setStateSafely(() => _errorMessage =
+          'offenseAdmin.error.permissionLoadFailed'
+              .trParams({'error': formatOffenseAdminError(e)}));
     }
   }
 
@@ -1398,16 +1481,20 @@ class _OffenseDetailPageState extends State<OffenseDetailPage> {
       ),
     );
 
+    if (!mounted) return;
     if (confirm == true) {
-      setState(() => _isLoading = true);
+      _setStateSafely(() => _isLoading = true);
       try {
-        if (!await _validateJwtToken()) {
-          Navigator.pushReplacementNamed(context, Routes.login);
+        final isValid = await _validateJwtToken();
+        if (!mounted) return;
+        if (!isValid) {
+          _redirectToLogin();
           return;
         }
         await offenseApi.apiOffensesOffenseIdDelete(offenseId: offenseId);
+        if (!mounted) return;
         _showSnackBar('offenseAdmin.success.deleted'.tr);
-        if (mounted) Navigator.pop(context, true);
+        Navigator.pop(context, true);
       } catch (e) {
         _showSnackBar(
           'offenseAdmin.error.deleteFailed'
@@ -1415,7 +1502,7 @@ class _OffenseDetailPageState extends State<OffenseDetailPage> {
           isError: true,
         );
       } finally {
-        if (mounted) setState(() => _isLoading = false);
+        _setStateSafely(() => _isLoading = false);
       }
     }
   }
@@ -1487,8 +1574,7 @@ class _OffenseDetailPageState extends State<OffenseDetailPage> {
                   Padding(
                     padding: const EdgeInsets.only(top: 16.0),
                     child: ElevatedButton(
-                      onPressed: () =>
-                          Navigator.pushReplacementNamed(context, Routes.login),
+                      onPressed: _redirectToLogin,
                       style: ElevatedButton.styleFrom(
                           backgroundColor: themeData.colorScheme.primary,
                           foregroundColor: themeData.colorScheme.onPrimary),

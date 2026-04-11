@@ -88,12 +88,66 @@ class _VehicleListState extends State<VehicleList> {
     super.dispose();
   }
 
+  void _setStateSafely(VoidCallback update) {
+    if (!mounted) return;
+    setState(update);
+  }
+
+  void _redirectToLogin() {
+    if (!mounted) return;
+    Navigator.pushReplacementNamed(context, Routes.login);
+  }
+
+  List<VehicleInformation> _buildFilteredVehicleList(
+    Iterable<VehicleInformation> vehicles,
+  ) {
+    final searchQuery = _activeQuery.toLowerCase();
+    return vehicles.where((vehicle) {
+      final licensePlate = (vehicle.licensePlate ?? '').toLowerCase();
+      final vehicleType = (vehicle.vehicleType ?? '').toLowerCase();
+      final registrationDate = vehicle.firstRegistrationDate;
+
+      var matchesQuery = true;
+      if (searchQuery.isNotEmpty) {
+        if (_searchType == kVehicleSearchTypeLicensePlate) {
+          matchesQuery = licensePlate.contains(searchQuery);
+        } else if (_searchType == kVehicleSearchTypeVehicleType) {
+          matchesQuery = vehicleType.contains(searchQuery);
+        }
+      }
+
+      var matchesDateRange = true;
+      if (_startDate != null && _endDate != null && registrationDate != null) {
+        matchesDateRange = registrationDate.isAfter(_startDate!) &&
+            registrationDate.isBefore(_endDate!.add(const Duration(days: 1)));
+      } else if (_startDate != null &&
+          _endDate != null &&
+          registrationDate == null) {
+        matchesDateRange = false;
+      }
+
+      return matchesQuery && matchesDateRange;
+    }).toList();
+  }
+
+  String _resolveVehicleListErrorMessage(
+    List<VehicleInformation> filteredVehicles,
+  ) {
+    if (filteredVehicles.isNotEmpty) {
+      return '';
+    }
+    if (_hasMore && _hasClientSideFiltering) {
+      return '';
+    }
+    return _hasActiveFilters ? 'vehicle.empty.filtered'.tr : 'vehicle.empty'.tr;
+  }
+
   Future<bool> _validateJwtToken() async {
     String? jwtToken = (await AuthTokenStore.instance.getJwtToken());
     debugPrint('Retrieved JWT: $jwtToken');
     if (jwtToken == null || jwtToken.isEmpty) {
       debugPrint('JWT token not found or empty');
-      setState(() => _errorMessage = 'vehicle.error.unauthorized'.tr);
+      _setStateSafely(() => _errorMessage = 'vehicle.error.unauthorized'.tr);
       return false;
     }
     try {
@@ -102,24 +156,27 @@ class _VehicleListState extends State<VehicleList> {
       if (JwtDecoder.isExpired(jwtToken)) {
         debugPrint('JWT token is expired: ${decodedToken['exp']}');
         jwtToken = await _refreshJwtToken();
+        if (!mounted) return false;
         if (jwtToken == null) {
-          setState(() => _errorMessage = 'vehicle.error.expired'.tr);
+          _setStateSafely(() => _errorMessage = 'vehicle.error.expired'.tr);
           return false;
         }
         await AuthTokenStore.instance.setJwtToken(jwtToken);
         final newDecodedToken = JwtDecoder.decode(jwtToken);
         debugPrint('New JWT decoded: $newDecodedToken');
         if (JwtDecoder.isExpired(jwtToken)) {
-          setState(() => _errorMessage = 'vehicle.error.refreshedExpired'.tr);
+          _setStateSafely(
+              () => _errorMessage = 'vehicle.error.refreshedExpired'.tr);
           return false;
         }
         await vehicleApi.initializeWithJwt();
+        if (!mounted) return false;
       }
       debugPrint('JWT token is valid. Subject: ${decodedToken['sub']}');
       return true;
     } catch (e) {
       debugPrint('JWT decode error: $e');
-      setState(() => _errorMessage = 'vehicle.error.invalidLogin'.tr);
+      _setStateSafely(() => _errorMessage = 'vehicle.error.invalidLogin'.tr);
       return false;
     }
   }
@@ -135,39 +192,46 @@ class _VehicleListState extends State<VehicleList> {
   }
 
   Future<void> _initialize() async {
-    setState(() => _isLoading = true);
+    _setStateSafely(() => _isLoading = true);
     try {
-      if (!await _validateJwtToken()) {
-        Navigator.pushReplacementNamed(context, Routes.login);
+      final isValid = await _validateJwtToken();
+      if (!mounted) return;
+      if (!isValid) {
+        _redirectToLogin();
         return;
       }
       await vehicleApi.initializeWithJwt();
+      if (!mounted) return;
       await _checkUserRole();
+      if (!mounted) return;
       await _fetchVehicles(reset: true);
     } catch (e) {
-      setState(() => _errorMessage = 'vehicle.error.initializeFailed'
+      _setStateSafely(() => _errorMessage = 'vehicle.error.initializeFailed'
           .trParams({'error': formatVehicleError(e)}));
     } finally {
-      setState(() => _isLoading = false);
+      _setStateSafely(() => _isLoading = false);
     }
   }
 
   Future<void> _checkUserRole() async {
     try {
-      if (!await _validateJwtToken()) {
-        Navigator.pushReplacementNamed(context, Routes.login);
+      final isValid = await _validateJwtToken();
+      if (!mounted) return;
+      if (!isValid) {
+        _redirectToLogin();
         return;
       }
       final roles = await _sessionHelper.fetchCurrentRoles();
+      if (!mounted) return;
       debugPrint('Resolved user roles: $roles');
-      setState(() => _isAdmin = hasAnyRole(roles, const [
+      _setStateSafely(() => _isAdmin = hasAnyRole(roles, const [
             'SUPER_ADMIN',
             'ADMIN',
             'TRAFFIC_POLICE',
           ]));
     } catch (e) {
       debugPrint('Error checking role: $e');
-      setState(() => _errorMessage = 'vehicle.error.roleCheckFailed'
+      _setStateSafely(() => _errorMessage = 'vehicle.error.roleCheckFailed'
           .trParams({'error': formatVehicleError(e)}));
     }
   }
@@ -183,47 +247,63 @@ class _VehicleListState extends State<VehicleList> {
     }
     if (!_hasMore) return;
 
-    setState(() {
+    _setStateSafely(() {
       _isLoading = true;
       _errorMessage = '';
     });
 
     try {
-      if (!await _validateJwtToken()) {
-        Navigator.pushReplacementNamed(context, Routes.login);
+      final isValid = await _validateJwtToken();
+      if (!mounted) return;
+      if (!isValid) {
+        _redirectToLogin();
         return;
       }
+      var shouldAutoLoadMore = false;
       do {
         final vehicles = await _loadVehiclePage(
           page: _currentPage,
           query: _activeQuery,
         );
         if (!mounted) return;
+        final updatedVehicles = <VehicleInformation>[
+          ..._vehicleList,
+          ...vehicles,
+        ];
+        final hasMore = vehicles.length == _pageSize;
+        final filteredVehicles = _buildFilteredVehicleList(updatedVehicles);
+        shouldAutoLoadMore =
+            hasMore && filteredVehicles.isEmpty && _hasClientSideFiltering;
 
-        setState(() {
-          _vehicleList.addAll(vehicles);
-          _hasMore = vehicles.length == _pageSize;
+        _setStateSafely(() {
+          _vehicleList
+            ..clear()
+            ..addAll(updatedVehicles);
+          _filteredVehicleList = filteredVehicles;
+          _hasMore = hasMore;
           _currentPage++;
-          _rebuildFilteredVehicleList();
+          _errorMessage = _resolveVehicleListErrorMessage(filteredVehicles);
         });
-      } while (_shouldAutoLoadMore());
+      } while (shouldAutoLoadMore && mounted);
     } catch (e) {
-      setState(() {
-        if (e is ApiException && e.code == 403) {
-          _errorMessage = 'vehicle.error.unauthorized'.tr;
-          Navigator.pushReplacementNamed(context, Routes.login);
-        } else if (e is ApiException && e.code == 404) {
+      if (e is ApiException && e.code == 403) {
+        _setStateSafely(() => _errorMessage = 'vehicle.error.unauthorized'.tr);
+        _redirectToLogin();
+      } else if (e is ApiException && e.code == 404) {
+        _setStateSafely(() {
           _vehicleList.clear();
           _filteredVehicleList.clear();
           _errorMessage = 'vehicle.error.notFound'.tr;
           _hasMore = false;
-        } else {
+        });
+      } else {
+        _setStateSafely(() {
           _errorMessage = 'vehicle.error.loadFailed'
               .trParams({'error': formatVehicleError(e)});
-        }
-      });
+        });
+      }
     } finally {
-      setState(() => _isLoading = false);
+      _setStateSafely(() => _isLoading = false);
     }
   }
 
@@ -244,14 +324,17 @@ class _VehicleListState extends State<VehicleList> {
 
   Future<List<String>> _fetchAutocompleteSuggestions(String prefix) async {
     try {
-      if (!await _validateJwtToken()) {
-        Navigator.pushReplacementNamed(context, Routes.login);
+      final isValid = await _validateJwtToken();
+      if (!mounted) return const [];
+      if (!isValid) {
+        _redirectToLogin();
         return [];
       }
       if (_searchType == kVehicleSearchTypeLicensePlate) {
         final suggestions = await vehicleApi.apiVehiclesSearchLicenseGlobalGet(
           prefix: prefix,
         );
+        if (!mounted) return const [];
         return suggestions
             .where((s) => s.toLowerCase().contains(prefix.toLowerCase()))
             .toList();
@@ -260,63 +343,16 @@ class _VehicleListState extends State<VehicleList> {
             await vehicleApi.apiVehiclesAutocompleteTypesGlobalGet(
           prefix: prefix,
         );
+        if (!mounted) return const [];
         return suggestions
             .where((s) => s.toLowerCase().contains(prefix.toLowerCase()))
             .toList();
       }
     } catch (e) {
-      setState(() => _errorMessage = 'vehicle.error.suggestionFailed'
+      _setStateSafely(() => _errorMessage = 'vehicle.error.suggestionFailed'
           .trParams({'error': formatVehicleError(e)}));
       return [];
     }
-  }
-
-  void _rebuildFilteredVehicleList() {
-    final searchQuery = _activeQuery.toLowerCase();
-    _filteredVehicleList = _vehicleList.where((vehicle) {
-      final licensePlate = (vehicle.licensePlate ?? '').toLowerCase();
-      final vehicleType = (vehicle.vehicleType ?? '').toLowerCase();
-      final registrationDate = vehicle.firstRegistrationDate;
-
-      bool matchesQuery = true;
-      if (searchQuery.isNotEmpty) {
-        if (_searchType == kVehicleSearchTypeLicensePlate) {
-          matchesQuery = licensePlate.contains(searchQuery);
-        } else if (_searchType == kVehicleSearchTypeVehicleType) {
-          matchesQuery = vehicleType.contains(searchQuery);
-        }
-      }
-
-      bool matchesDateRange = true;
-      if (_startDate != null && _endDate != null && registrationDate != null) {
-        matchesDateRange = registrationDate.isAfter(_startDate!) &&
-            registrationDate.isBefore(_endDate!.add(const Duration(days: 1)));
-      } else if (_startDate != null &&
-          _endDate != null &&
-          registrationDate == null) {
-        matchesDateRange = false;
-      }
-
-      return matchesQuery && matchesDateRange;
-    }).toList();
-
-    if (_filteredVehicleList.isEmpty) {
-      _errorMessage = _hasMore
-          ? ''
-          : _hasActiveFilters
-              ? 'vehicle.empty.filtered'.tr
-              : 'vehicle.empty'.tr;
-      return;
-    }
-
-    _errorMessage = '';
-  }
-
-  bool _shouldAutoLoadMore() {
-    return mounted &&
-        _hasMore &&
-        _filteredVehicleList.isEmpty &&
-        _hasClientSideFiltering;
   }
 
   bool get _hasDateFilter => _startDate != null && _endDate != null;
@@ -354,7 +390,7 @@ class _VehicleListState extends State<VehicleList> {
     _searchDebounce?.cancel();
     final effectiveQuery =
         clearFilters ? '' : (query ?? _searchController.text).trim();
-    setState(() {
+    _setStateSafely(() {
       _vehicleList.clear();
       _filteredVehicleList.clear();
       _currentPage = 1;
@@ -436,22 +472,26 @@ class _VehicleListState extends State<VehicleList> {
       ),
     );
 
+    if (!mounted) return;
     if (confirm == true) {
-      setState(() => _isLoading = true);
+      _setStateSafely(() => _isLoading = true);
       try {
-        if (!await _validateJwtToken()) {
-          Navigator.pushReplacementNamed(context, Routes.login);
+        final isValid = await _validateJwtToken();
+        if (!mounted) return;
+        if (!isValid) {
+          _redirectToLogin();
           return;
         }
         await vehicleApi.apiVehiclesVehicleIdDelete(vehicleId: vehicleId);
+        if (!mounted) return;
         await _refreshVehicleList();
       } catch (e) {
-        setState(() {
+        _setStateSafely(() {
           _errorMessage = 'vehicle.error.deleteFailed'
               .trParams({'error': formatVehicleError(e)});
         });
       } finally {
-        setState(() => _isLoading = false);
+        _setStateSafely(() => _isLoading = false);
       }
     }
   }
@@ -538,7 +578,7 @@ class _VehicleListState extends State<VehicleList> {
               DropdownButton<String>(
                 value: _searchType,
                 onChanged: (String? newValue) {
-                  setState(() {
+                  _setStateSafely(() {
                     _searchType = newValue!;
                     _startDate = null;
                     _endDate = null;
@@ -614,8 +654,9 @@ class _VehicleListState extends State<VehicleList> {
                       );
                     },
                   );
+                  if (!mounted) return;
                   if (range != null) {
-                    setState(() {
+                    _setStateSafely(() {
                       _startDate = range.start;
                       _endDate = range.end;
                     });
@@ -629,7 +670,7 @@ class _VehicleListState extends State<VehicleList> {
                       color: themeData.colorScheme.onSurfaceVariant),
                   tooltip: 'vehicle.filter.clearDateRange'.tr,
                   onPressed: () {
-                    setState(() {
+                    _setStateSafely(() {
                       _startDate = null;
                       _endDate = null;
                     });
@@ -717,9 +758,7 @@ class _VehicleListState extends State<VehicleList> {
                                         padding:
                                             const EdgeInsets.only(top: 16.0),
                                         child: ElevatedButton(
-                                          onPressed: () =>
-                                              Navigator.pushReplacementNamed(
-                                                  context, Routes.login),
+                                          onPressed: _redirectToLogin,
                                           style: ElevatedButton.styleFrom(
                                             backgroundColor:
                                                 themeData.colorScheme.primary,
@@ -935,6 +974,16 @@ class _AddVehiclePageState extends State<AddVehiclePage> {
   bool _isLoading = false;
   final DashboardController controller = Get.find<DashboardController>();
 
+  void _setStateSafely(VoidCallback update) {
+    if (!mounted) return;
+    setState(update);
+  }
+
+  void _redirectToLogin() {
+    if (!mounted) return;
+    Navigator.pushReplacementNamed(context, Routes.login);
+  }
+
   Future<bool> _validateJwtToken() async {
     final jwtToken = (await AuthTokenStore.instance.getJwtToken());
     if (jwtToken == null || jwtToken.isEmpty) {
@@ -960,13 +1009,16 @@ class _AddVehiclePageState extends State<AddVehiclePage> {
   }
 
   Future<void> _initialize() async {
-    setState(() => _isLoading = true);
+    _setStateSafely(() => _isLoading = true);
     try {
-      if (!await _validateJwtToken()) {
-        Navigator.pushReplacementNamed(context, Routes.login);
+      final isValid = await _validateJwtToken();
+      if (!mounted) return;
+      if (!isValid) {
+        _redirectToLogin();
         return;
       }
       final jwtToken = (await AuthTokenStore.instance.getJwtToken());
+      if (!mounted) return;
       if (jwtToken == null) throw Exception('vehicle.error.jwtMissing'.tr);
       final decodedToken = JwtDecoder.decode(jwtToken);
       final username = decodedToken['sub'] ?? '';
@@ -975,7 +1027,8 @@ class _AddVehiclePageState extends State<AddVehiclePage> {
       }
       await vehicleApi.initializeWithJwt();
       await driverApi.initializeWithJwt();
-      setState(() {
+      if (!mounted) return;
+      _setStateSafely(() {
         _contactNumberController.text = '';
       });
     } catch (e) {
@@ -985,7 +1038,7 @@ class _AddVehiclePageState extends State<AddVehiclePage> {
         isError: true,
       );
     } finally {
-      setState(() => _isLoading = false);
+      _setStateSafely(() => _isLoading = false);
     }
   }
 
@@ -1016,19 +1069,22 @@ class _AddVehiclePageState extends State<AddVehiclePage> {
   Future<void> _submitVehicle() async {
     if (!_formKey.currentState!.validate()) return;
     final licensePlate = buildVehicleLicensePlate(_licensePlateController.text);
-    if (!await _validateJwtToken()) {
-      Navigator.pushReplacementNamed(context, Routes.login);
+    final isValid = await _validateJwtToken();
+    if (!mounted) return;
+    if (!isValid) {
+      _redirectToLogin();
       return;
     }
     if (!await ensureVehicleLicensePlateAvailable(
       vehicleApi: vehicleApi,
       licensePlate: licensePlate,
     )) {
+      if (!mounted) return;
       _showSnackBar('vehicle.error.plateExists'.tr, isError: true);
       return;
     }
     final idCardNumber = _idCardNumberController.text.trim();
-    setState(() => _isLoading = true);
+    _setStateSafely(() => _isLoading = true);
     try {
       final vehiclePayload = VehicleInformation(
         licensePlate: licensePlate,
@@ -1057,18 +1113,17 @@ class _AddVehiclePageState extends State<AddVehiclePage> {
         vehicle: vehiclePayload,
         idempotencyKey: idempotencyKey,
       );
+      if (!mounted) return;
       _showSnackBar('vehicle.success.created'.tr);
-      if (mounted) {
-        Navigator.pop(context, true);
-        widget.onVehicleAdded?.call();
-      }
+      Navigator.pop(context, true);
+      widget.onVehicleAdded?.call();
     } catch (e) {
       _showSnackBar(
         'vehicle.error.createFailed'.trParams({'error': formatVehicleError(e)}),
         isError: true,
       );
     } finally {
-      if (mounted) setState(() => _isLoading = false);
+      _setStateSafely(() => _isLoading = false);
     }
   }
 
@@ -1111,7 +1166,7 @@ class _AddVehiclePageState extends State<AddVehiclePage> {
       ),
     );
     if (pickedDate != null && mounted) {
-      setState(() => _setFirstRegistrationDate(pickedDate));
+      _setStateSafely(() => _setFirstRegistrationDate(pickedDate));
     }
   }
 
@@ -1322,6 +1377,16 @@ class _EditVehiclePageState extends State<EditVehiclePage> {
   bool _isLoading = false;
   final DashboardController controller = Get.find<DashboardController>();
 
+  void _setStateSafely(VoidCallback update) {
+    if (!mounted) return;
+    setState(update);
+  }
+
+  void _redirectToLogin() {
+    if (!mounted) return;
+    Navigator.pushReplacementNamed(context, Routes.login);
+  }
+
   Future<bool> _validateJwtToken() async {
     final jwtToken = (await AuthTokenStore.instance.getJwtToken());
     if (jwtToken == null || jwtToken.isEmpty) {
@@ -1347,14 +1412,17 @@ class _EditVehiclePageState extends State<EditVehiclePage> {
   }
 
   Future<void> _initialize() async {
-    setState(() => _isLoading = true);
+    _setStateSafely(() => _isLoading = true);
     try {
-      if (!await _validateJwtToken()) {
-        Navigator.pushReplacementNamed(context, Routes.login);
+      final isValid = await _validateJwtToken();
+      if (!mounted) return;
+      if (!isValid) {
+        _redirectToLogin();
         return;
       }
       await vehicleApi.initializeWithJwt();
       await driverApi.initializeWithJwt();
+      if (!mounted) return;
       _initializeFields();
     } catch (e) {
       _showSnackBar(
@@ -1363,12 +1431,12 @@ class _EditVehiclePageState extends State<EditVehiclePage> {
         isError: true,
       );
     } finally {
-      setState(() => _isLoading = false);
+      _setStateSafely(() => _isLoading = false);
     }
   }
 
   void _initializeFields() {
-    setState(() {
+    _setStateSafely(() {
       _licensePlateController.text =
           widget.vehicle.licensePlate?.replaceFirst(kVehiclePlatePrefix, '') ??
               '';
@@ -1412,8 +1480,10 @@ class _EditVehiclePageState extends State<EditVehiclePage> {
     if (!_formKey.currentState!.validate()) return;
     final newLicensePlate =
         buildVehicleLicensePlate(_licensePlateController.text);
-    if (!await _validateJwtToken()) {
-      Navigator.pushReplacementNamed(context, Routes.login);
+    final isValid = await _validateJwtToken();
+    if (!mounted) return;
+    if (!isValid) {
+      _redirectToLogin();
       return;
     }
     if (!await ensureVehicleLicensePlateAvailable(
@@ -1421,11 +1491,12 @@ class _EditVehiclePageState extends State<EditVehiclePage> {
       licensePlate: newLicensePlate,
       currentLicensePlate: widget.vehicle.licensePlate,
     )) {
+      if (!mounted) return;
       _showSnackBar('vehicle.error.plateExists'.tr, isError: true);
       return;
     }
     final idCardNumber = _idCardNumberController.text.trim();
-    setState(() => _isLoading = true);
+    _setStateSafely(() => _isLoading = true);
     try {
       final vehiclePayload = VehicleInformation(
         vehicleId: widget.vehicle.vehicleId,
@@ -1456,15 +1527,16 @@ class _EditVehiclePageState extends State<EditVehiclePage> {
         vehicle: vehiclePayload,
         idempotencyKey: idempotencyKey,
       );
+      if (!mounted) return;
       _showSnackBar('vehicle.success.updated'.tr);
-      if (mounted) Navigator.pop(context, true);
+      Navigator.pop(context, true);
     } catch (e) {
       _showSnackBar(
         'vehicle.error.updateFailed'.trParams({'error': formatVehicleError(e)}),
         isError: true,
       );
     } finally {
-      if (mounted) setState(() => _isLoading = false);
+      _setStateSafely(() => _isLoading = false);
     }
   }
 
@@ -1509,7 +1581,7 @@ class _EditVehiclePageState extends State<EditVehiclePage> {
       ),
     );
     if (pickedDate != null && mounted) {
-      setState(() => _setFirstRegistrationDate(pickedDate));
+      _setStateSafely(() => _setFirstRegistrationDate(pickedDate));
     }
   }
 
@@ -1691,20 +1763,30 @@ class _VehicleDetailPageState extends State<VehicleDetailPage> {
   String? _currentDriverName;
   final DashboardController controller = Get.find<DashboardController>();
 
+  void _setStateSafely(VoidCallback update) {
+    if (!mounted) return;
+    setState(update);
+  }
+
+  void _redirectToLogin() {
+    if (!mounted) return;
+    Navigator.pushReplacementNamed(context, Routes.login);
+  }
+
   Future<bool> _validateJwtToken() async {
     final jwtToken = (await AuthTokenStore.instance.getJwtToken());
     if (jwtToken == null || jwtToken.isEmpty) {
-      setState(() => _errorMessage = 'vehicle.error.unauthorized'.tr);
+      _setStateSafely(() => _errorMessage = 'vehicle.error.unauthorized'.tr);
       return false;
     }
     try {
       if (JwtDecoder.isExpired(jwtToken)) {
-        setState(() => _errorMessage = 'vehicle.error.expired'.tr);
+        _setStateSafely(() => _errorMessage = 'vehicle.error.expired'.tr);
         return false;
       }
       return true;
     } catch (e) {
-      setState(() => _errorMessage = 'vehicle.error.invalidLogin'.tr);
+      _setStateSafely(() => _errorMessage = 'vehicle.error.invalidLogin'.tr);
       return false;
     }
   }
@@ -1716,13 +1798,16 @@ class _VehicleDetailPageState extends State<VehicleDetailPage> {
   }
 
   Future<void> _initialize() async {
-    setState(() => _isLoading = true);
+    _setStateSafely(() => _isLoading = true);
     try {
-      if (!await _validateJwtToken()) {
-        Navigator.pushReplacementNamed(context, Routes.login);
+      final isValid = await _validateJwtToken();
+      if (!mounted) return;
+      if (!isValid) {
+        _redirectToLogin();
         return;
       }
       final jwtToken = (await AuthTokenStore.instance.getJwtToken());
+      if (!mounted) return;
       if (jwtToken == null) {
         throw Exception('vehicle.error.jwtMissingRelogin'.tr);
       }
@@ -1732,29 +1817,34 @@ class _VehicleDetailPageState extends State<VehicleDetailPage> {
         throw Exception('vehicle.error.usernameMissingInJwt'.tr);
       }
       await vehicleApi.initializeWithJwt();
+      if (!mounted) return;
       final user = await _fetchUserManagement();
+      if (!mounted) return;
       final driverInfo = user?.userId != null
           ? await _fetchDriverInformation(user!.userId!)
           : null;
+      if (!mounted) return;
       _currentDriverName = driverInfo?.name ?? username;
       await _checkUserRole();
     } catch (e) {
-      setState(() => _errorMessage = 'vehicle.error.initializeFailed'
+      _setStateSafely(() => _errorMessage = 'vehicle.error.initializeFailed'
           .trParams({'error': formatVehicleError(e)}));
     } finally {
-      setState(() => _isLoading = false);
+      _setStateSafely(() => _isLoading = false);
     }
   }
 
   Future<UserManagement?> _fetchUserManagement() async {
     try {
-      if (!await _validateJwtToken()) {
-        Navigator.pushReplacementNamed(context, Routes.login);
+      final isValid = await _validateJwtToken();
+      if (!mounted) return null;
+      if (!isValid) {
+        _redirectToLogin();
         return null;
       }
       return await _sessionHelper.fetchCurrentUser();
     } catch (e) {
-      setState(() => _errorMessage = 'vehicle.error.userInfoLoadFailed'
+      _setStateSafely(() => _errorMessage = 'vehicle.error.userInfoLoadFailed'
           .trParams({'error': formatVehicleError(e)}));
       return null;
     }
@@ -1762,15 +1852,18 @@ class _VehicleDetailPageState extends State<VehicleDetailPage> {
 
   Future<DriverInformation?> _fetchDriverInformation(int userId) async {
     try {
-      if (!await _validateJwtToken()) {
-        Navigator.pushReplacementNamed(context, Routes.login);
+      final isValid = await _validateJwtToken();
+      if (!mounted) return null;
+      if (!isValid) {
+        _redirectToLogin();
         return null;
       }
       final driverApi = DriverInformationControllerApi();
       await driverApi.initializeWithJwt();
+      if (!mounted) return null;
       return await driverApi.apiDriversDriverIdGet(driverId: userId);
     } catch (e) {
-      setState(() => _errorMessage = 'vehicle.error.driverInfoLoadFailed'
+      _setStateSafely(() => _errorMessage = 'vehicle.error.driverInfoLoadFailed'
           .trParams({'error': formatVehicleError(e)}));
       return null;
     }
@@ -1778,13 +1871,16 @@ class _VehicleDetailPageState extends State<VehicleDetailPage> {
 
   Future<void> _checkUserRole() async {
     try {
-      if (!await _validateJwtToken()) {
-        Navigator.pushReplacementNamed(context, Routes.login);
+      final isValid = await _validateJwtToken();
+      if (!mounted) return;
+      if (!isValid) {
+        _redirectToLogin();
         return;
       }
       final roles = await _sessionHelper.fetchCurrentRoles();
+      if (!mounted) return;
       debugPrint('Resolved user roles: $roles');
-      setState(() => _isEditable = hasAnyRole(roles, const [
+      _setStateSafely(() => _isEditable = hasAnyRole(roles, const [
             'SUPER_ADMIN',
             'ADMIN',
             'TRAFFIC_POLICE',
@@ -1792,28 +1888,31 @@ class _VehicleDetailPageState extends State<VehicleDetailPage> {
           (_currentDriverName == widget.vehicle.ownerName));
     } catch (e) {
       debugPrint('Error checking role: $e');
-      setState(() => _errorMessage = 'vehicle.error.permissionLoadFailed'
+      _setStateSafely(() => _errorMessage = 'vehicle.error.permissionLoadFailed'
           .trParams({'error': formatVehicleError(e)}));
     }
   }
 
   Future<void> _deleteVehicle(int vehicleId) async {
-    setState(() => _isLoading = true);
+    _setStateSafely(() => _isLoading = true);
     try {
-      if (!await _validateJwtToken()) {
-        Navigator.pushReplacementNamed(context, Routes.login);
+      final isValid = await _validateJwtToken();
+      if (!mounted) return;
+      if (!isValid) {
+        _redirectToLogin();
         return;
       }
       await vehicleApi.apiVehiclesVehicleIdDelete(vehicleId: vehicleId);
+      if (!mounted) return;
       _showSnackBar('vehicle.success.deleted'.tr);
-      if (mounted) Navigator.pop(context, true);
+      Navigator.pop(context, true);
     } catch (e) {
       _showSnackBar(
         'vehicle.error.deleteFailed'.trParams({'error': formatVehicleError(e)}),
         isError: true,
       );
     } finally {
-      if (mounted) setState(() => _isLoading = false);
+      _setStateSafely(() => _isLoading = false);
     }
   }
 
@@ -1929,8 +2028,7 @@ class _VehicleDetailPageState extends State<VehicleDetailPage> {
                   Padding(
                     padding: const EdgeInsets.only(top: 16.0),
                     child: ElevatedButton(
-                      onPressed: () =>
-                          Navigator.pushReplacementNamed(context, Routes.login),
+                      onPressed: _redirectToLogin,
                       style: ElevatedButton.styleFrom(
                           backgroundColor: themeData.colorScheme.primary,
                           foregroundColor: themeData.colorScheme.onPrimary),

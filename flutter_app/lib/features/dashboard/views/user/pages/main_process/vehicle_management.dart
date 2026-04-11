@@ -128,24 +128,65 @@ class _VehicleManagementState extends State<VehicleManagement> {
     _initialize();
   }
 
+  void _setStateSafely(VoidCallback update) {
+    if (!mounted) return;
+    setState(update);
+  }
+
+  List<VehicleInformation> _buildFilteredVehicles(
+    Iterable<VehicleInformation> vehicles,
+    String query,
+  ) {
+    final searchQuery = query.trim().toLowerCase();
+    if (searchQuery.isEmpty) {
+      return vehicles.toList();
+    }
+
+    return vehicles.where((vehicle) {
+      final licensePlate = (vehicle.licensePlate ?? '').toLowerCase();
+      final vehicleType = (vehicle.vehicleType ?? '').toLowerCase();
+      if (_searchType == kVehicleSearchTypeLicensePlate) {
+        return licensePlate.contains(searchQuery);
+      }
+      return vehicleType.contains(searchQuery);
+    }).toList();
+  }
+
+  String _resolveVehicleListErrorMessage(
+    List<VehicleInformation> filteredVehicles,
+    String query,
+  ) {
+    if (filteredVehicles.isNotEmpty) return '';
+    if (_vehicleList.isEmpty) return 'vehicle.empty'.tr;
+    return query.trim().isNotEmpty
+        ? 'vehicle.empty.filtered'.tr
+        : 'vehicle.empty'.tr;
+  }
+
   Future<void> _initialize() async {
-    setState(() {
+    _setStateSafely(() {
       _isLoading = true;
       _errorMessage = '';
     });
     try {
       final prefs = await SharedPreferences.getInstance();
+      if (!mounted) return;
       final jwtToken = prefs.getString('jwtToken');
       if (jwtToken == null) {
         throw Exception('vehicle.error.jwtMissingRelogin'.tr);
       }
 
       await vehicleApi.initializeWithJwt();
+      if (!mounted) return;
       await driverApi.initializeWithJwt();
+      if (!mounted) return;
       await userApi.initializeWithJwt();
+      if (!mounted) return;
 
       final user = await _fetchUserManagement();
+      if (!mounted) return;
       final driverInfo = await _fetchDriverInformation();
+      if (!mounted) return;
       _currentDriverName = _resolveVehicleOwnerName(
         driverInfo: driverInfo,
         user: user,
@@ -165,12 +206,12 @@ class _VehicleManagementState extends State<VehicleManagement> {
 
       await _fetchUserVehicles(reset: true);
     } catch (e) {
-      setState(() {
+      _setStateSafely(() {
         _errorMessage = 'vehicle.error.initializeFailed'
             .trParams({'error': formatVehicleError(e)});
       });
     } finally {
-      setState(() => _isLoading = false);
+      _setStateSafely(() => _isLoading = false);
     }
   }
 
@@ -202,7 +243,7 @@ class _VehicleManagementState extends State<VehicleManagement> {
 
   Future<void> _fetchUserVehicles({bool reset = false, String? query}) async {
     if (_currentDriverIdCardNumber == null) {
-      setState(() {
+      _setStateSafely(() {
         _errorMessage = 'vehicle.error.missingIdCard'.tr;
         _isLoading = false;
       });
@@ -216,7 +257,7 @@ class _VehicleManagementState extends State<VehicleManagement> {
     }
     if (!_hasMore && query == null) return;
 
-    setState(() {
+    _setStateSafely(() {
       _isLoading = true;
       _errorMessage = '';
     });
@@ -227,23 +268,22 @@ class _VehicleManagementState extends State<VehicleManagement> {
 
     try {
       final vehicles = await vehicleApi.apiVehiclesMeGet();
+      if (!mounted) return;
+      final filteredVehicles = _buildFilteredVehicles(vehicles, searchQuery);
 
       debugPrint(
           'Vehicles fetched: ${vehicles.map((v) => v.toJson()).toList()}');
-      setState(() {
+      _setStateSafely(() {
         _vehicleList
           ..clear()
           ..addAll(vehicles);
+        _filteredVehicleList = filteredVehicles;
         _hasMore = false;
-        _applyFilters(searchQuery);
-        if (_filteredVehicleList.isEmpty) {
-          _errorMessage = searchQuery.isNotEmpty
-              ? 'vehicle.empty.filtered'.tr
-              : 'vehicle.empty'.tr;
-        }
+        _errorMessage =
+            _resolveVehicleListErrorMessage(filteredVehicles, searchQuery);
       });
     } catch (e) {
-      setState(() {
+      _setStateSafely(() {
         if (e is ApiException && e.code == 400) {
           _errorMessage = 'vehicle.error.invalidQuery'.tr;
         } else if (e is ApiException && e.code == 404) {
@@ -262,34 +302,15 @@ class _VehicleManagementState extends State<VehicleManagement> {
         }
       });
     } finally {
-      setState(() => _isLoading = false);
+      _setStateSafely(() => _isLoading = false);
     }
   }
 
   void _applyFilters(String query) {
-    final searchQuery = query.trim().toLowerCase();
-    setState(() {
-      if (searchQuery.isEmpty) {
-        _filteredVehicleList.clear();
-        _filteredVehicleList.addAll(_vehicleList);
-      } else {
-        _filteredVehicleList = _vehicleList.where((vehicle) {
-          final licensePlate = (vehicle.licensePlate ?? '').toLowerCase();
-          final vehicleType = (vehicle.vehicleType ?? '').toLowerCase();
-          if (_searchType == kVehicleSearchTypeLicensePlate) {
-            return licensePlate.contains(searchQuery);
-          } else {
-            return vehicleType.contains(searchQuery);
-          }
-        }).toList();
-      }
-      if (_filteredVehicleList.isEmpty && _vehicleList.isNotEmpty) {
-        _errorMessage = 'vehicle.empty.filtered'.tr;
-      } else {
-        _errorMessage = _filteredVehicleList.isEmpty && _vehicleList.isEmpty
-            ? 'vehicle.empty'.tr
-            : '';
-      }
+    final filteredVehicles = _buildFilteredVehicles(_vehicleList, query);
+    _setStateSafely(() {
+      _filteredVehicleList = filteredVehicles;
+      _errorMessage = _resolveVehicleListErrorMessage(filteredVehicles, query);
       debugPrint('Filtered vehicles: ${_filteredVehicleList.length}');
     });
   }
@@ -363,11 +384,11 @@ class _VehicleManagementState extends State<VehicleManagement> {
 
   Future<void> _deleteVehicle(int vehicleId, String licensePlate) async {
     _showDeleteConfirmationDialog('vehicle.action.delete'.tr, () async {
-      setState(() => _isLoading = true);
+      _setStateSafely(() => _isLoading = true);
       try {
         await vehicleApi.apiVehiclesMeVehicleIdDelete(vehicleId: vehicleId);
         _showSnackBar('vehicle.success.deleted'.tr);
-        _fetchUserVehicles(reset: true);
+        await _fetchUserVehicles(reset: true);
       } catch (e) {
         _showSnackBar(
           'vehicle.error.deleteFailed'
@@ -375,7 +396,7 @@ class _VehicleManagementState extends State<VehicleManagement> {
           isError: true,
         );
       } finally {
-        setState(() => _isLoading = false);
+        _setStateSafely(() => _isLoading = false);
       }
     });
   }
@@ -515,11 +536,14 @@ class _VehicleManagementState extends State<VehicleManagement> {
           DropdownButton<String>(
             value: _searchType,
             onChanged: (String? newValue) {
-              setState(() {
-                _searchType = newValue!;
+              if (newValue == null || newValue == _searchType) {
+                return;
+              }
+              _setStateSafely(() {
+                _searchType = newValue;
                 _searchController.clear();
-                _fetchUserVehicles(reset: true);
               });
+              _fetchUserVehicles(reset: true);
             },
             items: <String>[
               kVehicleSearchTypeLicensePlate,
@@ -808,8 +832,10 @@ class _AddVehiclePageState extends State<AddVehiclePage> {
   Future<void> _preFillForm() async {
     final user = await _fetchUserManagement();
     final driverInfo = await _fetchDriverInformation();
-    final ownerName = _resolveVehicleOwnerName(driverInfo: driverInfo, user: user);
-    final ownerIdCard = _resolveVehicleOwnerIdCard(driverInfo: driverInfo, user: user);
+    final ownerName =
+        _resolveVehicleOwnerName(driverInfo: driverInfo, user: user);
+    final ownerIdCard =
+        _resolveVehicleOwnerIdCard(driverInfo: driverInfo, user: user);
     final ownerContact =
         _resolveVehicleOwnerContact(driverInfo: driverInfo, user: user);
 

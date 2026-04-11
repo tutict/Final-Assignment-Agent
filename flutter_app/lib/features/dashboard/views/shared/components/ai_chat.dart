@@ -14,6 +14,9 @@ class AiChat extends StatefulWidget {
 
 class _AiChatState extends State<AiChat> {
   final ScrollController _scrollController = ScrollController();
+  late final ChatController _controller;
+  late final List<Worker> _autoScrollWorkers;
+  bool _autoScrollQueued = false;
 
   static const _background = Color(0xFF0E1116);
   static const _surface = Color(0xFF151A22);
@@ -25,37 +28,72 @@ class _AiChatState extends State<AiChat> {
   static const _accentSoft = Color(0xFF1C3146);
 
   @override
+  void initState() {
+    super.initState();
+    _controller = Get.find<ChatController>();
+    _autoScrollWorkers = [
+      ever<List<ChatMessage>>(
+          _controller.messages, (_) => _scheduleAutoScroll()),
+      ever<List<String>>(
+        _controller.searchResults,
+        (_) => _scheduleAutoScroll(),
+      ),
+      ever<AgentContextInfo?>(
+        _controller.agentContext,
+        (_) => _scheduleAutoScroll(),
+      ),
+      ever<bool>(_controller.isSending, (_) => _scheduleAutoScroll()),
+    ];
+  }
+
+  @override
   void dispose() {
+    for (final worker in _autoScrollWorkers) {
+      worker.dispose();
+    }
     _scrollController.dispose();
     super.dispose();
   }
 
+  void _scheduleAutoScroll() {
+    if (_autoScrollQueued) return;
+    _autoScrollQueued = true;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _autoScrollQueued = false;
+      if (!mounted || !_scrollController.hasClients) return;
+
+      final position = _scrollController.position;
+      final distanceToBottom = position.maxScrollExtent - position.pixels;
+      if (position.pixels > 0 && distanceToBottom > 160) {
+        return;
+      }
+
+      final target = position.maxScrollExtent;
+      if ((target - position.pixels).abs() < 1) return;
+
+      _scrollController.animateTo(
+        target,
+        duration: const Duration(milliseconds: 180),
+        curve: Curves.easeOut,
+      );
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
-    final controller = Get.find<ChatController>();
-
     return DecoratedBox(
       decoration: const BoxDecoration(color: _background),
       child: SafeArea(
         child: Column(
           children: [
-            _Header(controller: controller),
+            _Header(controller: _controller),
             Expanded(
               child: Obx(() {
-                WidgetsBinding.instance.addPostFrameCallback((_) {
-                  if (_scrollController.hasClients) {
-                    _scrollController.animateTo(
-                      _scrollController.position.maxScrollExtent,
-                      duration: const Duration(milliseconds: 200),
-                      curve: Curves.easeOut,
-                    );
-                  }
-                });
-
-                if (controller.messages.isEmpty) {
+                if (_controller.messages.isEmpty) {
                   return _EmptyState(
-                    suggestions: controller.suggestions,
-                    onSuggestionTap: controller.sendMessage,
+                    suggestions: _controller.suggestions,
+                    onSuggestionTap: _controller.sendMessage,
                   );
                 }
 
@@ -63,23 +101,23 @@ class _AiChatState extends State<AiChat> {
                   controller: _scrollController,
                   padding: const EdgeInsets.fromLTRB(18, 10, 18, 18),
                   children: [
-                    if (controller.agentContext.value != null)
+                    if (_controller.agentContext.value != null)
                       _ContextPanel(
-                        contextInfo: controller.agentContext.value!,
+                        contextInfo: _controller.agentContext.value!,
                       ),
-                    if (controller.searchResults.isNotEmpty)
-                      _SearchPanel(results: controller.searchResults),
-                    ...controller.messages.map(
+                    if (_controller.searchResults.isNotEmpty)
+                      _SearchPanel(results: _controller.searchResults),
+                    ..._controller.messages.map(
                       (message) => _MessageBlock(
                         message: message,
-                        onActionTap: controller.executeAction,
+                        onActionTap: _controller.executeAction,
                       ),
                     ),
                   ],
                 );
               }),
             ),
-            _Composer(controller: controller),
+            _Composer(controller: _controller),
           ],
         ),
       ),
