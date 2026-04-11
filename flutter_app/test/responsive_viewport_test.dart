@@ -13,6 +13,7 @@ import 'package:final_assignment_front/features/dashboard/views/admin/admin_dash
 import 'package:final_assignment_front/features/dashboard/views/shared/widgets/agent_dashboard_shell.dart';
 import 'package:final_assignment_front/features/dashboard/views/user/user_dashboard.dart';
 import 'package:final_assignment_front/features/dashboard/views/user/pages/main_process/business_progress.dart';
+import 'package:final_assignment_front/features/dashboard/views/user/widgets/news_page_layout.dart';
 import 'package:final_assignment_front/features/login_screen/login.dart';
 import 'package:final_assignment_front/i18n/app_translations.dart';
 import 'package:final_assignment_front/i18n/locale_controller.dart';
@@ -260,6 +261,30 @@ void main() {
           _expectNoFlutterErrors(tester);
         },
       );
+
+      testWidgets(
+        'NewsPageLayout header adapts without layout errors on ${viewport.label}',
+        (tester) async {
+          await _setViewport(tester, viewport.size);
+
+          await tester.pumpWidget(
+            _buildHarness(
+              NewsPageLayout(
+                title: '交通违法处理最新进展与事故证据提交流程说明页面',
+                trailing: const [
+                  Icon(Icons.share_outlined, color: Colors.white),
+                  Icon(Icons.bookmark_outline, color: Colors.white),
+                ],
+                contentBuilder: _buildNewsViewportBody,
+              ),
+            ),
+          );
+          await tester.pumpAndSettle(const Duration(milliseconds: 800));
+
+          expect(find.byType(NewsPageLayout), findsOneWidget);
+          _expectNoFlutterErrors(tester);
+        },
+      );
     }
   });
 }
@@ -315,6 +340,22 @@ class _ViewportBody extends StatelessWidget {
       ),
     );
   }
+}
+
+Widget _buildNewsViewportBody(BuildContext context, ThemeData theme) {
+  return Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: List.generate(
+      6,
+      (index) => Padding(
+        padding: const EdgeInsets.only(bottom: 16),
+        child: Text(
+          '新闻内容段落 ${index + 1}',
+          style: theme.textTheme.titleMedium,
+        ),
+      ),
+    ),
+  );
 }
 
 class _ViewportChatPanel extends StatelessWidget {

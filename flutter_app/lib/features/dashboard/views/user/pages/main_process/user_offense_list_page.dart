@@ -63,29 +63,94 @@ class _UserOffenseListPageState extends State<UserOffenseListPage> {
     super.dispose();
   }
 
+  void _setStateSafely(VoidCallback update) {
+    if (!mounted) return;
+    setState(update);
+  }
+
+  void _redirectToLogin() {
+    if (!mounted) return;
+    Get.offAllNamed(Routes.login);
+  }
+
+  List<OffenseInformation> _buildFilteredOffenses(
+    Iterable<OffenseInformation> offenses,
+  ) {
+    final searchText = _searchController.text.trim().toLowerCase();
+
+    return offenses.where((offense) {
+      final offenseTime = offense.offenseTime;
+      var matchesDateRange = true;
+
+      if (_startTime != null && _endTime != null && offenseTime != null) {
+        matchesDateRange = offenseTime.isAfter(_startTime!) &&
+            offenseTime.isBefore(_endTime!.add(const Duration(days: 1)));
+      } else if (_startTime != null &&
+          _endTime != null &&
+          offenseTime == null) {
+        matchesDateRange = false;
+      }
+
+      var matchesSearch = true;
+      if (searchText.isNotEmpty) {
+        matchesSearch = (offense.offenseType
+                    ?.toLowerCase()
+                    .contains(searchText) ??
+                false) ||
+            (offense.offenseCode?.toLowerCase().contains(searchText) ?? false);
+      }
+
+      return matchesDateRange && matchesSearch;
+    }).toList();
+  }
+
+  String _resolveFilterErrorMessage(List<OffenseInformation> filteredOffenses) {
+    if (filteredOffenses.isNotEmpty) return '';
+    if (_offenses.isEmpty) return 'offense.error.empty'.tr;
+    if (_startTime != null && _endTime != null) {
+      return 'offense.error.noRecordsInRange'.tr;
+    }
+    if (_searchController.text.trim().isNotEmpty) {
+      return 'offense.error.noRecordsBySearch'.tr;
+    }
+    return 'offense.error.empty'.tr;
+  }
+
   Future<bool> _validateJwtToken() async {
     final prefs = await SharedPreferences.getInstance();
     final jwtToken = prefs.getString('jwtToken');
     if (jwtToken == null || jwtToken.isEmpty) {
-      setState(() => _errorMessage = 'offense.error.unauthorized'.tr);
+      _setStateSafely(() {
+        _isUser = false;
+        _errorMessage = 'offense.error.unauthorized'.tr;
+      });
       return false;
     }
     try {
       final decodedToken = JwtDecoder.decode(jwtToken);
-      _isUser = hasAnyRole(decodedToken['roles'], const ['USER']);
-      if (!_isUser) {
-        setState(() => _errorMessage = 'offense.error.userOnly'.tr);
+      final isUser = hasAnyRole(decodedToken['roles'], const ['USER']);
+      _setStateSafely(() {
+        _isUser = isUser;
+      });
+      if (!isUser) {
+        _setStateSafely(() => _errorMessage = 'offense.error.userOnly'.tr);
         return false;
       }
       if (JwtDecoder.isExpired(jwtToken)) {
-        setState(() => _errorMessage = 'offense.error.loginExpired'.tr);
+        _setStateSafely(() {
+          _isUser = false;
+          _errorMessage = 'offense.error.loginExpired'.tr;
+        });
         return false;
       }
       await userApi.initializeWithJwt();
+      if (!mounted) return false;
       await driverApi.initializeWithJwt();
+      if (!mounted) return false;
       _driverName = prefs.getString('driverName') ?? '';
       if (_driverName.isEmpty) {
         _driverName = await _fetchDriverName() ?? '';
+        if (!mounted) return false;
       }
       if (_driverName.isNotEmpty) {
         await prefs.setString('driverName', _driverName);
@@ -95,7 +160,10 @@ class _UserOffenseListPageState extends State<UserOffenseListPage> {
       return true;
     } catch (e) {
       developer.log('JWT validation error: $e');
-      setState(() => _errorMessage = 'offense.error.invalidLogin'.tr);
+      _setStateSafely(() {
+        _isUser = false;
+        _errorMessage = 'offense.error.invalidLogin'.tr;
+      });
       return false;
     }
   }
@@ -120,26 +188,34 @@ class _UserOffenseListPageState extends State<UserOffenseListPage> {
   }
 
   Future<void> _initialize() async {
-    setState(() => _isLoading = true);
+    _setStateSafely(() {
+      _isLoading = true;
+      _errorMessage = '';
+    });
     try {
-      if (!await _validateJwtToken()) {
-        Get.offAllNamed(Routes.login);
+      final isValid = await _validateJwtToken();
+      if (!mounted) return;
+      if (!isValid) {
+        _redirectToLogin();
         return;
       }
       await offenseApi.initializeWithJwt();
+      if (!mounted) return;
       await _loadOffenses(reset: true);
     } catch (e) {
       developer.log('Initialization error: $e');
-      setState(() => _errorMessage = 'offense.error.initializeFailed'.trParams({
-            'error': formatUserOffenseErrorDetail(e),
-          }));
+      _setStateSafely(
+        () => _errorMessage = 'offense.error.initializeFailed'.trParams({
+          'error': formatUserOffenseErrorDetail(e),
+        }),
+      );
     } finally {
-      setState(() => _isLoading = false);
+      _setStateSafely(() => _isLoading = false);
     }
   }
 
   Future<void> _loadOffenses({bool reset = false}) async {
-    if (!_hasMore) return;
+    if (!reset && (!_hasMore || _isLoading)) return;
 
     if (reset) {
       _currentPage = 1;
@@ -149,94 +225,70 @@ class _UserOffenseListPageState extends State<UserOffenseListPage> {
       _searchController.clear();
     }
 
-    setState(() {
+    _setStateSafely(() {
       _isLoading = true;
       _errorMessage = '';
     });
 
     try {
-      if (!await _validateJwtToken()) {
-        Get.offAllNamed(Routes.login);
+      final isValid = await _validateJwtToken();
+      if (!mounted) return;
+      if (!isValid) {
+        _redirectToLogin();
         return;
       }
       final offenses = await offenseApi.apiOffensesMeGet(
         page: _currentPage,
         size: _pageSize,
       );
+      if (!mounted) return;
+      final updatedOffenses = <OffenseInformation>[
+        ..._offenses,
+        ...offenses,
+      ];
+      final filteredOffenses = _buildFilteredOffenses(updatedOffenses);
 
-      setState(() {
-        _offenses.addAll(offenses);
+      _setStateSafely(() {
+        _offenses
+          ..clear()
+          ..addAll(updatedOffenses);
         _hasMore = offenses.length == _pageSize;
-        _applyFilters();
-        if (_filteredOffenses.isEmpty) {
-          _errorMessage = _startTime != null && _endTime != null
-              ? 'offense.error.noRecordsInRange'.tr
-              : _searchController.text.isNotEmpty
-                  ? 'offense.error.noRecordsBySearch'.tr
-                  : 'offense.error.empty'.tr;
-        }
+        _filteredOffenses = filteredOffenses;
+        _errorMessage = _resolveFilterErrorMessage(filteredOffenses);
         _currentPage++;
       });
-      developer.log('Loaded offenses: ${_offenses.length}');
+      developer.log('Loaded offenses: ${updatedOffenses.length}');
     } catch (e) {
       developer.log('Error fetching offenses: $e',
           stackTrace: StackTrace.current);
-      setState(() {
-        if (e is ApiException && e.code == 204) {
+      if (e is ApiException && e.code == 204) {
+        _setStateSafely(() {
           _offenses.clear();
           _filteredOffenses.clear();
           _errorMessage = 'offense.error.notFound'.tr;
           _hasMore = false;
-        } else if (e is ApiException && e.code == 403) {
+        });
+      } else if (e is ApiException && e.code == 403) {
+        _setStateSafely(() {
           _errorMessage = 'offense.error.unauthorized'.tr;
-          Get.offAllNamed(Routes.login);
-        } else {
+        });
+        _redirectToLogin();
+      } else {
+        _setStateSafely(() {
           _errorMessage = 'offense.error.loadFailed'
               .trParams({'error': formatUserOffenseError(e)});
-        }
-      });
+        });
+      }
     } finally {
-      setState(() => _isLoading = false);
+      _setStateSafely(() => _isLoading = false);
     }
   }
 
   void _applyFilters() {
-    setState(() {
-      _filteredOffenses.clear();
-      _filteredOffenses = _offenses.where((offense) {
-        final offenseTime = offense.offenseTime;
-        bool matchesDateRange = true;
-        if (_startTime != null && _endTime != null && offenseTime != null) {
-          matchesDateRange = offenseTime.isAfter(_startTime!) &&
-              offenseTime.isBefore(_endTime!.add(const Duration(days: 1)));
-        } else if (_startTime != null &&
-            _endTime != null &&
-            offenseTime == null) {
-          matchesDateRange = false;
-        }
-        bool matchesSearch = true;
-        if (_searchController.text.isNotEmpty) {
-          final searchText = _searchController.text.toLowerCase();
-          matchesSearch =
-              (offense.offenseType?.toLowerCase().contains(searchText) ??
-                      false) ||
-                  (offense.offenseCode?.toLowerCase().contains(searchText) ??
-                      false);
-        }
-        return matchesDateRange && matchesSearch;
-      }).toList();
-
-      if (_filteredOffenses.isEmpty && _offenses.isNotEmpty) {
-        _errorMessage = _startTime != null && _endTime != null
-            ? 'offense.error.noRecordsInRange'.tr
-            : _searchController.text.isNotEmpty
-                ? 'offense.error.noRecordsBySearch'.tr
-                : 'offense.error.empty'.tr;
-      } else {
-        _errorMessage = _filteredOffenses.isEmpty && _offenses.isEmpty
-            ? 'offense.error.empty'.tr
-            : '';
-      }
+    final filteredOffenses = _buildFilteredOffenses(_offenses);
+    _setStateSafely(() {
+      _filteredOffenses = filteredOffenses;
+      _errorMessage = _resolveFilterErrorMessage(filteredOffenses);
     });
   }
 
@@ -273,7 +325,7 @@ class _UserOffenseListPageState extends State<UserOffenseListPage> {
   }
 
   Future<void> _refreshOffenses() async {
-    setState(() {
+    _setStateSafely(() {
       _offenses.clear();
       _filteredOffenses.clear();
       _currentPage = 1;
@@ -432,13 +484,12 @@ class _UserOffenseListPageState extends State<UserOffenseListPage> {
                 child: child!,
               ),
             );
-            if (range != null) {
-              setState(() {
-                _startTime = range.start;
-                _endTime = range.end;
-              });
-              _applyFilters();
-            }
+            if (!mounted || range == null) return;
+            _setStateSafely(() {
+              _startTime = range.start;
+              _endTime = range.end;
+            });
+            _applyFilters();
           },
         ),
         if (_startTime != null && _endTime != null)
@@ -447,7 +498,7 @@ class _UserOffenseListPageState extends State<UserOffenseListPage> {
                 color: themeData.colorScheme.onSurfaceVariant),
             tooltip: 'offense.filter.clear'.tr,
             onPressed: () {
-              setState(() {
+              _setStateSafely(() {
                 _startTime = null;
                 _endTime = null;
               });

@@ -65,7 +65,8 @@ class _AiChatState extends State<AiChat> {
                   children: [
                     if (controller.agentContext.value != null)
                       _ContextPanel(
-                          contextInfo: controller.agentContext.value!),
+                        contextInfo: controller.agentContext.value!,
+                      ),
                     if (controller.searchResults.isNotEmpty)
                       _SearchPanel(results: controller.searchResults),
                     ...controller.messages.map(
