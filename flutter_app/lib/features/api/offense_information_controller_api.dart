@@ -10,8 +10,8 @@ import 'package:get/get.dart';
 import 'package:http/http.dart' as http;
 import 'package:final_assignment_front/utils/services/auth_token_store.dart';
 
-/// å®ä¹ä¸ä¸ªå
-// ¨å±ç?defaultApiClient
+/// Shared default ApiClient instance.
+
 final ApiClient defaultApiClient = ApiClient();
 
 class OffenseInformationControllerApi {
@@ -20,7 +20,7 @@ class OffenseInformationControllerApi {
   OffenseInformationControllerApi([ApiClient? apiClient])
       : apiClient = apiClient ?? defaultApiClient;
 
-  /// ä»?SharedPreferences ä¸­è¯»å?jwtToken å¹¶è®¾ç½®å° ApiClient ä¸?
+  /// Loads the JWT token from storage and applies it to the ApiClient.
   Future<void> initializeWithJwt() async {
     final jwtToken = (await AuthTokenStore.instance.getJwtToken());
     if (jwtToken == null || jwtToken.isEmpty) {
@@ -31,7 +31,7 @@ class OffenseInformationControllerApi {
         'Initialized OffenseInformationControllerApi with token: $jwtToken');
   }
 
-  /// è§£ç ååºä½å­èå°å­ç¬¦ä¸²ï¼ä½¿ç¨ UTF-8 è§£ç 
+  /// Decodes response bytes as UTF-8 text.
   String _decodeBodyBytes(http.Response response) {
     return utf8.decode(response.bodyBytes); // Properly decode UTF-8
   }
@@ -42,36 +42,35 @@ class OffenseInformationControllerApi {
         : localizeHttpStatusError(response.statusCode);
   }
 
-  /// è·åå¸¦æ JWT çè¯·æ±å¤´
-  Future<Map<String, String>> _getHeaders() async {
+  /// Builds request headers and adds JWT plus idempotency support when needed.
+  Future<Map<String, String>> _getHeaders({String? idempotencyKey}) async {
     final token = (await AuthTokenStore.instance.getJwtToken()) ?? '';
-    return {
+    final headers = <String, String>{
       'Content-Type': 'application/json; charset=utf-8',
       if (token.isNotEmpty) 'Authorization': 'Bearer $token',
     };
+    if (idempotencyKey != null && idempotencyKey.trim().isNotEmpty) {
+      headers['Idempotency-Key'] = idempotencyKey.trim();
+    }
+    return headers;
   }
 
-  /// æ·»å  idempotencyKey ä½ä¸ºæ¥è¯¢åæ°
-  List<QueryParam> _addIdempotencyKey(String idempotencyKey) {
-    return [QueryParam('idempotencyKey', idempotencyKey)];
-  }
-
+  /// HTTP methods.
   // HTTP Methods
 
-  /// POST /api/offenses - åå»ºè¿æ³è¡ä¸º (ä»
-// ç®¡çå)
+  /// POST /api/offenses - create an offense record (admin only).
+
   Future<void> apiOffensesPost({
     required OffenseInformation offenseInformation,
     required String idempotencyKey,
   }) async {
     const path = '/api/offenses';
-    final headerParams = await _getHeaders();
     final response = await apiClient.invokeAPI(
       path,
       'POST',
-      _addIdempotencyKey(idempotencyKey),
+      [],
       offenseInformation.toJson(),
-      headerParams,
+      await _getHeaders(idempotencyKey: idempotencyKey),
       {},
       'application/json',
       ['bearerAuth'],
@@ -87,7 +86,7 @@ class OffenseInformationControllerApi {
     }
   }
 
-  /// GET /api/offenses/{offenseId} - æ ¹æ®IDè·åè¿æ³è¡ä¸ºä¿¡æ¯ (ç¨æ·åç®¡çå)
+  /// GET /api/offenses/{offenseId} - fetch offense details by ID.
   Future<OffenseInformation?> apiOffensesOffenseIdGet({
     required int offenseId,
   }) async {
@@ -116,14 +115,20 @@ class OffenseInformationControllerApi {
     return OffenseInformation.fromJson(data);
   }
 
-  /// GET /api/offenses - è·åææè¿æ³è¡ä¸ºä¿¡æ?(ç¨æ·åç®¡çå)
-  Future<List<OffenseInformation>> apiOffensesGet() async {
+  /// GET /api/offenses - fetch all offense records.
+  Future<List<OffenseInformation>> apiOffensesGet({
+    int page = 1,
+    int size = 20,
+  }) async {
     const path = '/api/offenses';
     final headerParams = await _getHeaders();
     final response = await apiClient.invokeAPI(
       path,
       'GET',
-      [],
+      [
+        QueryParam('page', '$page'),
+        QueryParam('size', '$size'),
+      ],
       null,
       headerParams,
       {},
@@ -139,21 +144,44 @@ class OffenseInformationControllerApi {
     return jsonList.map((json) => OffenseInformation.fromJson(json)).toList();
   }
 
-  /// PUT /api/offenses/{offenseId} - æ´æ°è¿æ³è¡ä¸ºä¿¡æ¯ (ä»
-// ç®¡çå)
+  Future<List<OffenseInformation>> apiOffensesMeGet({
+    int page = 1,
+    int size = 20,
+  }) async {
+    final response = await apiClient.invokeAPI(
+      '/api/offenses/me',
+      'GET',
+      [QueryParam('page', '$page'), QueryParam('size', '$size')],
+      null,
+      await _getHeaders(),
+      {},
+      null,
+      ['bearerAuth'],
+    );
+    if (response.statusCode >= 400) {
+      if (response.statusCode == 204 || response.statusCode == 404) return [];
+      throw ApiException(
+          response.statusCode, _errorMessageOrHttpStatus(response));
+    }
+    if (response.body.isEmpty) return [];
+    final List<dynamic> jsonList = jsonDecode(_decodeBodyBytes(response));
+    return jsonList.map((json) => OffenseInformation.fromJson(json)).toList();
+  }
+
+  /// PUT /api/offenses/{offenseId} - update an offense record (admin only).
+
   Future<OffenseInformation> apiOffensesOffenseIdPut({
     required int offenseId,
     required OffenseInformation offenseInformation,
     required String idempotencyKey,
   }) async {
     final path = '/api/offenses/$offenseId';
-    final headerParams = await _getHeaders();
     final response = await apiClient.invokeAPI(
       path,
       'PUT',
-      _addIdempotencyKey(idempotencyKey),
+      [],
       offenseInformation.toJson(),
-      headerParams,
+      await _getHeaders(idempotencyKey: idempotencyKey),
       {},
       'application/json',
       ['bearerAuth'],
@@ -175,8 +203,8 @@ class OffenseInformationControllerApi {
     return OffenseInformation.fromJson(data);
   }
 
-  /// DELETE /api/offenses/{offenseId} - å é¤è¿æ³è¡ä¸ºä¿¡æ¯ (ä»
-// ç®¡çå)
+  /// DELETE /api/offenses/{offenseId} - delete an offense record (admin only).
+
   Future<void> apiOffensesOffenseIdDelete({
     required int offenseId,
   }) async {
@@ -207,15 +235,19 @@ class OffenseInformationControllerApi {
     }
   }
 
-  /// GET /api/offenses/timeRange - æ ¹æ®æ¶é´èå´è·åè¿æ³è¡ä¸ºä¿¡æ¯ (ç¨æ·åç®¡çå)
+  /// GET /api/offenses/timeRange - fetch offenses within a time range.
   Future<List<OffenseInformation>> apiOffensesTimeRangeGet({
     String startTime = '1970-01-01', // Default matches backend
     String endTime = '2100-01-01', // Default matches backend
+    int page = 1,
+    int size = 20,
   }) async {
     const path = '/api/offenses/search/time-range';
     final queryParams = [
       QueryParam('startTime', startTime),
       QueryParam('endTime', endTime),
+      QueryParam('page', '$page'),
+      QueryParam('size', '$size'),
     ];
     final headerParams = await _getHeaders();
     final response = await apiClient.invokeAPI(
@@ -237,7 +269,7 @@ class OffenseInformationControllerApi {
     return jsonList.map((json) => OffenseInformation.fromJson(json)).toList();
   }
 
-  /// GET /api/offenses/by-offense-type - æç´¢è¿æ³è¡ä¸ºæç±»å?(ç¨æ·åç®¡çå)
+  /// GET /api/offenses/by-offense-type - search offenses by offense type.
   Future<List<OffenseInformation>> apiOffensesByOffenseTypeGet({
     required String query,
     int page = 1,
@@ -246,9 +278,9 @@ class OffenseInformationControllerApi {
     if (query.isEmpty) {
       throw ApiException(400, localizeMissingRequiredParam('query'));
     }
-    const path = '/api/offenses/search/code';
+    const path = '/api/offenses/search/type';
     final queryParams = [
-      QueryParam('offenseCode', query),
+      QueryParam('offenseType', query),
       QueryParam('page', page.toString()),
       QueryParam('size', size.toString()),
     ];
@@ -275,7 +307,7 @@ class OffenseInformationControllerApi {
     return jsonList.map((json) => OffenseInformation.fromJson(json)).toList();
   }
 
-  /// GET /api/offenses/by-driver-name - æç´¢è¿æ³è¡ä¸ºæå¸æºå§å?(ç¨æ·åç®¡çå)
+  /// GET /api/offenses/by-driver-name - search offenses by driver name.
   Future<List<OffenseInformation>> apiOffensesByDriverNameGet({
     required String query,
     int page = 1,
@@ -341,7 +373,7 @@ class OffenseInformationControllerApi {
     return merged.values.toList();
   }
 
-  /// GET /api/offenses/driver/{driverId} - æé©¾é©¶åIDæ¥è¯¢
+  /// GET /api/offenses/driver/{driverId} - fetch offenses by driver ID.
   Future<List<OffenseInformation>> apiOffensesDriverDriverIdGet({
     required int driverId,
     int page = 1,
@@ -369,7 +401,7 @@ class OffenseInformationControllerApi {
     return jsonList.map((json) => OffenseInformation.fromJson(json)).toList();
   }
 
-  /// GET /api/offenses/vehicle/{vehicleId} - æè½¦è¾IDæ¥è¯¢
+  /// GET /api/offenses/vehicle/{vehicleId} - fetch offenses by vehicle ID.
   Future<List<OffenseInformation>> apiOffensesVehicleVehicleIdGet({
     required int vehicleId,
     int page = 1,
@@ -397,7 +429,7 @@ class OffenseInformationControllerApi {
     return jsonList.map((json) => OffenseInformation.fromJson(json)).toList();
   }
 
-  /// GET /api/offenses/search/status?processStatus=... - æå¤çç¶ææ¥è¯?
+  /// GET /api/offenses/search/status - search offenses by process status.
   Future<List<OffenseInformation>> apiOffensesSearchStatusGet({
     required String processStatus,
     int page = 1,
@@ -409,7 +441,7 @@ class OffenseInformationControllerApi {
       path,
       'GET',
       [
-        QueryParam('processStatus', processStatus),
+        QueryParam('status', processStatus),
         QueryParam('page', '$page'),
         QueryParam('size', '$size'),
       ],
@@ -429,7 +461,7 @@ class OffenseInformationControllerApi {
     return jsonList.map((json) => OffenseInformation.fromJson(json)).toList();
   }
 
-  /// GET /api/offenses/search/number?offenseNumber=... - æè¿æ³ç¼å·æ¥è¯?
+  /// GET /api/offenses/search/number - search offenses by offense number.
   Future<List<OffenseInformation>> apiOffensesSearchNumberGet({
     required String offenseNumber,
     int page = 1,
@@ -655,7 +687,7 @@ class OffenseInformationControllerApi {
     return jsonList.map((json) => OffenseInformation.fromJson(json)).toList();
   }
 
-  /// GET /api/offenses/by-license-plate - æç´¢è¿æ³è¡ä¸ºæè½¦çå· (ç¨æ·åç®¡çå)
+  /// GET /api/offenses/by-license-plate - search offenses by license plate.
   Future<List<OffenseInformation>> apiOffensesByLicensePlateGet({
     required String query,
     int page = 1,

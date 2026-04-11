@@ -60,7 +60,9 @@ class _ProgressDetailPageState extends State<ProgressDetailPage> {
               ),
               _buildDetailRow(
                 'progress.detail.user'.tr,
-                widget.item.username,
+                widget.item.username.isNotEmpty
+                    ? widget.item.username
+                    : (widget.item.userId?.toString() ?? 'common.notFilled'.tr),
                 themeData,
               ),
               _buildDetailRow(
@@ -73,10 +75,6 @@ class _ProgressDetailPageState extends State<ProgressDetailPage> {
                 progressController.getBusinessContext(widget.item),
                 themeData,
               ),
-              if (progressController.isAdmin) ...[
-                const SizedBox(height: 20),
-                _buildActionButtons(themeData),
-              ],
             ],
           ),
         ),
@@ -104,119 +102,6 @@ class _ProgressDetailPageState extends State<ProgressDetailPage> {
             ),
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _buildActionButtons(ThemeData themeData) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-      children: [
-        ElevatedButton.icon(
-          onPressed: () => _updateStatus(progressStatusProcessing, themeData),
-          icon: const Icon(Icons.play_arrow),
-          label: Text('progress.action.processing'.tr),
-        ),
-        ElevatedButton.icon(
-          onPressed: () => _updateStatus(progressStatusCompleted, themeData),
-          icon: const Icon(Icons.check),
-          label: Text('progress.action.completed'.tr),
-        ),
-        ElevatedButton.icon(
-          onPressed: () => _showDeleteConfirmationDialog(themeData),
-          icon: const Icon(Icons.delete),
-          label: Text('progress.action.delete'.tr),
-          style: ElevatedButton.styleFrom(
-            backgroundColor: themeData.colorScheme.error,
-            foregroundColor: themeData.colorScheme.onError,
-          ),
-        ),
-      ],
-    );
-  }
-
-  Future<void> _updateStatus(String newStatus, ThemeData themeData) async {
-    if (widget.item.id == null) {
-      _showSnackBar('progress.error.idMissingUpdate'.tr,
-          isError: true, themeData: themeData);
-      return;
-    }
-    try {
-      await progressController.updateProgressStatus(widget.item.id!, newStatus);
-      if (mounted) {
-        _showSnackBar('progress.success.statusUpdated'.tr,
-            themeData: themeData);
-        Navigator.pop(context, true);
-      }
-    } catch (e) {
-      if (mounted) {
-        _showSnackBar(
-          'progress.error.statusUpdateFailed'
-              .trParams({'error': formatProgressError(e)}),
-          isError: true,
-          themeData: themeData,
-        );
-      }
-    }
-  }
-
-  void _showDeleteConfirmationDialog(ThemeData themeData) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text('progress.delete.confirmTitle'.tr),
-        content: Text('progress.delete.confirmBody'.tr),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: Text('common.cancel'.tr),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              if (widget.item.id == null) {
-                _showSnackBar(
-                  'progress.error.idMissingDelete'.tr,
-                  isError: true,
-                  themeData: themeData,
-                );
-                Navigator.pop(ctx);
-                return;
-              }
-              try {
-                await progressController.deleteProgress(widget.item.id!);
-                if (mounted) {
-                  _showSnackBar('progress.success.deleted'.tr,
-                      themeData: themeData);
-                  Navigator.pop(context, true);
-                }
-              } catch (e) {
-                if (mounted) {
-                  _showSnackBar(
-                    'progress.error.deleteFailed'
-                        .trParams({'error': formatProgressError(e)}),
-                    isError: true,
-                    themeData: themeData,
-                  );
-                }
-              }
-              Navigator.pop(ctx);
-            },
-            child: Text('progress.action.delete'.tr),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showSnackBar(String message,
-      {bool isError = false, required ThemeData themeData}) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: isError
-            ? themeData.colorScheme.error
-            : themeData.colorScheme.primary,
       ),
     );
   }

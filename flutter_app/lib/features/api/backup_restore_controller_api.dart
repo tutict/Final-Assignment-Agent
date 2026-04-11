@@ -143,12 +143,19 @@ class BackupRestoreControllerApi {
         jsonDecode(_decodeBodyBytes(response)) as Map<String, dynamic>);
   }
 
-  /// GET /api/system/backup?status=...
-  Future<List<BackupRestore>> apiSystemBackupGet({String? status}) async {
+  /// GET /api/system/backup?status=...&page=...&size=...
+  Future<List<BackupRestore>> apiSystemBackupGet({
+    String? status,
+    int page = 1,
+    int size = 20,
+  }) async {
     final queryParams = <QueryParam>[];
     if (status != null && status.trim().isNotEmpty) {
       queryParams.add(QueryParam('status', status.trim()));
     }
+    queryParams
+      ..add(QueryParam('page', '$page'))
+      ..add(QueryParam('size', '$size'));
     final response = await apiClient.invokeAPI(
       '/api/system/backup',
       'GET',

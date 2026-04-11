@@ -4,37 +4,36 @@ import 'package:final_assignment_front/features/model/register_request.dart';
 import 'package:final_assignment_front/i18n/api_error_localizers.dart';
 import 'package:final_assignment_front/utils/helpers/api_exception.dart';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http; // ç¨äº Response å?MultipartRequest
+import 'package:http/http.dart' as http; // Used for Response and MultipartRequest
 import 'package:final_assignment_front/utils/services/api_client.dart';
 import 'package:final_assignment_front/utils/services/auth_token_store.dart';
 
-// å®ä¹ä¸ä¸ªå
-// ¨å±ç?defaultApiClient
+// Shared default ApiClient instance.
+
 final ApiClient defaultApiClient = ApiClient();
 
 class AuthControllerApi {
   final ApiClient apiClient;
 
-  // æ´æ°åçæé å½æ°ï¼apiClient åæ°å¯ä¸ºç©?
+  // Allows injecting a custom ApiClient and otherwise uses the shared default instance.
   AuthControllerApi([ApiClient? apiClient])
       : apiClient = apiClient ?? defaultApiClient;
 
-  // è§£ç ååºä½çè¾
-// å©æ¹æ³
+  // Decodes the response body.
+
   String _decodeBodyBytes(http.Response response) => response.body;
 
-  // è·åéç¨è¯·æ±å¤´ï¼å
-// å« JWT
+  // Builds common headers and adds the JWT token when available.
+
   Future<Map<String, String>> _getHeaders() async {
     final token = (await AuthTokenStore.instance.getJwtToken()) ?? '';
-    debugPrint('Using JWT for request: $token');
     return {
       'Content-Type': 'application/json; charset=utf-8',
       if (token.isNotEmpty) 'Authorization': 'Bearer $token',
     };
   }
 
-  /// ä½¿ç¨ HTTP ä¿¡æ¯è¿è¡ç»å½
+  /// Sends the HTTP login request.
   Future<http.Response> apiAuthLoginPostWithHttpInfo(
       {required LoginRequest loginRequest}) async {
     Object postBody = loginRequest;
@@ -55,14 +54,13 @@ class AuthControllerApi {
     return response;
   }
 
-  /// ç»å½
+  /// Logs in with username and password.
   Future<Map<String, dynamic>> apiAuthLoginPost(
       {required LoginRequest loginRequest}) async {
     try {
       http.Response response =
           await apiAuthLoginPostWithHttpInfo(loginRequest: loginRequest);
       debugPrint('Login response status: ${response.statusCode}');
-      debugPrint('Login response body: ${response.body}');
 
       if (response.statusCode >= 400) {
         String errorMessage = response.body.isNotEmpty
@@ -80,7 +78,41 @@ class AuthControllerApi {
     }
   }
 
-  /// ä½¿ç¨ HTTP ä¿¡æ¯è¿è¡ç¨æ·æ³¨å
+  /// Sends the HTTP refresh-token request.
+  Future<Map<String, dynamic>> apiAuthRefreshPost({
+    required String refreshToken,
+  }) async {
+    if (refreshToken.trim().isEmpty) {
+      throw ApiException(400, localizeMissingRequiredParam('refreshToken'));
+    }
+
+    final response = await apiClient.invokeAPI(
+      '/api/auth/refresh',
+      'POST',
+      const [],
+      {
+        'refreshToken': refreshToken.trim(),
+      },
+      {
+        'Content-Type': 'application/json; charset=utf-8',
+      },
+      const {},
+      'application/json',
+      const [],
+    );
+
+    if (response.statusCode >= 400) {
+      final errorMessage = response.body.isNotEmpty
+          ? _decodeBodyBytes(response)
+          : localizeHttpStatusError(response.statusCode);
+      throw ApiException(response.statusCode, errorMessage);
+    }
+    if (response.body.isEmpty) {
+      return {};
+    }
+    return jsonDecode(_decodeBodyBytes(response)) as Map<String, dynamic>;
+  }
+
   Future<http.Response> apiAuthRegisterPostWithHttpInfo(
       {required RegisterRequest registerRequest}) async {
     Object postBody = registerRequest;
@@ -101,14 +133,13 @@ class AuthControllerApi {
     return response;
   }
 
-  /// ç¨æ·æ³¨å
+  /// Registers a new user.
   Future<Map<String, dynamic>> apiAuthRegisterPost(
       {required RegisterRequest registerRequest}) async {
     try {
       http.Response response = await apiAuthRegisterPostWithHttpInfo(
           registerRequest: registerRequest);
       debugPrint('Register response status: ${response.statusCode}');
-      debugPrint('Register response body: ${response.body}');
 
       if (response.statusCode >= 400) {
         String errorMessage = response.body.isNotEmpty
@@ -129,7 +160,7 @@ class AuthControllerApi {
     }
   }
 
-  /// ä½¿ç¨ HTTP ä¿¡æ¯è·åææç¨æ?
+  /// Sends the HTTP request that fetches all users.
   Future<http.Response> apiAuthUsersGetWithHttpInfo() async {
     String path = "/api/auth/users".replaceAll("{format}", "json");
 
@@ -147,7 +178,7 @@ class AuthControllerApi {
     return response;
   }
 
-  /// è·åææç¨æ?
+  /// Fetches all users.
   Future<Map<String, dynamic>> apiAuthUsersGet() async {
     try {
       http.Response response = await apiAuthUsersGetWithHttpInfo();
@@ -170,7 +201,7 @@ class AuthControllerApi {
     }
   }
 
-  /// è·åè§è²åè¡¨ï¼æ°å¢ï¼
+  /// Sends the HTTP request that fetches all roles.
   Future<http.Response> apiRolesGetWithHttpInfo() async {
     String path = "/api/roles".replaceAll("{format}", "json");
 
@@ -188,7 +219,7 @@ class AuthControllerApi {
     return response;
   }
 
-  /// è·åè§è²åè¡¨
+  /// Fetches all roles.
   Future<Map<String, dynamic>> apiRolesGet() async {
     try {
       http.Response response = await apiRolesGetWithHttpInfo();
@@ -211,7 +242,7 @@ class AuthControllerApi {
     }
   }
 
-  /// ç»å½ï¼WebSocketï¼?
+  /// Logs in through WebSocket.
   Future<Object?> eventbusAuthLoginPost(
       {required LoginRequest loginRequest}) async {
     final msg = <String, dynamic>{
@@ -234,7 +265,7 @@ class AuthControllerApi {
     return null;
   }
 
-  /// ç¨æ·æ³¨åï¼WebSocketï¼?
+  /// Registers a user through WebSocket.
   Future<Object?> eventbusAuthRegisterPost(
       {required RegisterRequest registerRequest}) async {
     final msg = <String, dynamic>{
@@ -262,7 +293,7 @@ class AuthControllerApi {
     return null;
   }
 
-  /// è·åææç¨æ·ï¼WebSocketï¼?
+  /// Fetches all users through WebSocket.
   Future<Object?> eventbusAuthUsersGet() async {
     final msg = <String, dynamic>{
       "service": "Auth",

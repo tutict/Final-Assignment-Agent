@@ -1,3 +1,5 @@
+import 'package:final_assignment_front/utils/helpers/role_utils.dart';
+
 class UserManagement {
   final int? userId;
   final String? username;
@@ -24,6 +26,7 @@ class UserManagement {
   final DateTime? deletedAt;
   final String? remarks;
   final String? idempotencyKey;
+  final List<String>? roles;
 
   const UserManagement({
     this.userId,
@@ -51,6 +54,7 @@ class UserManagement {
     this.deletedAt,
     this.remarks,
     this.idempotencyKey,
+    this.roles,
   });
 
   UserManagement copyWith({
@@ -79,6 +83,7 @@ class UserManagement {
     DateTime? deletedAt,
     String? remarks,
     String? idempotencyKey,
+    List<String>? roles,
   }) {
     return UserManagement(
       userId: userId ?? this.userId,
@@ -106,6 +111,7 @@ class UserManagement {
       deletedAt: deletedAt ?? this.deletedAt,
       remarks: remarks ?? this.remarks,
       idempotencyKey: idempotencyKey ?? this.idempotencyKey,
+      roles: roles ?? this.roles,
     );
   }
 
@@ -136,6 +142,7 @@ class UserManagement {
       deletedAt: _parseDateTime(json['deletedAt']),
       remarks: json['remarks'],
       idempotencyKey: json['idempotencyKey'],
+      roles: normalizeRoleCodes(json['roles']),
     );
   }
 
@@ -168,6 +175,7 @@ class UserManagement {
       'deletedAt': deletedAt?.toIso8601String(),
       'remarks': remarks,
       'idempotencyKey': idempotencyKey,
+      'roles': roles,
     };
     return json;
   }
@@ -183,8 +191,7 @@ class UserManagement {
         .toList();
   }
 
-  static Map<String, UserManagement> mapFromJson(
-      Map<String, dynamic> json) {
+  static Map<String, UserManagement> mapFromJson(Map<String, dynamic> json) {
     final map = <String, UserManagement>{};
     if (json.isNotEmpty) {
       json.forEach((key, value) {
@@ -199,8 +206,7 @@ class UserManagement {
     final map = <String, List<UserManagement>>{};
     if (json.isNotEmpty) {
       json.forEach((key, value) {
-        map[key] =
-            UserManagement.listFromJson(value as List<dynamic>);
+        map[key] = UserManagement.listFromJson(value as List<dynamic>);
       });
     }
     return map;

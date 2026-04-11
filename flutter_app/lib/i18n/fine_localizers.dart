@@ -91,11 +91,19 @@ bool shouldShowFineDetailReloginAction(String message) {
   ]);
 }
 
-String localizeManagerFineStatus(
+String localizeAdminFineStatus(
   String? status, {
   String emptyKey = 'common.notFilled',
 }) {
   return localizeFineStatus(status, emptyKey: emptyKey);
+}
+
+@Deprecated('Use localizeAdminFineStatus instead.')
+String localizeManagerFineStatus(
+  String? status, {
+  String emptyKey = 'common.notFilled',
+}) {
+  return localizeAdminFineStatus(status, emptyKey: emptyKey);
 }
 
 String fineSearchHintText(String searchType) {
@@ -150,6 +158,15 @@ String? fineFieldHelperText(String fieldKey) {
     default:
       return null;
   }
+}
+
+String? validateFineOffenseSelection(int? offenseId) {
+  return offenseId == null ? 'fineAdmin.error.selectValidOffense'.tr : null;
+}
+
+String? normalizeOptionalFineValue(String? value) {
+  final trimmedValue = value?.trim() ?? '';
+  return trimmedValue.isEmpty ? null : trimmedValue;
 }
 
 String? validateFineFormField(

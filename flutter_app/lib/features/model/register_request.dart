@@ -4,9 +4,6 @@ class RegisterRequest {
   final String role;
   final String? idempotencyKey;
 
-  // 使用静态常量正则表达式，提高效率和可读性
-  static final RegExp _domainRegExp = RegExp(r'@([^.]+)\.');
-
   /// 构造函数，根据 [username] 自动设置 [role]
   RegisterRequest({
     required this.username,
@@ -48,16 +45,8 @@ class RegisterRequest {
     return 'RegisterRequest[username=$username, password=******, role=$role, idempotencyKey=$idempotencyKey]';
   }
 
-  /// 根据 [username] 确定角色
-  /// 如果域名是 'admin'，返回 'ADMIN'，否则返回 'USER'
+  /// 自助注册统一落为普通用户角色，后台岗位由管理员分配
   static String _determineRole(String username) {
-    final match = _domainRegExp.firstMatch(username);
-    if (match != null && match.groupCount >= 1) {
-      final domain = match.group(1)?.toLowerCase();
-      if (domain == 'admin') {
-        return 'ADMIN';
-      }
-    }
     return 'USER';
   }
 

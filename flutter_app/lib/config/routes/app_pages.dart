@@ -1,19 +1,19 @@
-import 'package:final_assignment_front/features/dashboard/views/manager/manager_dashboard_screen.dart';
-import 'package:final_assignment_front/features/dashboard/views/manager/pages/backup_and_restore.dart';
-import 'package:final_assignment_front/features/dashboard/views/manager/pages/logs/login_log_page.dart';
-import 'package:final_assignment_front/features/dashboard/views/manager/pages/logs/operation_log_page.dart';
-import 'package:final_assignment_front/features/dashboard/views/manager/pages/logs/system_log_page.dart';
-import 'package:final_assignment_front/features/dashboard/views/manager/pages/main_process/appeal_management.dart';
-import 'package:final_assignment_front/features/dashboard/views/manager/pages/main_process/driver_list.dart';
-import 'package:final_assignment_front/features/dashboard/views/manager/pages/main_process/offense_list.dart';
-import 'package:final_assignment_front/features/dashboard/views/manager/pages/main_process/vehicle_list.dart';
-import 'package:final_assignment_front/features/dashboard/views/manager/pages/manager_personal_page.dart';
-import 'package:final_assignment_front/features/dashboard/views/manager/pages/manager_setting.dart';
-import 'package:final_assignment_front/features/dashboard/views/manager/pages/progress_management.dart';
-import 'package:final_assignment_front/features/dashboard/views/manager/pages/sidebar_management/log_management.dart';
-import 'package:final_assignment_front/features/dashboard/views/manager/pages/sidebar_management/manager_business_processing.dart';
-import 'package:final_assignment_front/features/dashboard/views/manager/pages/sidebar_management/user_management_page.dart';
-import 'package:final_assignment_front/features/dashboard/views/manager/pages/traffic_violation_screen.dart';
+import 'package:final_assignment_front/features/dashboard/views/admin/admin_dashboard_screen.dart';
+import 'package:final_assignment_front/features/dashboard/views/admin/pages/backup_and_restore.dart';
+import 'package:final_assignment_front/features/dashboard/views/admin/pages/logs/login_log_page.dart';
+import 'package:final_assignment_front/features/dashboard/views/admin/pages/logs/operation_log_page.dart';
+import 'package:final_assignment_front/features/dashboard/views/admin/pages/logs/system_log_page.dart';
+import 'package:final_assignment_front/features/dashboard/views/admin/pages/main_process/appeal_management.dart';
+import 'package:final_assignment_front/features/dashboard/views/admin/pages/main_process/driver_list.dart';
+import 'package:final_assignment_front/features/dashboard/views/admin/pages/main_process/offense_list.dart';
+import 'package:final_assignment_front/features/dashboard/views/admin/pages/main_process/vehicle_list.dart';
+import 'package:final_assignment_front/features/dashboard/views/admin/pages/admin_personal_page.dart';
+import 'package:final_assignment_front/features/dashboard/views/admin/pages/admin_setting_page.dart';
+import 'package:final_assignment_front/features/dashboard/views/admin/pages/progress_management.dart';
+import 'package:final_assignment_front/features/dashboard/views/admin/pages/sidebar_management/log_management.dart';
+import 'package:final_assignment_front/features/dashboard/views/admin/pages/admin_business_processing.dart';
+import 'package:final_assignment_front/features/dashboard/views/admin/pages/sidebar_management/user_management_page.dart';
+import 'package:final_assignment_front/features/dashboard/views/admin/pages/traffic_violation_screen.dart';
 import 'package:final_assignment_front/features/dashboard/views/shared/components/ai_chat.dart';
 import 'package:final_assignment_front/features/dashboard/views/shared/components/change_themes.dart';
 import 'package:final_assignment_front/features/dashboard/views/shared/components/map.dart';
@@ -36,7 +36,7 @@ import 'package:final_assignment_front/features/dashboard/views/user/pages/scann
 import 'package:final_assignment_front/features/dashboard/views/user/user_dashboard.dart';
 import 'package:final_assignment_front/features/login_screen/login.dart';
 import 'package:final_assignment_front/features/model/progress_item.dart';
-import 'package:final_assignment_front/features/dashboard/bindings/manager_dashboard_binding.dart';
+import 'package:final_assignment_front/features/dashboard/bindings/admin_dashboard_binding.dart';
 import 'package:final_assignment_front/features/dashboard/bindings/user_dashboard_binding.dart';
 import 'package:get/get.dart';
 
@@ -64,7 +64,11 @@ class AppPages {
   static const appealManagement = Routes.appealManagement;
   static const backupAndRestore = Routes.backupAndRestore;
   static const driverList = Routes.driverList;
+  static const adminPersonalPage = Routes.adminPersonalPage;
+  @Deprecated('Use adminPersonalPage instead.')
   static const managerPersonalPage = Routes.managerPersonalPage;
+  static const adminSetting = Routes.adminSetting;
+  @Deprecated('Use adminSetting instead.')
   static const managerSetting = Routes.managerSetting;
   static const offenseList = Routes.offenseList;
   static const vehicleList = Routes.vehicleList;
@@ -74,6 +78,8 @@ class AppPages {
   static const vehicleManagement = Routes.vehicleManagement;
   static const changeThemes = Routes.changeThemes;
   static const businessProgress = Routes.businessProgress;
+  static const adminBusinessProcessing = Routes.adminBusinessProcessing;
+  @Deprecated('Use adminBusinessProcessing instead.')
   static const managerBusinessProcessing = Routes.managerBusinessProcessing;
   static const accidentEvidencePage = Routes.accidentEvidencePage;
   static const accidentProgressPage = Routes.accidentProgressPage;
@@ -100,7 +106,7 @@ class AppPages {
     ),
     GetPage(
       name: RoutePaths.dashboard,
-      page: () => const DashboardScreen(),
+      page: () => const AdminDashboardScreen(),
       binding: DashboardBinding(),
     ),
     GetPage(
@@ -149,12 +155,20 @@ class AppPages {
       page: () => const DriverList(),
     ),
     GetPage(
+      name: RoutePaths.adminPersonalPage,
+      page: () => const AdminPersonalPage(),
+    ),
+    GetPage(
       name: RoutePaths.managerPersonalPage,
-      page: () => const ManagerPersonalPage(),
+      page: () => const AdminPersonalPage(),
+    ),
+    GetPage(
+      name: RoutePaths.adminSetting,
+      page: () => const AdminSettingPage(),
     ),
     GetPage(
       name: RoutePaths.managerSetting,
-      page: () => const ManagerSetting(),
+      page: () => const AdminSettingPage(),
     ),
     GetPage(
       name: RoutePaths.offenseList,
@@ -185,8 +199,12 @@ class AppPages {
       page: () => const BusinessProgressPage(),
     ),
     GetPage(
+      name: RoutePaths.adminBusinessProcessing,
+      page: () => const AdminBusinessProcessing(),
+    ),
+    GetPage(
       name: RoutePaths.managerBusinessProcessing,
-      page: () => const ManagerBusinessProcessing(),
+      page: () => const AdminBusinessProcessing(),
     ),
     GetPage(
       name: RoutePaths.accidentEvidencePage,

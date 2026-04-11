@@ -542,6 +542,32 @@ class AppealManagementControllerApi {
     return _parseReviewList(_decodeBodyBytes(response));
   }
 
+  /// GET /api/appeals/{appealId}/reviews
+  Future<List<AppealReviewModel>> apiAppealsAppealIdReviewsGet({
+    required int appealId,
+    int page = 1,
+    int size = 20,
+  }) async {
+    final response = await apiClient.invokeAPI(
+      '/api/appeals/$appealId/reviews',
+      'GET',
+      [
+        QueryParam('page', '$page'),
+        QueryParam('size', '$size'),
+      ],
+      null,
+      await _getHeaders(),
+      const {},
+      null,
+      ['bearerAuth'],
+    );
+    if (response.statusCode == 404) {
+      return [];
+    }
+    _ensureSuccess(response);
+    return _parseReviewList(_decodeBodyBytes(response));
+  }
+
   /// GET /api/appeals/reviews/search/reviewer
   Future<List<AppealReviewModel>> apiAppealsReviewsSearchReviewerGet({
     required String reviewer,

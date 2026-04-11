@@ -94,12 +94,15 @@ class _Button extends StatelessWidget {
 
     // 未选中时背景色为透明，选中时使用 primaryColor 的浅透明效果
     final Color backgroundColor = selected
-        ? Theme.of(context).primaryColor.withValues(alpha: isLight ? 0.15 : 0.25)
+        ? Theme.of(context)
+            .primaryColor
+            .withValues(alpha: isLight ? 0.15 : 0.25)
         : Colors.transparent;
 
     // 阴影颜色，根据选中状态调整
-    final Color shadowColor =
-        isLight ? Colors.black.withValues(alpha: 0.1) : Colors.black.withValues(alpha: 0.3);
+    final Color shadowColor = isLight
+        ? Colors.black.withValues(alpha: 0.1)
+        : Colors.black.withValues(alpha: 0.3);
 
     // 图标和文字颜色
     final Color defaultIconColor = selected

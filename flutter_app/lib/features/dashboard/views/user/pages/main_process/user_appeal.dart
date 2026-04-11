@@ -14,7 +14,6 @@ import 'package:final_assignment_front/features/model/offense_information.dart';
 import 'package:final_assignment_front/features/model/progress_item.dart';
 import 'package:final_assignment_front/features/model/user_management.dart';
 import 'package:final_assignment_front/i18n/appeal_localizers.dart';
-import 'package:final_assignment_front/i18n/personal_field_localizers.dart';
 import 'package:final_assignment_front/i18n/progress_localizers.dart';
 import 'package:final_assignment_front/i18n/status_localizers.dart';
 import 'package:final_assignment_front/utils/helpers/role_utils.dart';
@@ -327,24 +326,44 @@ class _UserAppealPageState extends State<UserAppealPage> {
     }
   }
 
+  String? _normalizeOptionalAppealText(String value) {
+    final trimmed = value.trim();
+    return trimmed.isEmpty ? null : trimmed;
+  }
+
   void _showSubmitAppealDialog() async {
-    final TextEditingController nameController =
-        TextEditingController(text: _currentDriverName ?? '');
     final user = await _fetchUserManagement();
     final driverInfo = await _fetchDriverInformation();
-    final TextEditingController idCardController =
-        TextEditingController(text: driverInfo?.idCardNumber ?? '');
-    final TextEditingController contactController = TextEditingController(
-        text: driverInfo?.contactNumber ?? user?.contactNumber ?? '');
+    final profileName = (driverInfo?.name ??
+            _currentDriverName ??
+            user?.realName ??
+            user?.username ??
+            '')
+        .trim();
+    final profileIdCard =
+        (driverInfo?.idCardNumber ?? user?.idCardNumber ?? '').trim();
+    final profileContact =
+        (driverInfo?.contactNumber ?? user?.contactNumber ?? '').trim();
+
+    if (profileName.isEmpty ||
+        profileIdCard.isEmpty ||
+        profileContact.isEmpty) {
+      _showSnackBar(
+        'appeal.error.completeProfileBeforeSubmit'.tr,
+        isError: true,
+      );
+      return;
+    }
+
     final TextEditingController reasonController = TextEditingController();
+    final TextEditingController evidenceDescriptionController =
+        TextEditingController();
+    final TextEditingController evidenceUrlsController =
+        TextEditingController();
     final formKey = GlobalKey<FormState>();
     int? selectedOffenseId;
     bool isSubmitting = false;
     AutovalidateMode autovalidateMode = AutovalidateMode.disabled;
-
-    final bool isNameReadOnly = nameController.text.isNotEmpty;
-    final bool isIdCardReadOnly = idCardController.text.isNotEmpty;
-    final bool isContactReadOnly = contactController.text.isNotEmpty;
 
     final offenses = await _fetchUserOffenses();
     if (offenses.isEmpty) {
@@ -419,101 +438,73 @@ class _UserAppealPageState extends State<UserAppealPage> {
                         ),
                         const SizedBox(height: 12.0),
                         TextFormField(
-                          controller: nameController,
-                          readOnly: isNameReadOnly,
+                          initialValue: profileName,
+                          readOnly: true,
                           decoration: InputDecoration(
                             labelText: 'appeal.form.appellantName'.tr,
                             labelStyle: TextStyle(
                                 color: themeData.colorScheme.onSurfaceVariant),
                             filled: true,
-                            fillColor: isNameReadOnly
-                                ? themeData.colorScheme.surfaceContainerHighest
-                                    .withValues(alpha: 0.5)
-                                : themeData.colorScheme.surfaceContainerLowest,
+                            fillColor: themeData
+                                .colorScheme.surfaceContainerHighest
+                                .withValues(alpha: 0.5),
                             border: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(8.0),
                               borderSide: BorderSide(
                                   color: themeData.colorScheme.outline
                                       .withValues(alpha: 0.3)),
                             ),
-                            suffixIcon: isNameReadOnly
-                                ? Icon(Icons.lock,
-                                    size: 18,
-                                    color: themeData.colorScheme.primary)
-                                : null,
-                          ),
-                          validator: (value) => validatePersonalField(
-                            'name',
-                            value: value ?? '',
-                            required: true,
+                            helperText: 'appeal.form.identityFromProfile'.tr,
+                            suffixIcon: Icon(Icons.lock,
+                                size: 18, color: themeData.colorScheme.primary),
                           ),
                           style:
                               TextStyle(color: themeData.colorScheme.onSurface),
                         ),
                         const SizedBox(height: 12.0),
                         TextFormField(
-                          controller: idCardController,
-                          readOnly: isIdCardReadOnly,
+                          initialValue: profileIdCard,
+                          readOnly: true,
                           decoration: InputDecoration(
                             labelText: 'appeal.form.idCard'.tr,
                             labelStyle: TextStyle(
                                 color: themeData.colorScheme.onSurfaceVariant),
                             filled: true,
-                            fillColor: isIdCardReadOnly
-                                ? themeData.colorScheme.surfaceContainerHighest
-                                    .withValues(alpha: 0.5)
-                                : themeData.colorScheme.surfaceContainerLowest,
+                            fillColor: themeData
+                                .colorScheme.surfaceContainerHighest
+                                .withValues(alpha: 0.5),
                             border: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(8.0),
                               borderSide: BorderSide(
                                   color: themeData.colorScheme.outline
                                       .withValues(alpha: 0.3)),
                             ),
-                            suffixIcon: isIdCardReadOnly
-                                ? Icon(Icons.lock,
-                                    size: 18,
-                                    color: themeData.colorScheme.primary)
-                                : null,
-                          ),
-                          keyboardType: TextInputType.number,
-                          validator: (value) => validatePersonalField(
-                            'idCardNumber',
-                            value: value ?? '',
-                            required: true,
+                            suffixIcon: Icon(Icons.lock,
+                                size: 18, color: themeData.colorScheme.primary),
                           ),
                           style:
                               TextStyle(color: themeData.colorScheme.onSurface),
                         ),
                         const SizedBox(height: 12.0),
                         TextFormField(
-                          controller: contactController,
-                          readOnly: isContactReadOnly,
+                          initialValue: profileContact,
+                          readOnly: true,
                           decoration: InputDecoration(
                             labelText: 'appeal.form.contact'.tr,
                             labelStyle: TextStyle(
                                 color: themeData.colorScheme.onSurfaceVariant),
                             filled: true,
-                            fillColor: isContactReadOnly
-                                ? themeData.colorScheme.surfaceContainerHighest
-                                    .withValues(alpha: 0.5)
-                                : themeData.colorScheme.surfaceContainerLowest,
+                            fillColor: themeData
+                                .colorScheme.surfaceContainerHighest
+                                .withValues(alpha: 0.5),
                             border: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(8.0),
                               borderSide: BorderSide(
                                   color: themeData.colorScheme.outline
                                       .withValues(alpha: 0.3)),
                             ),
-                            suffixIcon: isContactReadOnly
-                                ? Icon(Icons.lock,
-                                    size: 18,
-                                    color: themeData.colorScheme.primary)
-                                : null,
-                          ),
-                          keyboardType: TextInputType.phone,
-                          validator: (value) => validatePersonalField(
-                            'contactNumber',
-                            value: value ?? '',
-                            required: true,
+                            suffixIcon: Icon(Icons.lock,
+                                size: 18, color: themeData.colorScheme.primary),
                           ),
                           style:
                               TextStyle(color: themeData.colorScheme.onSurface),
@@ -539,6 +530,52 @@ class _UserAppealPageState extends State<UserAppealPage> {
                           maxLines: 3,
                           validator: (value) =>
                               validateAppealReasonField(value, required: true),
+                          style:
+                              TextStyle(color: themeData.colorScheme.onSurface),
+                        ),
+                        const SizedBox(height: 12.0),
+                        TextFormField(
+                          controller: evidenceDescriptionController,
+                          decoration: InputDecoration(
+                            labelText:
+                                'appeal.form.initialEvidenceDescription'.tr,
+                            labelStyle: TextStyle(
+                                color: themeData.colorScheme.onSurfaceVariant),
+                            filled: true,
+                            fillColor:
+                                themeData.colorScheme.surfaceContainerLowest,
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8.0),
+                              borderSide: BorderSide(
+                                  color: themeData.colorScheme.outline
+                                      .withValues(alpha: 0.3)),
+                            ),
+                          ),
+                          maxLength: 500,
+                          maxLines: 3,
+                          style:
+                              TextStyle(color: themeData.colorScheme.onSurface),
+                        ),
+                        const SizedBox(height: 12.0),
+                        TextFormField(
+                          controller: evidenceUrlsController,
+                          decoration: InputDecoration(
+                            labelText: 'appeal.form.initialEvidenceUrls'.tr,
+                            hintText: 'appeal.form.evidenceUrlsHint'.tr,
+                            labelStyle: TextStyle(
+                                color: themeData.colorScheme.onSurfaceVariant),
+                            filled: true,
+                            fillColor:
+                                themeData.colorScheme.surfaceContainerLowest,
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8.0),
+                              borderSide: BorderSide(
+                                  color: themeData.colorScheme.outline
+                                      .withValues(alpha: 0.3)),
+                            ),
+                          ),
+                          maxLength: 1000,
+                          maxLines: 3,
                           style:
                               TextStyle(color: themeData.colorScheme.onSurface),
                         ),
@@ -574,14 +611,16 @@ class _UserAppealPageState extends State<UserAppealPage> {
                                       dialogSetState(() => isSubmitting = true);
                                       final newAppeal = AppealRecordModel(
                                         offenseId: selectedOffenseId,
-                                        appellantName:
-                                            nameController.text.trim(),
-                                        appellantIdCard:
-                                            idCardController.text.trim(),
-                                        appellantContact:
-                                            contactController.text.trim(),
                                         appealReason:
                                             reasonController.text.trim(),
+                                        evidenceDescription:
+                                            _normalizeOptionalAppealText(
+                                          evidenceDescriptionController.text,
+                                        ),
+                                        evidenceUrls:
+                                            _normalizeOptionalAppealText(
+                                          evidenceUrlsController.text,
+                                        ),
                                         appealTime: DateTime.now(),
                                       );
                                       final idempotencyKey =
@@ -626,10 +665,9 @@ class _UserAppealPageState extends State<UserAppealPage> {
         );
       }),
     ).whenComplete(() {
-      nameController.dispose();
-      idCardController.dispose();
-      contactController.dispose();
       reasonController.dispose();
+      evidenceDescriptionController.dispose();
+      evidenceUrlsController.dispose();
     });
   }
 

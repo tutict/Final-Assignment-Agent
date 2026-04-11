@@ -28,11 +28,17 @@ class LoginLogControllerApi {
   }
 
   // GET /api/logs/login
-  Future<List<LoginLog>> apiLogsLoginGet() async {
+  Future<List<LoginLog>> apiLogsLoginGet({
+    int page = 1,
+    int size = 20,
+  }) async {
     final r = await _apiClient.invokeAPI(
       '/api/logs/login',
       'GET',
-      const [],
+      [
+        QueryParam('page', '$page'),
+        QueryParam('size', '$size'),
+      ],
       null,
       {},
       {},
@@ -66,66 +72,6 @@ class LoginLogControllerApi {
       throw ApiException(r.statusCode, _errorMessageOrHttpStatus(r));
     }
     return LoginLog.fromJson(jsonDecode(_decode(r)));
-  }
-
-  // POST /api/logs/login
-  Future<LoginLog> apiLogsLoginPost({
-    required LoginLog loginLog,
-    required String idempotencyKey,
-  }) async {
-    final r = await _apiClient.invokeAPI(
-      '/api/logs/login',
-      'POST',
-      [QueryParam('idempotencyKey', idempotencyKey)],
-      loginLog.toJson(),
-      {},
-      {},
-      'application/json',
-      const ['bearerAuth'],
-    );
-    if (r.statusCode >= 400) {
-      throw ApiException(r.statusCode, _errorMessageOrHttpStatus(r));
-    }
-    return LoginLog.fromJson(jsonDecode(_decode(r)));
-  }
-
-  // PUT /api/logs/login/{logId}
-  Future<LoginLog> apiLogsLoginLogIdPut({
-    required int logId,
-    required LoginLog loginLog,
-    required String idempotencyKey,
-  }) async {
-    final r = await _apiClient.invokeAPI(
-      '/api/logs/login/$logId',
-      'PUT',
-      [QueryParam('idempotencyKey', idempotencyKey)],
-      loginLog.toJson(),
-      {},
-      {},
-      'application/json',
-      const ['bearerAuth'],
-    );
-    if (r.statusCode >= 400) {
-      throw ApiException(r.statusCode, _errorMessageOrHttpStatus(r));
-    }
-    return LoginLog.fromJson(jsonDecode(_decode(r)));
-  }
-
-  // DELETE /api/logs/login/{logId}
-  Future<void> apiLogsLoginLogIdDelete({required int logId}) async {
-    final r = await _apiClient.invokeAPI(
-      '/api/logs/login/$logId',
-      'DELETE',
-      const [],
-      null,
-      {},
-      {},
-      null,
-      const ['bearerAuth'],
-    );
-    if (r.statusCode != 204) {
-      throw ApiException(r.statusCode, _errorMessageOrHttpStatus(r));
-    }
   }
 
   // GET /api/logs/login/search/username?username=&page=&size=

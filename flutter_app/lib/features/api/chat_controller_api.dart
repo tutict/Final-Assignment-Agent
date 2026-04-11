@@ -93,14 +93,9 @@ class ChatControllerApi {
     String message,
     bool webSearch,
   ) async* {
-    final base = apiClient.basePath.endsWith('/')
-        ? apiClient.basePath.substring(0, apiClient.basePath.length - 1)
-        : apiClient.basePath;
-    final wsScheme = base.startsWith('https://') ? 'wss://' : 'ws://';
-    final wsBase = base.replaceFirst(RegExp(r'^https?://'), '');
     final token = await AuthTokenStore.instance.getJwtToken();
     final channel = IOWebSocketChannel.connect(
-      Uri.parse('$wsScheme$wsBase/eventbus/ai-chat'),
+      Uri.parse(apiClient.resolveWebSocketUrl('/eventbus/ai-chat')),
       headers: {
         ...await _authHeaders(),
       },

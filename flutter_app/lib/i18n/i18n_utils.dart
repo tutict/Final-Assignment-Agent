@@ -192,6 +192,156 @@ String? validateMaxLengthWithField(
   return value.length > maxLength ? key.trParams({'field': fieldLabel}) : null;
 }
 
+String? validatePersonNameField(
+  String value, {
+  bool required = false,
+  String? fieldLabel,
+  int minLength = 2,
+  int maxLength = 50,
+  String requiredKey = 'driverAdmin.validation.required',
+  String invalidKey = 'driverAdmin.validation.nameLength',
+}) {
+  final trimmedValue = value.trim();
+  if (required && trimmedValue.isEmpty) {
+    return formatRequiredFieldValidation(
+      requiredKey,
+      fieldLabel ?? '',
+    );
+  }
+  if (trimmedValue.isEmpty) {
+    return null;
+  }
+  if (trimmedValue.length < minLength || trimmedValue.length > maxLength) {
+    return invalidKey.tr;
+  }
+  return null;
+}
+
+String? validateIdCardField(
+  String value, {
+  bool required = false,
+  String? fieldLabel,
+  bool allowLowercaseX = true,
+  int? maxLength,
+  String requiredKey = 'driverAdmin.validation.required',
+  String invalidKey = 'driverAdmin.validation.idCardInvalid',
+  String? tooLongKey,
+}) {
+  final trimmedValue = value.trim();
+  if (required && trimmedValue.isEmpty) {
+    return formatRequiredFieldValidation(
+      requiredKey,
+      fieldLabel ?? '',
+    );
+  }
+  if (trimmedValue.isEmpty) {
+    return null;
+  }
+  if (maxLength != null &&
+      trimmedValue.length > maxLength &&
+      tooLongKey != null) {
+    return tooLongKey.tr;
+  }
+  if (!isChineseIdCardNumber(
+    trimmedValue,
+    allowLowercaseX: allowLowercaseX,
+  )) {
+    return invalidKey.tr;
+  }
+  return null;
+}
+
+String? validateContactNumberField(
+  String value, {
+  bool required = false,
+  String? fieldLabel,
+  bool strictPrefix = false,
+  int? maxLength,
+  String requiredKey = 'driverAdmin.validation.required',
+  String invalidKey = 'driverAdmin.validation.contactInvalid',
+  String? tooLongKey,
+}) {
+  final trimmedValue = value.trim();
+  if (required && trimmedValue.isEmpty) {
+    return formatRequiredFieldValidation(
+      requiredKey,
+      fieldLabel ?? '',
+    );
+  }
+  if (trimmedValue.isEmpty) {
+    return null;
+  }
+  if (maxLength != null &&
+      trimmedValue.length > maxLength &&
+      tooLongKey != null) {
+    return tooLongKey.tr;
+  }
+  if (!isMainlandPhoneNumber(
+    trimmedValue,
+    strictPrefix: strictPrefix,
+  )) {
+    return invalidKey.tr;
+  }
+  return null;
+}
+
+String? validateExactDigitsFieldValue(
+  String value, {
+  bool required = false,
+  String? fieldLabel,
+  required int length,
+  String requiredKey = 'driverAdmin.validation.required',
+  String invalidKey = 'driverAdmin.validation.licenseInvalid',
+}) {
+  final trimmedValue = value.trim();
+  if (required && trimmedValue.isEmpty) {
+    return formatRequiredFieldValidation(
+      requiredKey,
+      fieldLabel ?? '',
+    );
+  }
+  if (trimmedValue.isEmpty) {
+    return null;
+  }
+  if (!isExactDigits(trimmedValue, length)) {
+    return invalidKey.tr;
+  }
+  return null;
+}
+
+String? validateEmailFieldValue(
+  String value, {
+  bool required = false,
+  String? fieldLabel,
+  int maxLength = 100,
+  String requiredKey = 'driverAdmin.validation.required',
+  String tooLongKey = 'userAdmin.validation.emailTooLong',
+  String invalidKey = 'auth.validation.emailInvalid',
+}) {
+  final trimmedValue = value.trim();
+  if (required && trimmedValue.isEmpty) {
+    return formatRequiredFieldValidation(
+      requiredKey,
+      fieldLabel ?? '',
+    );
+  }
+  if (trimmedValue.isEmpty) {
+    return null;
+  }
+  final emailLengthError = validateMaxLength(
+    trimmedValue,
+    maxLength: maxLength,
+    key: tooLongKey,
+  );
+  if (emailLengthError != null) {
+    return emailLengthError;
+  }
+  if (!RegExp(r'^[\w.%+-]+@[\w.-]+\.[A-Za-z]{2,}$').hasMatch(trimmedValue)) {
+    return invalidKey.tr;
+  }
+  return null;
+}
+
 bool isCompactChineseLicensePlate(String value) {
   return RegExp(r'^[\u4e00-\u9fa5][A-Za-z0-9]{5,7}$').hasMatch(value);
 }

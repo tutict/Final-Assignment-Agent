@@ -1,47 +1,72 @@
 # Traffic Management Flutter App
 
-## 项目简介
+## Overview
 
-这是交通违法业务处理系统的 Flutter 客户端，面向普通用户和后台管理人员提供统一的业务入口。应用覆盖违法查询、罚款缴纳、申诉处理、车辆管理、办理进度跟踪和个人信息维护等核心场景，用于配合后端完成完整的交通违法闭环处理流程。
+This Flutter app is the frontend for the traffic violation management system.
+It serves both regular users and administrative operators with a shared
+workspace model, role-aware navigation, and a responsive dashboard shell.
 
-## 核心能力
+Core areas include:
 
-- 用户端：查看违法记录、缴纳罚款、提交和撤回申诉、查询办理进度、维护个人与驾驶人信息
-- 管理端：查看业务数据、处理违法与罚款记录、管理日志与系统配置
-- 统一鉴权：基于 JWT 的登录态管理和接口访问控制
-- 多语言支持：内置中英文文案映射
-- 主题能力：支持页面主题切换和统一 Dashboard 布局
+- violation lookup and payment flow
+- appeal and progress tracking
+- driver, vehicle, and profile management
+- administrative monitoring and operational workflows
+- AI assistant surfaces inside the dashboard
 
-## 目录说明
+## Structure
 
-- `lib/features/`：业务页面、接口封装、数据模型
-- `lib/config/`：路由、主题和应用级配置
-- `lib/i18n/`：国际化文案与本地化格式化工具
-- `lib/utils/`：通用工具、鉴权存储、网络请求封装
+- `lib/features/`: business pages, controllers, models, API wrappers
+- `lib/config/`: routes, themes, app-level configuration
+- `lib/i18n/`: translations and localization helpers
+- `lib/shared_components/`: shared UI building blocks
+- `lib/utils/`: helpers, navigation, service utilities
+- `test/`: widget and viewport regression tests
+- `tool/`: local development and validation scripts
 
-## 运行方式
+## Common Commands
 
-1. 安装 Flutter 依赖
+Install dependencies:
 
 ```bash
 flutter pub get
 ```
 
-2. 启动应用
+Run the app:
 
 ```bash
 flutter run
 ```
 
-3. 进行静态检查
+Static analysis:
 
 ```bash
 flutter analyze
 ```
 
-## 开发说明
+## Viewport Regression
 
-- 默认通过 `features/api/` 中的接口类与后端通信
-- 登录令牌保存在本地存储中，应用启动后会根据令牌恢复登录状态
-- 页面主要通过 GetX 控制器组织状态和路由跳转
-- 国际化文案集中维护在 `lib/i18n/app_translations.dart`
+Run the all-platform viewport regression suite with:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tool\test_viewports.ps1
+```
+
+Run tests only:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tool\test_viewports.ps1 -SkipAnalyze
+```
+
+The script automatically bypasses local proxy settings that can otherwise break
+`flutter test` on Windows when `flutter_tester` tries to open a localhost
+WebSocket.
+
+## Notes
+
+- State management and routing are primarily organized with GetX.
+- Theme switching is persisted locally.
+- Translation content is maintained in `lib/i18n/app_translations.dart`.
+- The viewport regression suite currently covers login, dashboard shell, user
+  home, admin home, and selected-page states across phone, tablet portrait,
+  tablet landscape, and wide desktop breakpoints.

@@ -29,17 +29,22 @@ String personalFieldLabel(String field) {
   }
 }
 
-String managerPersonalFieldLabel(String field) {
+String adminPersonalFieldLabel(String field) {
   switch (field) {
     case 'email':
-      return 'manager.personal.field.emailAddress'.tr;
+      return 'admin.personal.field.emailAddress'.tr;
     case 'remarks':
-      return 'manager.personal.field.remarks'.tr;
+      return 'admin.personal.field.remarks'.tr;
     case 'username':
-      return 'manager.personal.field.username'.tr;
+      return 'admin.personal.field.username'.tr;
     default:
       return personalFieldLabel(field);
   }
+}
+
+@Deprecated('Use adminPersonalFieldLabel instead.')
+String managerPersonalFieldLabel(String field) {
+  return adminPersonalFieldLabel(field);
 }
 
 String localizePersonalAccountStatus(String? status) {
@@ -50,12 +55,17 @@ String localizePersonalAccountStatus(String? status) {
   );
 }
 
-String localizeManagerPersonalAccountStatus(String? status) {
+String localizeAdminPersonalAccountStatus(String? status) {
   return localizeAccountStatus(
     status,
-    activeKey: 'manager.personal.status.active',
-    inactiveKey: 'manager.personal.status.inactive',
+    activeKey: 'admin.personal.status.active',
+    inactiveKey: 'admin.personal.status.inactive',
   );
+}
+
+@Deprecated('Use localizeAdminPersonalAccountStatus instead.')
+String localizeManagerPersonalAccountStatus(String? status) {
+  return localizeAdminPersonalAccountStatus(status);
 }
 
 String personalDisplayValue(
@@ -85,4 +95,67 @@ String formatPersonalError(dynamic error) {
   }
 
   return localizeApiErrorDetail(error);
+}
+
+String? validatePersonalField(
+  String field, {
+  required String value,
+  bool required = false,
+}) {
+  final trimmedValue = value.trim();
+  final fieldLabel = personalFieldLabel(field);
+
+  if (required && trimmedValue.isEmpty) {
+    return formatRequiredFieldValidation(
+      'driverAdmin.validation.required',
+      fieldLabel,
+    );
+  }
+
+  if (trimmedValue.isEmpty) {
+    return null;
+  }
+
+  switch (field) {
+    case 'name':
+      return validatePersonNameField(
+        trimmedValue,
+        required: required,
+        fieldLabel: fieldLabel,
+      );
+    case 'contactNumber':
+      return validateContactNumberField(
+        trimmedValue,
+        required: required,
+        fieldLabel: fieldLabel,
+        strictPrefix: false,
+      );
+    case 'idCardNumber':
+      return validateIdCardField(
+        trimmedValue,
+        required: required,
+        fieldLabel: fieldLabel,
+        allowLowercaseX: true,
+      );
+    case 'driverLicenseNumber':
+      return validateExactDigitsFieldValue(
+        trimmedValue,
+        required: required,
+        fieldLabel: fieldLabel,
+        length: 12,
+      );
+    case 'email':
+      return validateEmailFieldValue(
+        trimmedValue,
+        required: required,
+        fieldLabel: fieldLabel,
+      );
+    case 'password':
+      if (trimmedValue.length < 5) {
+        return 'auth.validation.passwordShort'.tr;
+      }
+      return null;
+    default:
+      return null;
+  }
 }

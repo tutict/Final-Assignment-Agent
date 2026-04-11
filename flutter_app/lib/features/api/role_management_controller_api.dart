@@ -2,25 +2,25 @@ import 'package:final_assignment_front/features/model/role_management.dart';
 import 'package:final_assignment_front/i18n/api_error_localizers.dart';
 import 'package:final_assignment_front/utils/helpers/api_exception.dart';
 import 'package:final_assignment_front/utils/services/api_client.dart';
+import 'package:final_assignment_front/utils/services/auth_token_store.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:http/http.dart' as http;
-import 'package:final_assignment_front/utils/services/auth_token_store.dart';
 
-/// å®ä¹ä¸ä¸ªå
-// ¨å±ç?defaultApiClient
+/// Shared default ApiClient instance.
+
 final ApiClient defaultApiClient = ApiClient();
 
 class RoleManagementControllerApi {
   final ApiClient apiClient;
 
-  /// æé å½æ°ï¼å¯ä¼ å
-// ?ApiClientï¼å¦åä½¿ç¨å
-// ¨å±é»è®¤å®ä¾
+  /// Allows injecting a custom ApiClient and otherwise uses the shared default instance.
+
+
   RoleManagementControllerApi([ApiClient? apiClient])
       : apiClient = apiClient ?? defaultApiClient;
 
-  /// ä»?SharedPreferences ä¸­è¯»å?jwtToken å¹¶è®¾ç½®å° ApiClient ä¸?
+  /// Loads the JWT token from storage and applies it to the ApiClient.
   Future<void> initializeWithJwt() async {
     final jwtToken = (await AuthTokenStore.instance.getJwtToken());
     if (jwtToken == null) {
@@ -30,7 +30,7 @@ class RoleManagementControllerApi {
     debugPrint('Initialized RoleManagementControllerApi with token: $jwtToken');
   }
 
-  /// è§£ç ååºä½å­èå°å­ç¬¦ä¸?
+  /// Decodes the response body.
   String _decodeBodyBytes(http.Response response) => response.body;
 
   String _errorMessageOrHttpStatus(http.Response response) {
@@ -46,28 +46,37 @@ class RoleManagementControllerApi {
     }
   }
 
-  /// è¾
-// å©æ¹æ³ï¼æ·»å æ¥è¯¢åæ°ï¼å¦åç§°æç´¢ï¼
-  List<QueryParam> _addQueryParams({String? name, String? idempotencyKey}) {
+  /// Builds common request headers.
+
+  Future<Map<String, String>> _getHeaders({String? idempotencyKey}) async {
+    final token = (await AuthTokenStore.instance.getJwtToken()) ?? '';
+    final headers = <String, String>{
+      'Content-Type': 'application/json; charset=utf-8',
+      if (token.isNotEmpty) 'Authorization': 'Bearer $token',
+    };
+    if (idempotencyKey != null && idempotencyKey.trim().isNotEmpty) {
+      headers['Idempotency-Key'] = idempotencyKey.trim();
+    }
+    return headers;
+  }
+
+  List<QueryParam> _addQueryParams({String? name}) {
     final queryParams = <QueryParam>[];
     if (name != null) {
       queryParams.add(QueryParam('name', name));
     }
-    if (idempotencyKey != null) {
-      queryParams.add(QueryParam('idempotencyKey', idempotencyKey));
-    }
     return queryParams;
   }
 
-  /// POST /api/roles - åå»ºæ°çè§è²è®°å½ (ä»?ADMIN)
+  /// POST /api/roles - create a role (admin only).
   Future<RoleManagement> createRole(
       RoleManagement role, String idempotencyKey) async {
     final response = await apiClient.invokeAPI(
       '/api/roles',
       'POST',
-      _addQueryParams(idempotencyKey: idempotencyKey),
+      [],
       role.toJson(),
-      {},
+      await _getHeaders(idempotencyKey: idempotencyKey),
       {},
       'application/json',
       ['bearerAuth'],
@@ -81,7 +90,7 @@ class RoleManagementControllerApi {
     return RoleManagement.fromJson(data);
   }
 
-  /// GET /api/roles/{roleId} - æ ¹æ®è§è²IDè·åè§è²ä¿¡æ¯ (USER å?ADMIN)
+  /// GET /api/roles/{roleId} - fetch a role by ID.
   Future<RoleManagement?> apiRolesRoleIdGet(int roleId) async {
     final response = await apiClient.invokeAPI(
       '/api/roles/$roleId',
@@ -100,12 +109,18 @@ class RoleManagementControllerApi {
     return RoleManagement.fromJson(data);
   }
 
-  /// GET /api/roles - è·åææè§è²ä¿¡æ?(USER å?ADMIN)
-  Future<List<RoleManagement>> apiRolesGet() async {
+  /// GET /api/roles - fetch all roles.
+  Future<List<RoleManagement>> apiRolesGet({
+    int page = 1,
+    int size = 20,
+  }) async {
     final response = await apiClient.invokeAPI(
       '/api/roles',
       'GET',
-      [],
+      [
+        QueryParam('page', '$page'),
+        QueryParam('size', '$size'),
+      ],
       '',
       {},
       {},
@@ -118,7 +133,7 @@ class RoleManagementControllerApi {
     return RoleManagement.listFromJson(data);
   }
 
-  /// GET /api/roles/name/{roleName} - æ ¹æ®è§è²åç§°è·åè§è²ä¿¡æ¯ (USER å?ADMIN)
+  /// GET /api/roles/name/{roleName} - fetch a role by name.
   Future<RoleManagement?> apiRolesNameRoleNameGet(String roleName) async {
     if (roleName.isEmpty) {
       throw ApiException(400, localizeMissingRequiredParam('roleName'));
@@ -140,8 +155,8 @@ class RoleManagementControllerApi {
     return RoleManagement.fromJson(data);
   }
 
-  /// GET /api/roles/search - æ ¹æ®è§è²åç§°æ¨¡ç³å¹é
-// è·åè§è²ä¿¡æ¯ (USER å?ADMIN)
+  /// GET /api/roles/search - search roles by name.
+
   Future<List<RoleManagement>> apiRolesSearchGet({String? name}) async {
     final response = await apiClient.invokeAPI(
       '/api/roles/search',
@@ -159,15 +174,15 @@ class RoleManagementControllerApi {
     return RoleManagement.listFromJson(data);
   }
 
-  /// PUT /api/roles/{roleId} - æ´æ°æå®è§è²çä¿¡æ?(ä»?ADMIN)
+  /// PUT /api/roles/{roleId} - update a role (admin only).
   Future<RoleManagement> apiRolesRoleIdPut(
       int roleId, RoleManagement updatedRole, String idempotencyKey) async {
     final response = await apiClient.invokeAPI(
       '/api/roles/$roleId',
       'PUT',
-      _addQueryParams(idempotencyKey: idempotencyKey),
+      [],
       updatedRole.toJson(),
-      {},
+      await _getHeaders(idempotencyKey: idempotencyKey),
       {},
       'application/json',
       ['bearerAuth'],
@@ -178,7 +193,7 @@ class RoleManagementControllerApi {
     return RoleManagement.fromJson(data);
   }
 
-  /// DELETE /api/roles/{roleId} - å é¤æå®è§è²è®°å½ (ä»?ADMIN)
+  /// DELETE /api/roles/{roleId} - delete a role (admin only).
   Future<void> apiRolesRoleIdDelete(int roleId) async {
     final response = await apiClient.invokeAPI(
       '/api/roles/$roleId',
@@ -196,7 +211,7 @@ class RoleManagementControllerApi {
     }
   }
 
-  /// DELETE /api/roles/name/{roleName} - æ ¹æ®è§è²åç§°å é¤è§è²è®°å½ (ä»?ADMIN)
+  /// DELETE /api/roles/name/{roleName} - delete a role by name (admin only).
   Future<void> apiRolesNameRoleNameDelete(String roleName) async {
     if (roleName.isEmpty) {
       throw ApiException(400, localizeMissingRequiredParam('roleName'));
@@ -217,13 +232,13 @@ class RoleManagementControllerApi {
     }
   }
 
-  /// è·åå½åç¨æ·è§è² (USER å?ADMIN)
+  /// Determines the current user role from the fetched role list.
   Future<String> getCurrentUserRole() async {
     final roles = await apiRolesGet();
     for (var role in roles) {
       if (role.roleName != null && role.roleName!.isNotEmpty) {
         return role
-            .roleName!; // è¿åç¬¬ä¸ä¸ªéç©ºè§è²åï¼åè®¾ç¨æ·åªæä¸ä¸ªä¸»è¦è§è?
+            .roleName!; // Returns the first non-empty role name.
       }
     }
     throw ApiException(403, localizeCannotDetermineUserRole());
@@ -232,7 +247,7 @@ class RoleManagementControllerApi {
   // WebSocket Methods (Aligned with HTTP Endpoints)
 
   /// GET /api/roles (WebSocket)
-  /// å¯¹åºåç«¯: @WsAction(service="RoleManagement", action="getAllRoles")
+  /// Maps to @WsAction(service="RoleManagement", action="getAllRoles")
   Future<List<RoleManagement>> eventbusRolesGet() async {
     final msg = {
       "service": "RoleManagement",
@@ -253,7 +268,7 @@ class RoleManagementControllerApi {
   }
 
   /// DELETE /api/roles/name/{roleName} (WebSocket)
-  /// å¯¹åºåç«¯: @WsAction(service="RoleManagement", action="deleteRoleByName")
+  /// Maps to @WsAction(service="RoleManagement", action="deleteRoleByName")
   Future<bool> eventbusRolesNameRoleNameDelete(
       {required String roleName}) async {
     if (roleName.isEmpty) {
@@ -273,7 +288,7 @@ class RoleManagementControllerApi {
   }
 
   /// GET /api/roles/name/{roleName} (WebSocket)
-  /// å¯¹åºåç«¯: @WsAction(service="RoleManagement", action="getRoleByName")
+  /// Maps to @WsAction(service="RoleManagement", action="getRoleByName")
   Future<RoleManagement?> eventbusRolesNameRoleNameGet(
       {required String roleName}) async {
     if (roleName.isEmpty) {
@@ -296,7 +311,7 @@ class RoleManagementControllerApi {
   }
 
   /// POST /api/roles (WebSocket)
-  /// å¯¹åºåç«¯: @WsAction(service="RoleManagement", action="createRole")
+  /// Maps to @WsAction(service="RoleManagement", action="createRole")
   Future<RoleManagement> eventbusRolesPost(
       {required RoleManagement roleManagement, String? idempotencyKey}) async {
     final msg = {
@@ -315,7 +330,7 @@ class RoleManagementControllerApi {
   }
 
   /// DELETE /api/roles/{roleId} (WebSocket)
-  /// å¯¹åºåç«¯: @WsAction(service="RoleManagement", action="deleteRole")
+  /// Maps to @WsAction(service="RoleManagement", action="deleteRole")
   Future<bool> eventbusRolesRoleIdDelete({required int roleId}) async {
     final msg = {
       "service": "RoleManagement",
@@ -331,7 +346,7 @@ class RoleManagementControllerApi {
   }
 
   /// GET /api/roles/{roleId} (WebSocket)
-  /// å¯¹åºåç«¯: @WsAction(service="RoleManagement", action="getRoleById")
+  /// Maps to @WsAction(service="RoleManagement", action="getRoleById")
   Future<RoleManagement?> eventbusRolesRoleIdGet({required int roleId}) async {
     final msg = {
       "service": "RoleManagement",
@@ -350,7 +365,7 @@ class RoleManagementControllerApi {
   }
 
   /// PUT /api/roles/{roleId} (WebSocket)
-  /// å¯¹åºåç«¯: @WsAction(service="RoleManagement", action="updateRole")
+  /// Maps to @WsAction(service="RoleManagement", action="updateRole")
   Future<RoleManagement> eventbusRolesRoleIdPut({
     required int roleId,
     required RoleManagement updatedRole,
@@ -372,7 +387,7 @@ class RoleManagementControllerApi {
   }
 
   /// GET /api/roles/search (WebSocket)
-  /// å¯¹åºåç«¯: @WsAction(service="RoleManagement", action="getRolesByNameLike")
+  /// Maps to @WsAction(service="RoleManagement", action="getRolesByNameLike")
   Future<List<RoleManagement>> eventbusRolesSearchGet({String? name}) async {
     final msg = {
       "service": "RoleManagement",
@@ -392,7 +407,7 @@ class RoleManagementControllerApi {
     return [];
   }
 
-  // HTTP: GET /api/roles/by-code/{roleCode} - æ ¹æ®è§è²ç¼ç è·å
+  // HTTP: GET /api/roles/by-code/{roleCode} - fetch a role by code.
   Future<RoleManagement?> apiRolesByCodeRoleCodeGet(String roleCode) async {
     if (roleCode.isEmpty) {
       throw ApiException(400, localizeMissingRequiredParam('roleCode'));
@@ -596,7 +611,7 @@ class RoleManagementControllerApi {
     return RoleManagement.listFromJson(data);
   }
 
-  // HTTP: GET /api/roles/{roleId}/permissions - æ¥è¯¢è§è²æ¥æçæé?
+  // HTTP: GET /api/roles/{roleId}/permissions - fetch permissions assigned to a role.
   Future<List<dynamic>> apiRolesRoleIdPermissionsGet({
     required int roleId,
     int page = 1,

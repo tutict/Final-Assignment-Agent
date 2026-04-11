@@ -4,7 +4,6 @@ import 'package:final_assignment_front/config/routes/app_routes.dart';
 import 'package:final_assignment_front/features/dashboard/controllers/progress_controller.dart';
 import 'package:final_assignment_front/features/dashboard/controllers/user_dashboard_screen_controller.dart';
 import 'package:final_assignment_front/features/dashboard/views/shared/widgets/dashboard_page_template.dart';
-import 'package:final_assignment_front/features/model/progress_item.dart';
 import 'package:final_assignment_front/i18n/progress_localizers.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
@@ -39,7 +38,7 @@ class OnlineProcessingProgress extends StatelessWidget {
           padding: const EdgeInsets.all(16),
           child: Column(
             children: [
-              _buildFilterControls(context, progressController, themeData),
+              _buildFilterControls(progressController, themeData),
               const SizedBox(height: 16),
               Expanded(
                 child: progressController.isLoading.value
@@ -157,62 +156,10 @@ class OnlineProcessingProgress extends StatelessWidget {
                                           ),
                                         ],
                                       ),
-                                      trailing: PopupMenuButton<String>(
-                                        icon: Icon(
-                                          Icons.more_vert,
-                                          color: themeData
-                                              .colorScheme.onSurfaceVariant,
-                                        ),
-                                        onSelected: (value) {
-                                          if (value == 'view') {
-                                            Get.toNamed(
-                                              Routes.progressDetailPage,
-                                              arguments: item,
-                                            )?.then((result) {
-                                              if (result == true) {
-                                                progressController
-                                                    .fetchProgress();
-                                              }
-                                            });
-                                          } else if (value == 'edit') {
-                                            _showEditProgressDialog(
-                                              context,
-                                              themeData,
-                                              progressController,
-                                              item,
-                                            );
-                                          } else if (value == 'delete') {
-                                            _showDeleteConfirmationDialog(
-                                              context,
-                                              themeData,
-                                              progressController,
-                                              item.id!,
-                                            );
-                                          }
-                                        },
-                                        itemBuilder: (context) => [
-                                          PopupMenuItem(
-                                            value: 'view',
-                                            child:
-                                                Text('progress.viewDetail'.tr),
-                                          ),
-                                          PopupMenuItem(
-                                            value: 'edit',
-                                            child: Text('common.edit'.tr),
-                                          ),
-                                          PopupMenuItem(
-                                            value: 'delete',
-                                            child: Text(
-                                              'progress.action.delete'.tr,
-                                              style: themeData
-                                                  .textTheme.bodyMedium
-                                                  ?.copyWith(
-                                                color:
-                                                    themeData.colorScheme.error,
-                                              ),
-                                            ),
-                                          ),
-                                        ],
+                                      trailing: Icon(
+                                        Icons.chevron_right,
+                                        color: themeData
+                                            .colorScheme.onSurfaceVariant,
                                       ),
                                       onTap: () => Get.toNamed(
                                         Routes.progressDetailPage,
@@ -235,7 +182,6 @@ class OnlineProcessingProgress extends StatelessWidget {
   }
 
   Widget _buildFilterControls(
-    BuildContext context,
     ProgressController controller,
     ThemeData themeData,
   ) {
@@ -283,12 +229,6 @@ class OnlineProcessingProgress extends StatelessWidget {
           },
           tooltip: 'progress.filter.clear'.tr,
         ),
-        const SizedBox(width: 16),
-        ElevatedButton(
-          onPressed: () =>
-              _showSubmitProgressDialog(context, themeData, controller),
-          child: Text('progress.submitNew'.tr),
-        ),
       ],
     );
   }
@@ -314,176 +254,6 @@ class OnlineProcessingProgress extends StatelessWidget {
         pickedRange.end,
       );
     }
-  }
-
-  void _showSubmitProgressDialog(
-    BuildContext context,
-    ThemeData themeData,
-    ProgressController progressController,
-  ) {
-    final titleController = TextEditingController();
-    final detailsController = TextEditingController();
-
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text('progress.dialog.submitTitle'.tr),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: titleController,
-                decoration:
-                    InputDecoration(labelText: 'progress.field.title'.tr),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: detailsController,
-                decoration:
-                    InputDecoration(labelText: 'progress.field.details'.tr),
-                maxLines: 3,
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: Text('common.cancel'.tr),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              if (titleController.text.isEmpty ||
-                  detailsController.text.isEmpty) {
-                Get.snackbar(
-                  'common.error'.tr,
-                  'progress.validation.titleAndDetails'.tr,
-                  snackPosition: SnackPosition.TOP,
-                );
-                return;
-              }
-              await progressController.submitProgress(
-                titleController.text,
-                detailsController.text,
-              );
-              Navigator.pop(ctx);
-            },
-            child: Text('common.submit'.tr),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showEditProgressDialog(
-    BuildContext context,
-    ThemeData themeData,
-    ProgressController progressController,
-    ProgressItem item,
-  ) {
-    final titleController = TextEditingController(text: item.title);
-    final detailsController = TextEditingController(text: item.details);
-    String selectedStatus = item.status;
-
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text('progress.dialog.editTitle'.tr),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: titleController,
-                decoration:
-                    InputDecoration(labelText: 'progress.field.title'.tr),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: detailsController,
-                decoration:
-                    InputDecoration(labelText: 'progress.field.details'.tr),
-                maxLines: 3,
-              ),
-              const SizedBox(height: 16),
-              DropdownButtonFormField<String>(
-                initialValue: selectedStatus,
-                decoration: InputDecoration(labelText: 'progress.status'.tr),
-                items: progressController.statusCategories
-                    .map(
-                      (status) => DropdownMenuItem<String>(
-                        value: status,
-                        child: Text(localizeProgressStatus(status)),
-                      ),
-                    )
-                    .toList(),
-                onChanged: (value) {
-                  if (value != null) {
-                    selectedStatus = value;
-                  }
-                },
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: Text('common.cancel'.tr),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              if (titleController.text.isEmpty ||
-                  detailsController.text.isEmpty) {
-                Get.snackbar(
-                  'common.error'.tr,
-                  'progress.validation.titleAndDetails'.tr,
-                  snackPosition: SnackPosition.TOP,
-                );
-                return;
-              }
-              await progressController.updateProgress(
-                item.id!,
-                titleController.text,
-                detailsController.text,
-                selectedStatus,
-              );
-              Navigator.pop(ctx);
-            },
-            child: Text('common.save'.tr),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showDeleteConfirmationDialog(
-    BuildContext context,
-    ThemeData themeData,
-    ProgressController progressController,
-    int id,
-  ) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text('progress.delete.confirmTitle'.tr),
-        content: Text('progress.delete.confirmBody'.tr),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: Text('common.cancel'.tr),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              await progressController.deleteProgress(id);
-              Navigator.pop(ctx);
-            },
-            child: Text('progress.action.delete'.tr),
-          ),
-        ],
-      ),
-    );
   }
 
   Color _getStatusColor(String? status, ThemeData themeData) {

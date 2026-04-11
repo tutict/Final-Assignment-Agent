@@ -1,10 +1,10 @@
 import 'package:final_assignment_front/config/routes/app_routes.dart';
-import 'package:final_assignment_front/features/dashboard/views/manager/pages/manager_personal_page.dart';
-import 'package:final_assignment_front/features/dashboard/views/manager/pages/manager_setting.dart';
-import 'package:final_assignment_front/features/dashboard/views/manager/pages/progress_management.dart';
-import 'package:final_assignment_front/features/dashboard/views/manager/pages/sidebar_management/log_management.dart';
-import 'package:final_assignment_front/features/dashboard/views/manager/pages/sidebar_management/manager_business_processing.dart';
-import 'package:final_assignment_front/features/dashboard/views/manager/pages/sidebar_management/user_management_page.dart';
+import 'package:final_assignment_front/features/dashboard/views/admin/pages/admin_personal_page.dart';
+import 'package:final_assignment_front/features/dashboard/views/admin/pages/admin_setting_page.dart';
+import 'package:final_assignment_front/features/dashboard/views/admin/pages/progress_management.dart';
+import 'package:final_assignment_front/features/dashboard/views/admin/pages/sidebar_management/log_management.dart';
+import 'package:final_assignment_front/features/dashboard/views/admin/pages/admin_business_processing.dart';
+import 'package:final_assignment_front/features/dashboard/views/admin/pages/sidebar_management/user_management_page.dart';
 import 'package:final_assignment_front/features/dashboard/views/shared/components/ai_chat.dart';
 import 'package:final_assignment_front/features/dashboard/views/shared/components/change_themes.dart';
 import 'package:final_assignment_front/features/dashboard/views/shared/components/map.dart';
@@ -46,12 +46,15 @@ Widget? resolveDashboardPage(String routeName) {
       return const MainScan();
     case Routes.changeThemes:
       return const ChangeThemes();
+    case Routes.adminSetting:
     case Routes.managerSetting:
-      return const ManagerSetting();
+      return const AdminSettingPage();
+    case Routes.adminPersonalPage:
     case Routes.managerPersonalPage:
-      return const ManagerPersonalPage();
+      return const AdminPersonalPage();
+    case Routes.adminBusinessProcessing:
     case Routes.managerBusinessProcessing:
-      return const ManagerBusinessProcessing();
+      return const AdminBusinessProcessing();
     case Routes.accidentEvidencePage:
       return const AccidentEvidencePage();
     case Routes.accidentVideoQuickPage:

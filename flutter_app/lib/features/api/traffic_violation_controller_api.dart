@@ -76,6 +76,25 @@ class TrafficViolationControllerApi {
     return jsonList.map((e) => OffenseInformation.fromJson(e)).toList();
   }
 
+  // GET /api/violations/dashboard-summary - real dashboard summary
+  Future<Map<String, dynamic>> apiViolationsDashboardSummaryGet() async {
+    const path = '/api/violations/dashboard-summary';
+    final headers = await _getHeaders();
+    final response = await apiClient.invokeAPI(
+      path,
+      'GET',
+      const [],
+      null,
+      headers,
+      const {},
+      null,
+      const ['bearerAuth'],
+    );
+    if (response.statusCode >= 400) _handleError(response);
+    if (response.body.isEmpty) return {};
+    return jsonDecode(_decodeBodyBytes(response)) as Map<String, dynamic>;
+  }
+
   // GET /api/violations/{offenseId} - full chain details
   // Returns a payload map with keys: offense, fines, payments, deductions, appeals
   Future<Map<String, dynamic>> apiViolationsOffenseIdGet({

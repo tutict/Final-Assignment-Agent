@@ -79,23 +79,31 @@ class UserDashboardController extends GetxController {
       final prefs = await SharedPreferences.getInstance();
       final jwtToken = prefs.getString('jwtToken');
       final userName = prefs.getString('userName');
+      final displayName =
+          prefs.getString('displayName') ?? prefs.getString('driverName');
       final userEmail = prefs.getString('userEmail');
       final userRole = prefs.getString('userRole');
+      final resolvedDisplayName =
+          (displayName != null && displayName.isNotEmpty)
+              ? displayName
+              : userName;
 
       developer.log(
-          'Loading user from prefs: jwtToken=$jwtToken, userName=$userName, userEmail=$userEmail, userRole=$userRole');
+          'Loading user from prefs: jwtToken=$jwtToken, userName=$userName, displayName=$resolvedDisplayName, userEmail=$userEmail, userRole=$userRole');
 
-      if (jwtToken != null && userName != null && userEmail != null) {
+      if (jwtToken != null &&
+          userName != null &&
+          resolvedDisplayName != null &&
+          userEmail != null) {
         currentUser.value = Profile(
           photo: const AssetImage(ImageRasterPath.avatar1),
-          name: userName,
+          name: resolvedDisplayName,
           email: userEmail,
         );
-        currentDriverName.value = userName;
+        currentDriverName.value = resolvedDisplayName;
         currentEmail.value = userEmail;
         await offenseApi.initializeWithJwt();
         await roleApi.initializeWithJwt();
-        // Fetch driver data to ensure correct name
         await _fetchDriverData();
       } else {
         _showErrorSnackBar('auth.error.loginRequiredForReset'.tr);
@@ -114,24 +122,21 @@ class UserDashboardController extends GetxController {
     try {
       final prefs = await SharedPreferences.getInstance();
       final storedUsername = prefs.getString('userName');
-      if (storedUsername == null || storedUsername.isEmpty) {
-        throw Exception('personal.error.currentUserNotFound'.tr);
-      }
       final userApi = UserManagementControllerApi();
       await userApi.initializeWithJwt();
-      final user =
-          await userApi.apiUsersSearchUsernameGet(username: storedUsername);
-      if (user == null || user.userId == null) {
-        throw Exception('personal.error.currentUserNotFound'.tr);
-      }
-      final userId = user.userId!;
+      final user = await userApi.apiUsersMeGet();
 
       final driverApi = DriverInformationControllerApi();
       await driverApi.initializeWithJwt();
-      final driver = await driverApi.apiDriversDriverIdGet(driverId: userId);
-      final resolvedName =
-          driver?.name ?? user.realName ?? user.username ?? storedUsername;
-      final resolvedEmail = user.email ?? currentEmail.value;
+      final driver = await driverApi.apiDriversMeGet();
+      final resolvedName = driver?.name ??
+          prefs.getString('displayName') ??
+          prefs.getString('driverName') ??
+          user?.realName ??
+          user?.username ??
+          storedUsername ??
+          currentDriverName.value;
+      final resolvedEmail = user?.email ?? currentEmail.value;
 
       updateCurrentUser(
         resolvedName,
@@ -139,13 +144,18 @@ class UserDashboardController extends GetxController {
       );
       driverLicenseNumber.value = driver?.driverLicenseNumber ?? '';
       idCardNumber.value = driver?.idCardNumber ?? '';
-      await prefs.setString('userName', resolvedName);
-      await prefs.setString('userId', userId.toString());
+      if (resolvedName.isNotEmpty) {
+        await prefs.setString('displayName', resolvedName);
+        await prefs.setString('driverName', resolvedName);
+      }
+      if (user?.userId != null) {
+        await prefs.setString('userId', user!.userId.toString());
+      }
       if (resolvedEmail.isNotEmpty) {
         await prefs.setString('userEmail', resolvedEmail);
       }
-      developer
-          .log('Updated user info from API: name=$resolvedName, id=$userId');
+      developer.log(
+          'Updated user info from API: name=$resolvedName, id=${user?.userId}');
     } catch (e) {
       developer.log('Failed to fetch driver data: $e');
       _showErrorSnackBar('offense.error.driverNameMissing'.tr);
@@ -196,8 +206,13 @@ class UserDashboardController extends GetxController {
 
   Future<void> _saveUserToPrefs(String name, String email) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('userName', name);
-    await prefs.setString('userEmail', email);
+    if (name.isNotEmpty) {
+      await prefs.setString('displayName', name);
+      await prefs.setString('driverName', name);
+    }
+    if (email.isNotEmpty) {
+      await prefs.setString('userEmail', email);
+    }
   }
 
   Profile get currentProfile =>

@@ -355,28 +355,28 @@ class AppTranslations extends Translations {
     'feedback.approvalUpdated': 'Feedback has been @status',
     'feedback.error.loadFailed': 'Failed to load feedback requests: @error',
     'feedback.error.updateFailed': 'Failed to update feedback: @error',
-    'manager.personal.title': 'Admin profile',
-    'manager.personal.logoutTooltip': 'Log out',
-    'manager.personal.error.userFromToken':
+    'admin.personal.title': 'Admin profile',
+    'admin.personal.logoutTooltip': 'Log out',
+    'admin.personal.error.userFromToken':
         'Could not resolve the current user from the token.',
-    'manager.personal.error.jwtMissing': 'JWT token was not found in storage.',
-    'manager.personal.field.username': 'Username',
-    'manager.personal.field.emailAddress': 'Email address',
-    'manager.personal.field.remarks': 'Remarks',
-    'manager.personal.status.active': 'Active',
-    'manager.personal.status.inactive': 'Inactive',
-    'manager.personal.logoutConfirmTitle': 'Confirm logout',
-    'manager.personal.logoutConfirmBody': 'Are you sure you want to log out?',
-    'manager.personal.noData': 'No data',
-    'manager.business.title': 'Business processing menu',
-    'manager.business.appeal': 'Appeal management',
-    'manager.business.deduction': 'Deduction management',
-    'manager.business.driver': 'Driver management',
-    'manager.business.fine': 'Fine management',
-    'manager.business.vehicle': 'Vehicle management',
-    'manager.business.offense': 'Violation management',
-    'manager.business.enter': 'Tap to enter',
-    'manager.logs.title': 'Log management menu',
+    'admin.personal.error.jwtMissing': 'JWT token was not found in storage.',
+    'admin.personal.field.username': 'Username',
+    'admin.personal.field.emailAddress': 'Email address',
+    'admin.personal.field.remarks': 'Remarks',
+    'admin.personal.status.active': 'Active',
+    'admin.personal.status.inactive': 'Inactive',
+    'admin.personal.logoutConfirmTitle': 'Confirm logout',
+    'admin.personal.logoutConfirmBody': 'Are you sure you want to log out?',
+    'admin.personal.noData': 'No data',
+    'admin.business.title': 'Business processing menu',
+    'admin.business.appeal': 'Appeal management',
+    'admin.business.deduction': 'Deduction management',
+    'admin.business.driver': 'Driver management',
+    'admin.business.fine': 'Fine management',
+    'admin.business.vehicle': 'Vehicle management',
+    'admin.business.offense': 'Violation management',
+    'admin.business.enter': 'Tap to enter',
+    'admin.logs.title': 'Log management menu',
     'driverAdmin.page.listTitle': 'Driver list',
     'driverAdmin.page.addTitle': 'Add driver',
     'driverAdmin.page.editTitle': 'Edit driver',
@@ -714,8 +714,23 @@ class AppTranslations extends Translations {
     'backupRestore.page.title': 'Backup and restore',
     'backupRestore.detailPage.title': 'Backup details',
     'backupRestore.dialog.editTitle': 'Edit backup',
+    'backupRestore.search.filterType': 'Search field',
+    'backupRestore.search.type.all': 'All records',
+    'backupRestore.search.type.fileName': 'File name',
+    'backupRestore.search.type.backupTime': 'Backup time',
+    'backupRestore.search.type.restoreTime': 'Restore time',
+    'backupRestore.search.type.backupType': 'Backup type',
+    'backupRestore.search.type.handler': 'Backup handler',
+    'backupRestore.search.type.status': 'Task status',
+    'backupRestore.search.type.restoreStatus': 'Restore status',
     'backupRestore.search.byFileName': 'Search backups by file name',
     'backupRestore.search.byBackupTime': 'Search backups by backup time',
+    'backupRestore.search.byRestoreTime': 'Search backups by restore time',
+    'backupRestore.search.byType': 'Search backups by type',
+    'backupRestore.search.byHandler': 'Search backups by handler',
+    'backupRestore.search.byStatus': 'Filter by task status',
+    'backupRestore.search.byRestoreStatus': 'Filter by restore status',
+    'backupRestore.search.allStatuses': 'All statuses',
     'backupRestore.empty.noRecords': 'No backup records found.',
     'backupRestore.error.notLoggedIn':
         'You are not signed in. Please sign in again.',
@@ -743,20 +758,35 @@ class AppTranslations extends Translations {
     'backupRestore.action.edit': 'Edit this backup',
     'backupRestore.action.delete': 'Delete this backup',
     'backupRestore.action.viewDetails': 'View details',
+    'backupRestore.action.resetFilters': 'Reset filters',
     'backupRestore.field.backupId': 'Backup ID',
+    'backupRestore.field.backupType': 'Backup type',
     'backupRestore.field.fileName': 'File name',
     'backupRestore.field.backupTime': 'Backup time',
+    'backupRestore.field.backupHandler': 'Backup handler',
     'backupRestore.field.restoreTime': 'Restore time',
     'backupRestore.field.restoreStatus': 'Restore status',
+    'backupRestore.field.restoreHandler': 'Restore handler',
+    'backupRestore.field.status': 'Task status',
     'backupRestore.field.remarks': 'Remarks',
     'backupRestore.field.idempotencyKey': 'Idempotency key',
+    'backupRestore.detail.backupType': 'Backup type: @value',
     'backupRestore.detail.fileName': 'File name: @value',
     'backupRestore.detail.backupTime': 'Backup time: @value',
+    'backupRestore.detail.backupHandler': 'Backup handler: @value',
     'backupRestore.detail.restoreTime': 'Restore time: @value',
     'backupRestore.detail.restoreStatus': 'Restore status: @value',
+    'backupRestore.detail.restoreHandler': 'Restore handler: @value',
+    'backupRestore.detail.status': 'Task status: @value',
     'backupRestore.status.pending': 'Pending',
     'backupRestore.status.restored': 'Restored',
+    'backupRestore.status.failed': 'Failed',
     'backupRestore.status.notRestored': 'Not restored',
+    'backupRestore.type.full': 'Full backup',
+    'backupRestore.type.incremental': 'Incremental backup',
+    'backupRestore.type.differential': 'Differential backup',
+    'backupRestore.type.manual': 'Manual backup',
+    'backupRestore.type.auto': 'Automatic backup',
     'backupRestore.value.manualCreatedRemarks': 'Manually created backup',
     'progress.pageTitle': 'Progress updates',
     'progress.empty': 'No progress records yet',
@@ -1094,12 +1124,97 @@ class AppTranslations extends Translations {
     'fine.paymentHistory.channel': 'Payment channel',
     'fine.paymentHistory.paymentNumber': 'Payment number',
     'fine.paymentHistory.transactionId': 'Transaction ID',
+    'fine.paymentHistory.receiptNumber': 'Receipt number',
+    'fine.paymentHistory.receiptUrl': 'Payment proof link',
+    'fine.paymentHistory.payerName': 'Payer name',
+    'fine.paymentHistory.payerIdCard': 'Payer ID card',
+    'fine.paymentHistory.payerContact': 'Payer contact',
+    'fine.paymentHistory.bankName': 'Bank name',
+    'fine.paymentHistory.bankAccount': 'Bank account',
     'fine.paymentHistory.refund': 'Refund information',
     'fine.paymentHistory.refundValue': '\$@amount at @time',
+    'fine.paymentHistory.missingProofHint':
+        'Self-service payment is confirmed but no proof link was uploaded. Finance should verify it manually.',
+    'fine.reviewQueue.title': 'Pending payment reviews',
+    'fine.reviewQueue.empty': 'No pending finance review tasks right now.',
+    'fine.reviewQueue.loadFailed':
+        'Failed to load payment review tasks: @error',
+    'fine.reviewQueue.openFine': 'Open fine',
+    'fine.reviewQueue.openFailed': 'Failed to open the related fine: @error',
+    'fine.reviewQueue.recordSubtitle': 'Fine #@fineId · @status · @channel',
+    'fine.reviewQueue.selectionHint': '@count selected',
+    'fine.reviewQueue.selectAll': 'Select all',
+    'fine.reviewQueue.clearSelection': 'Clear selection',
+    'fine.reviewQueue.batchNeedProof': 'Batch request proof',
+    'fine.reviewQueue.batchNeedProofSuccess':
+        'Marked @count payment review tasks as needing more proof.',
+    'fine.reviewQueue.batchNeedProofFailed':
+        'Failed to batch request more proof: @error',
+    'fine.reviewQueue.batchApprove': 'Batch verify',
+    'fine.reviewQueue.batchApproveSuccess':
+        'Marked @count payment review tasks as verified.',
+    'fine.reviewQueue.batchApproveFailed':
+        'Failed to batch verify payment review tasks: @error',
+    'fine.reviewQueue.filter.all': 'All',
+    'fine.reviewQueue.filter.overdue': 'Overdue',
+    'fine.reviewQueue.filter.missingProof': 'Missing proof',
+    'fine.reviewQueue.filter.needProof': 'Need proof again',
+    'fine.reviewQueue.sort.pending': 'Sort: newest pending',
+    'fine.reviewQueue.sort.amount': 'Sort: highest amount',
+    'fine.reviewQueue.filteredEmpty':
+        'No payment review tasks match the current filter.',
+    'fine.reviewQueue.overdueBadge': 'Overdue',
+    'fine.reviewQueue.pendingSince': 'Pending since @time',
+    'fine.reviewQueue.pendingHours': '@hours h',
+    'fine.reviewQueue.pendingDays': '@days d',
+    'fine.paymentReview.latest': 'Latest finance review',
+    'fine.paymentReview.result': 'Review result',
+    'fine.paymentReview.time': 'Review time',
+    'fine.paymentReview.reviewer': 'Reviewer',
+    'fine.paymentReview.opinion': 'Review note',
+    'fine.paymentReview.result.approved': 'Verified',
+    'fine.paymentReview.result.needProof': 'Need more proof',
+    'fine.paymentReview.action.approve': 'Mark verified',
+    'fine.paymentReview.action.needProof': 'Request proof',
+    'fine.paymentReview.dialog.needProofTitle': 'Request more proof',
+    'fine.paymentReview.dialog.needProofHint':
+        'Tell the payer what proof still needs to be uploaded for finance verification.',
+    'fine.paymentReview.validation.opinionRequired':
+        'Please enter the proof request before submitting.',
+    'fine.paymentReview.success.approved': 'Finance review marked as verified.',
+    'fine.paymentReview.success.needProof':
+        'Finance review marked as proof required.',
+    'fine.paymentReview.failed': 'Failed to submit finance review: @error',
+    'fine.payment.action.uploadProof': 'Upload proof',
+    'fine.payment.proofDialog.title': 'Upload payment proof',
+    'fine.payment.proofDialog.hint':
+        'Paste the latest receipt or proof link for this payment so finance can continue the review.',
+    'fine.payment.proof.validation.receiptUrlRequired':
+        'Please enter the payment proof link before submitting.',
+    'fine.payment.proof.success': 'Payment proof updated successfully.',
+    'fine.payment.proof.failed': 'Failed to update payment proof: @error',
     'fine.qr.alipayHint': 'Scan the QR code below with Alipay to pay',
     'fine.action.close': 'Close',
     'fine.action.payNow': 'Pay now (\$@amount)',
     'fine.payment.unavailable': 'This fine cannot be paid right now.',
+    'fine.payment.orderCreated':
+        'Payment order created: \$@amount. Confirm it after you finish paying.',
+    'fine.payment.confirmAction': 'Confirm payment',
+    'fine.payment.confirmSuccess': 'Payment confirmed: \$@amount',
+    'fine.payment.confirmFailed': 'Failed to confirm payment: @error',
+    'fine.payment.confirmDialog.title': 'Confirm payment',
+    'fine.payment.confirmDialog.hint':
+        'Enter the real transaction ID used for this payment. You can also keep a proof link for later review.',
+    'fine.payment.form.transactionId': 'Transaction ID *',
+    'fine.payment.form.receiptUrl': 'Payment proof link (optional)',
+    'fine.payment.validation.transactionIdRequired':
+        'Please enter the transaction ID before confirming payment.',
+    'fine.payment.pendingHint':
+        'This order is waiting for payment confirmation. Complete the transfer first, then confirm here.',
+    'fine.payment.expiredHint':
+        'This pending payment order has expired. You can create a new one if you still need to pay.',
+    'fine.payment.pendingExistsInline':
+        'There is already a pending payment order for this fine. Confirm it before creating another one.',
     'fine.payment.success': 'Payment recorded successfully: \$@amount',
     'fine.payment.failed': 'Failed to record payment: @error',
     'fine.page.title': 'Traffic violation fine records',
@@ -1244,6 +1359,8 @@ class AppTranslations extends Translations {
     'appeal.error.submitFailed': 'Failed to submit appeal: @error',
     'appeal.error.noOffenseToSubmit':
         'You do not have any violation records, so an appeal cannot be submitted.',
+    'appeal.error.completeProfileBeforeSubmit':
+        'Complete your name, ID card number and contact number in personal profile before submitting an appeal.',
     'appeal.dialog.submitTitle': 'Submit an appeal',
     'appeal.form.offense': 'Violation record *',
     'appeal.form.offenseOption': 'ID: @id - @type',
@@ -1252,7 +1369,11 @@ class AppTranslations extends Translations {
     'appeal.form.appellantName': 'Appellant name *',
     'appeal.form.idCard': 'ID card number *',
     'appeal.form.contact': 'Contact number *',
+    'appeal.form.identityFromProfile':
+        'This information is taken from your current personal profile.',
     'appeal.form.reason': 'Appeal reason *',
+    'appeal.form.initialEvidenceDescription': 'Evidence description (optional)',
+    'appeal.form.initialEvidenceUrls': 'Evidence links (optional)',
     'appeal.validation.required': 'Please fill in @field.',
     'appeal.validation.reasonTooLong':
         'Appeal reason cannot exceed 500 characters.',
@@ -1290,6 +1411,15 @@ class AppTranslations extends Translations {
     'appeal.detail.acceptanceStatus': 'Acceptance status',
     'appeal.detail.status': 'Processing status',
     'appeal.detail.result': 'Processing result',
+    'appeal.detail.reviewHistory': 'Review history',
+    'appeal.detail.reviewEmpty': 'No review history yet.',
+    'appeal.detail.reviewCount': '@count review records',
+    'appeal.detail.reviewReviewer': 'Reviewer',
+    'appeal.detail.reviewReviewerDept': 'Reviewer department',
+    'appeal.detail.reviewLevel': 'Review level',
+    'appeal.detail.reviewResult': 'Review result',
+    'appeal.detail.reviewOpinion': 'Review opinion',
+    'appeal.detail.reviewTime': 'Review time',
     'appeal.form.supplementTitle': 'Update appeal materials',
     'appeal.form.supplementHint':
         'Adjust your appeal reason or supplementary evidence before sending it back for review.',
@@ -1341,13 +1471,77 @@ class AppTranslations extends Translations {
     'appealAdmin.search.appellantName': 'Search appellant name',
     'appealAdmin.search.processStatus': 'Search processing status',
     'appealAdmin.search.timeRangeSelected': 'Search time range (selected)',
+    'appealAdmin.view.appeals': 'Appeals',
+    'appealAdmin.view.reviews': 'Reviews',
+    'appealAdmin.review.search.reviewer': 'Search reviewer',
+    'appealAdmin.review.search.reviewerDept': 'Search reviewer department',
+    'appealAdmin.review.search.timeRangeSelected':
+        'Search review time range (selected)',
     'appealAdmin.filter.byAppealReason': 'By appeal reason',
     'appealAdmin.filter.byAppellantName': 'By appellant name',
     'appealAdmin.filter.byProcessStatus': 'By processing status',
     'appealAdmin.filter.byTimeRange': 'By time range',
+    'appealAdmin.review.filter.byReviewer': 'By reviewer',
+    'appealAdmin.review.filter.byReviewerDept': 'By reviewer department',
+    'appealAdmin.review.filter.byTimeRange': 'By review time range',
     'appealAdmin.card.reason': 'Reason: @value',
     'appealAdmin.card.status': 'Status: @value',
     'appealAdmin.card.time': 'Time: @value',
+    'appealAdmin.review.empty': 'No appeal review records yet.',
+    'appealAdmin.review.empty.filtered':
+        'No appeal review records match the current filter.',
+    'appealAdmin.review.loadFailed': 'Failed to load appeal reviews: @error',
+    'appealAdmin.review.card.title': 'Appeal #@appealId · @level review',
+    'appealAdmin.review.card.result': 'Result: @value',
+    'appealAdmin.review.card.reviewer': 'Reviewer: @value',
+    'appealAdmin.review.card.reviewerDept': 'Department: @value',
+    'appealAdmin.review.card.time': 'Reviewed at: @value',
+    'appealAdmin.review.card.opinion': 'Opinion: @value',
+    'appealAdmin.review.level.primary': 'Primary',
+    'appealAdmin.review.level.secondary': 'Secondary',
+    'appealAdmin.review.level.final': 'Final',
+    'appealAdmin.review.result.approved': 'Approved',
+    'appealAdmin.review.result.rejected': 'Rejected',
+    'appealAdmin.review.result.needResubmit': 'Need resubmit',
+    'appealAdmin.review.result.transfer': 'Transfer',
+    'appealAdmin.review.workbench.title': 'Review workbench',
+    'appealAdmin.review.workbench.subtitle':
+        'Track review workload, open queues, and today\'s output from one panel.',
+    'appealAdmin.review.workbench.loadFailed':
+        'Failed to load review workbench: @error',
+    'appealAdmin.review.metric.primary': 'Primary reviews',
+    'appealAdmin.review.metric.primary.helper':
+        'Total records currently in the primary review layer.',
+    'appealAdmin.review.metric.secondary': 'Secondary reviews',
+    'appealAdmin.review.metric.secondary.helper':
+        'Total records currently in the secondary review layer.',
+    'appealAdmin.review.metric.final': 'Final reviews',
+    'appealAdmin.review.metric.final.helper':
+        'Total records currently in the final review layer.',
+    'appealAdmin.review.metric.today': 'Reviewed today',
+    'appealAdmin.review.metric.today.helper':
+        'Reviews completed today in the current loaded dataset.',
+    'appealAdmin.review.metric.pendingStart': 'Awaiting review start',
+    'appealAdmin.review.metric.pendingStart.helper':
+        'Accepted appeals that still have not entered formal review.',
+    'appealAdmin.review.metric.inProgress': 'Under review',
+    'appealAdmin.review.metric.inProgress.helper':
+        'Appeals currently sitting in the active review stage.',
+    'appealAdmin.review.metric.visibleTotal': 'Loaded review records: @count',
+    'appealAdmin.review.metric.visibleApproved':
+        'Approved in current list: @count',
+    'appealAdmin.review.metric.visibleRejected':
+        'Rejected in current list: @count',
+    'appealAdmin.review.quick.today': 'Today\'s reviews',
+    'appealAdmin.review.quick.pendingStart': 'Awaiting start appeals',
+    'appealAdmin.review.quick.inProgress': 'Appeals under review',
+    'appealAdmin.review.quick.refreshWorkbench': 'Refresh workbench',
+    'appealAdmin.review.queue.title': 'Priority queue',
+    'appealAdmin.review.queue.empty':
+        'No accepted appeals are waiting for review right now.',
+    'appealAdmin.review.queue.reason': 'Reason: @value',
+    'appealAdmin.review.queue.status': 'Status: @value',
+    'appealAdmin.review.queue.time': 'Latest node time: @value',
     'appealAdmin.result.approved': 'Appeal approved',
     'appealAdmin.success.approved': 'The appeal has been approved.',
     'appealAdmin.success.acceptanceRejected':
@@ -1747,6 +1941,16 @@ class AppTranslations extends Translations {
     'news.latest.expert.title': 'Follow traffic regulations',
     'news.latest.expert.body':
         'Experts urge drivers to follow the new rules strictly to avoid unnecessary fines and safety risks.',
+    'news.latest.heroLabel': 'Live headline',
+    'news.latest.section.liveFeed': 'Live traffic feed',
+    'news.latest.loading': 'Loading live traffic news...',
+    'news.latest.emptyRealtime': 'No live traffic news is available right now.',
+    'news.latest.loadFailed': 'Failed to load live traffic news: @error',
+    'news.latest.action.retry': 'Retry',
+    'news.latest.action.refresh': 'Refresh live news',
+    'news.latest.field.source': 'Source: @value',
+    'news.latest.field.publishedAt': 'Published: @value',
+    'news.latest.source.unknown': 'Unknown source',
     'scan.pageTitle': 'QR code generator',
     'scan.dialog.fineQr': 'Fine QR code',
     'scan.dialog.genericQr': 'QR code',
@@ -1768,15 +1972,15 @@ class AppTranslations extends Translations {
         'What materials are required for a traffic violation appeal?',
     'questions.user.item4': 'When does my fine expire?',
     'questions.user.item5': 'How do I handle a speeding violation?',
-    'questions.manager.title': 'Predefined admin questions',
-    'questions.manager.item1':
+    'questions.admin.title': 'Predefined admin questions',
+    'questions.admin.item1':
         'How do I view all unprocessed traffic violation records?',
-    'questions.manager.item2':
+    'questions.admin.item2':
         'How do I calculate the total fine payments for this month?',
-    'questions.manager.item3':
+    'questions.admin.item3':
         'Which traffic violation appeals are pending review?',
-    'questions.manager.item4': 'How do I bulk update fine due statuses?',
-    'questions.manager.item5':
+    'questions.admin.item4': 'How do I bulk update fine due statuses?',
+    'questions.admin.item5':
         'What is the handling process for speeding violations?',
     'validation.required': 'This field is required.',
     'lookup.taskType.todo': 'To-do',
@@ -2276,30 +2480,30 @@ class AppTranslations extends Translations {
         '\u52a0\u8f7d\u53cd\u9988\u8bf7\u6c42\u5931\u8d25\uff1a@error',
     'feedback.error.updateFailed':
         '\u66f4\u65b0\u53cd\u9988\u5931\u8d25\uff1a@error',
-    'manager.personal.title': '\u7ba1\u7406\u5458\u8d44\u6599',
-    'manager.personal.logoutTooltip': '\u9000\u51fa\u767b\u5f55',
-    'manager.personal.error.userFromToken':
+    'admin.personal.title': '\u7ba1\u7406\u5458\u8d44\u6599',
+    'admin.personal.logoutTooltip': '\u9000\u51fa\u767b\u5f55',
+    'admin.personal.error.userFromToken':
         '\u672a\u80fd\u4ece\u51ed\u8bc1\u4e2d\u89e3\u6790\u5f53\u524d\u7528\u6237\u3002',
-    'manager.personal.error.jwtMissing':
+    'admin.personal.error.jwtMissing':
         '\u672a\u5728\u5b58\u50a8\u4e2d\u627e\u5230 JWT \u51ed\u8bc1\u3002',
-    'manager.personal.field.username': '\u7528\u6237\u540d',
-    'manager.personal.field.emailAddress': '\u90ae\u7bb1\u5730\u5740',
-    'manager.personal.field.remarks': '\u5907\u6ce8',
-    'manager.personal.status.active': '\u542f\u7528',
-    'manager.personal.status.inactive': '\u7981\u7528',
-    'manager.personal.logoutConfirmTitle': '\u786e\u8ba4\u9000\u51fa',
-    'manager.personal.logoutConfirmBody':
+    'admin.personal.field.username': '\u7528\u6237\u540d',
+    'admin.personal.field.emailAddress': '\u90ae\u7bb1\u5730\u5740',
+    'admin.personal.field.remarks': '\u5907\u6ce8',
+    'admin.personal.status.active': '\u542f\u7528',
+    'admin.personal.status.inactive': '\u7981\u7528',
+    'admin.personal.logoutConfirmTitle': '\u786e\u8ba4\u9000\u51fa',
+    'admin.personal.logoutConfirmBody':
         '\u60a8\u786e\u5b9a\u8981\u9000\u51fa\u767b\u5f55\u5417\uff1f',
-    'manager.personal.noData': '\u65e0\u6570\u636e',
-    'manager.business.title': '\u4e1a\u52a1\u5904\u7406\u83dc\u5355',
-    'manager.business.appeal': '\u7533\u8bc9\u7ba1\u7406',
-    'manager.business.deduction': '\u6263\u5206\u7ba1\u7406',
-    'manager.business.driver': '\u53f8\u673a\u7ba1\u7406',
-    'manager.business.fine': '\u7f5a\u6b3e\u7ba1\u7406',
-    'manager.business.vehicle': '\u8f66\u8f86\u7ba1\u7406',
-    'manager.business.offense': '\u8fdd\u6cd5\u884c\u4e3a',
-    'manager.business.enter': '\u70b9\u51fb\u8fdb\u5165',
-    'manager.logs.title': '\u65e5\u5fd7\u7ba1\u7406\u83dc\u5355',
+    'admin.personal.noData': '\u65e0\u6570\u636e',
+    'admin.business.title': '\u4e1a\u52a1\u5904\u7406\u83dc\u5355',
+    'admin.business.appeal': '\u7533\u8bc9\u7ba1\u7406',
+    'admin.business.deduction': '\u6263\u5206\u7ba1\u7406',
+    'admin.business.driver': '\u53f8\u673a\u7ba1\u7406',
+    'admin.business.fine': '\u7f5a\u6b3e\u7ba1\u7406',
+    'admin.business.vehicle': '\u8f66\u8f86\u7ba1\u7406',
+    'admin.business.offense': '\u8fdd\u6cd5\u884c\u4e3a',
+    'admin.business.enter': '\u70b9\u51fb\u8fdb\u5165',
+    'admin.logs.title': '\u65e5\u5fd7\u7ba1\u7406\u83dc\u5355',
     'driverAdmin.page.listTitle': '司机列表',
     'driverAdmin.page.addTitle': '添加司机',
     'driverAdmin.page.editTitle': '编辑司机',
@@ -2653,10 +2857,30 @@ class AppTranslations extends Translations {
     'backupRestore.page.title': '\u5907\u4efd\u4e0e\u6062\u590d\u7ba1\u7406',
     'backupRestore.detailPage.title': '\u5907\u4efd\u8be6\u60c5',
     'backupRestore.dialog.editTitle': '\u7f16\u8f91\u5907\u4efd',
+    'backupRestore.search.filterType': '\u68c0\u7d22\u6761\u4ef6',
+    'backupRestore.search.type.all': '\u5168\u90e8\u8bb0\u5f55',
+    'backupRestore.search.type.fileName': '\u6587\u4ef6\u540d',
+    'backupRestore.search.type.backupTime': '\u5907\u4efd\u65f6\u95f4',
+    'backupRestore.search.type.restoreTime': '\u6062\u590d\u65f6\u95f4',
+    'backupRestore.search.type.backupType': '\u5907\u4efd\u7c7b\u578b',
+    'backupRestore.search.type.handler': '\u5907\u4efd\u6267\u884c\u4eba',
+    'backupRestore.search.type.status': '\u4efb\u52a1\u72b6\u6001',
+    'backupRestore.search.type.restoreStatus': '\u6062\u590d\u72b6\u6001',
     'backupRestore.search.byFileName':
         '\u6309\u6587\u4ef6\u540d\u641c\u7d22\u5907\u4efd',
     'backupRestore.search.byBackupTime':
         '\u6309\u5907\u4efd\u65f6\u95f4\u641c\u7d22\u5907\u4efd',
+    'backupRestore.search.byRestoreTime':
+        '\u6309\u6062\u590d\u65f6\u95f4\u641c\u7d22\u5907\u4efd',
+    'backupRestore.search.byType':
+        '\u6309\u5907\u4efd\u7c7b\u578b\u641c\u7d22\u5907\u4efd',
+    'backupRestore.search.byHandler':
+        '\u6309\u5907\u4efd\u6267\u884c\u4eba\u641c\u7d22\u5907\u4efd',
+    'backupRestore.search.byStatus':
+        '\u6309\u4efb\u52a1\u72b6\u6001\u7b5b\u9009',
+    'backupRestore.search.byRestoreStatus':
+        '\u6309\u6062\u590d\u72b6\u6001\u7b5b\u9009',
+    'backupRestore.search.allStatuses': '\u5168\u90e8\u72b6\u6001',
     'backupRestore.empty.noRecords':
         '\u6ca1\u6709\u627e\u5230\u5907\u4efd\u8bb0\u5f55',
     'backupRestore.error.notLoggedIn':
@@ -2691,21 +2915,38 @@ class AppTranslations extends Translations {
     'backupRestore.action.edit': '\u7f16\u8f91\u6b64\u5907\u4efd',
     'backupRestore.action.delete': '\u5220\u9664\u6b64\u5907\u4efd',
     'backupRestore.action.viewDetails': '\u67e5\u770b\u8be6\u60c5',
+    'backupRestore.action.resetFilters': '\u91cd\u7f6e\u7b5b\u9009',
     'backupRestore.field.backupId': '\u5907\u4efd ID',
+    'backupRestore.field.backupType': '\u5907\u4efd\u7c7b\u578b',
     'backupRestore.field.fileName': '\u6587\u4ef6\u540d',
     'backupRestore.field.backupTime': '\u5907\u4efd\u65f6\u95f4',
+    'backupRestore.field.backupHandler': '\u5907\u4efd\u6267\u884c\u4eba',
     'backupRestore.field.restoreTime': '\u6062\u590d\u65f6\u95f4',
     'backupRestore.field.restoreStatus': '\u6062\u590d\u72b6\u6001',
+    'backupRestore.field.restoreHandler': '\u6062\u590d\u6267\u884c\u4eba',
+    'backupRestore.field.status': '\u4efb\u52a1\u72b6\u6001',
     'backupRestore.field.remarks': '\u5907\u6ce8',
     'backupRestore.field.idempotencyKey': '\u5e42\u7b49\u952e',
+    'backupRestore.detail.backupType': '\u5907\u4efd\u7c7b\u578b\uff1a@value',
     'backupRestore.detail.fileName': '\u6587\u4ef6\u540d\uff1a@value',
     'backupRestore.detail.backupTime': '\u5907\u4efd\u65f6\u95f4\uff1a@value',
+    'backupRestore.detail.backupHandler':
+        '\u5907\u4efd\u6267\u884c\u4eba\uff1a@value',
     'backupRestore.detail.restoreTime': '\u6062\u590d\u65f6\u95f4\uff1a@value',
     'backupRestore.detail.restoreStatus':
         '\u6062\u590d\u72b6\u6001\uff1a@value',
+    'backupRestore.detail.restoreHandler':
+        '\u6062\u590d\u6267\u884c\u4eba\uff1a@value',
+    'backupRestore.detail.status': '\u4efb\u52a1\u72b6\u6001\uff1a@value',
     'backupRestore.status.pending': '\u5f85\u5904\u7406',
     'backupRestore.status.restored': '\u5df2\u6062\u590d',
+    'backupRestore.status.failed': '\u5931\u8d25',
     'backupRestore.status.notRestored': '\u672a\u6062\u590d',
+    'backupRestore.type.full': '\u5168\u91cf\u5907\u4efd',
+    'backupRestore.type.incremental': '\u589e\u91cf\u5907\u4efd',
+    'backupRestore.type.differential': '\u5dee\u5f02\u5907\u4efd',
+    'backupRestore.type.manual': '\u624b\u52a8\u5907\u4efd',
+    'backupRestore.type.auto': '\u81ea\u52a8\u5907\u4efd',
     'backupRestore.value.manualCreatedRemarks':
         '\u624b\u52a8\u521b\u5efa\u7684\u5907\u4efd',
     'progress.pageTitle': '\u8fdb\u5ea6\u6d88\u606f',
@@ -3036,14 +3277,116 @@ class AppTranslations extends Translations {
     'fine.paymentHistory.channel': '\u652f\u4ed8\u6e20\u9053',
     'fine.paymentHistory.paymentNumber': '\u652f\u4ed8\u5355\u53f7',
     'fine.paymentHistory.transactionId': '\u4ea4\u6613\u6d41\u6c34\u53f7',
+    'fine.paymentHistory.receiptNumber': '\u6536\u636e\u7f16\u53f7',
+    'fine.paymentHistory.receiptUrl': '\u652f\u4ed8\u51ed\u8bc1\u94fe\u63a5',
+    'fine.paymentHistory.payerName': '\u4ed8\u6b3e\u4eba\u59d3\u540d',
+    'fine.paymentHistory.payerIdCard':
+        '\u4ed8\u6b3e\u4eba\u8eab\u4efd\u8bc1\u53f7',
+    'fine.paymentHistory.payerContact':
+        '\u4ed8\u6b3e\u4eba\u8054\u7cfb\u65b9\u5f0f',
+    'fine.paymentHistory.bankName': '\u94f6\u884c\u540d\u79f0',
+    'fine.paymentHistory.bankAccount': '\u94f6\u884c\u8d26\u53f7',
     'fine.paymentHistory.refund': '\u9000\u6b3e\u4fe1\u606f',
     'fine.paymentHistory.refundValue': '\$@amount\uff0c\u65f6\u95f4\uff1a@time',
+    'fine.paymentHistory.missingProofHint':
+        '\u8be5\u6761\u81ea\u52a9\u652f\u4ed8\u5df2\u786e\u8ba4\uff0c\u4f46\u672a\u4e0a\u4f20\u652f\u4ed8\u51ed\u8bc1\u94fe\u63a5\uff0c\u8d22\u52a1\u9700\u4eba\u5de5\u590d\u6838\u3002',
+    'fine.reviewQueue.title': '\u5f85\u590d\u6838\u652f\u4ed8',
+    'fine.reviewQueue.empty':
+        '\u5f53\u524d\u6ca1\u6709\u5f85\u8d22\u52a1\u590d\u6838\u7684\u652f\u4ed8\u4efb\u52a1\u3002',
+    'fine.reviewQueue.loadFailed':
+        '\u52a0\u8f7d\u5f85\u590d\u6838\u652f\u4ed8\u4efb\u52a1\u5931\u8d25\uff1a@error',
+    'fine.reviewQueue.openFine': '\u6253\u5f00\u7f5a\u5355',
+    'fine.reviewQueue.openFailed':
+        '\u6253\u5f00\u5173\u8054\u7f5a\u5355\u5931\u8d25\uff1a@error',
+    'fine.reviewQueue.recordSubtitle':
+        '\u7f5a\u5355 #@fineId \u00b7 @status \u00b7 @channel',
+    'fine.reviewQueue.selectionHint': '\u5df2\u9009 @count \u6761',
+    'fine.reviewQueue.selectAll': '\u5168\u9009',
+    'fine.reviewQueue.clearSelection': '\u6e05\u7a7a\u9009\u4e2d',
+    'fine.reviewQueue.batchNeedProof':
+        '\u6279\u91cf\u8981\u6c42\u8865\u51ed\u8bc1',
+    'fine.reviewQueue.batchNeedProofSuccess':
+        '\u5df2\u6279\u91cf\u6807\u8bb0 @count \u6761\u652f\u4ed8\u5f85\u590d\u6838\u4efb\u52a1\u9700\u8865\u5145\u51ed\u8bc1\u3002',
+    'fine.reviewQueue.batchNeedProofFailed':
+        '\u6279\u91cf\u8981\u6c42\u8865\u5145\u51ed\u8bc1\u5931\u8d25\uff1a@error',
+    'fine.reviewQueue.batchApprove':
+        '\u6279\u91cf\u6807\u8bb0\u5df2\u6838\u9a8c',
+    'fine.reviewQueue.batchApproveSuccess':
+        '\u5df2\u6279\u91cf\u6807\u8bb0 @count \u6761\u652f\u4ed8\u5f85\u590d\u6838\u4efb\u52a1\u4e3a\u5df2\u6838\u9a8c\u3002',
+    'fine.reviewQueue.batchApproveFailed':
+        '\u6279\u91cf\u6807\u8bb0\u5f85\u590d\u6838\u652f\u4ed8\u5931\u8d25\uff1a@error',
+    'fine.reviewQueue.filter.all': '\u5168\u90e8',
+    'fine.reviewQueue.filter.overdue': '\u8d85\u65f6',
+    'fine.reviewQueue.filter.missingProof': '\u7f3a\u5c11\u51ed\u8bc1',
+    'fine.reviewQueue.filter.needProof': '\u9700\u518d\u6b21\u8865\u8bc1',
+    'fine.reviewQueue.sort.pending':
+        '\u6392\u5e8f\uff1a\u6700\u65b0\u5f85\u5904\u7406',
+    'fine.reviewQueue.sort.amount':
+        '\u6392\u5e8f\uff1a\u91d1\u989d\u4ece\u9ad8\u5230\u4f4e',
+    'fine.reviewQueue.filteredEmpty':
+        '\u5f53\u524d\u7b5b\u9009\u6761\u4ef6\u4e0b\u6682\u65e0\u5f85\u590d\u6838\u652f\u4ed8\u4efb\u52a1\u3002',
+    'fine.reviewQueue.overdueBadge': '\u8d85\u65f6',
+    'fine.reviewQueue.pendingSince': '\u5df2\u5f85\u5904\u7406 @time',
+    'fine.reviewQueue.pendingHours': '@hours \u5c0f\u65f6',
+    'fine.reviewQueue.pendingDays': '@days \u5929',
+    'fine.paymentReview.latest': '\u6700\u65b0\u8d22\u52a1\u590d\u6838',
+    'fine.paymentReview.result': '\u590d\u6838\u7ed3\u679c',
+    'fine.paymentReview.time': '\u590d\u6838\u65f6\u95f4',
+    'fine.paymentReview.reviewer': '\u590d\u6838\u4eba',
+    'fine.paymentReview.opinion': '\u590d\u6838\u8bf4\u660e',
+    'fine.paymentReview.result.approved': '\u5df2\u6838\u9a8c',
+    'fine.paymentReview.result.needProof': '\u9700\u8865\u5145\u51ed\u8bc1',
+    'fine.paymentReview.action.approve': '\u6807\u8bb0\u5df2\u6838\u9a8c',
+    'fine.paymentReview.action.needProof': '\u8981\u6c42\u8865\u51ed\u8bc1',
+    'fine.paymentReview.dialog.needProofTitle':
+        '\u8981\u6c42\u8865\u5145\u51ed\u8bc1',
+    'fine.paymentReview.dialog.needProofHint':
+        '\u8bf7\u544a\u77e5\u7f34\u6b3e\u4eba\u8fd8\u9700\u8865\u4e0a\u54ea\u4e9b\u51ed\u8bc1\uff0c\u4f9b\u8d22\u52a1\u590d\u6838\u3002',
+    'fine.paymentReview.validation.opinionRequired':
+        '\u63d0\u4ea4\u524d\u8bf7\u5148\u586b\u5199\u8865\u5145\u51ed\u8bc1\u8981\u6c42\u3002',
+    'fine.paymentReview.success.approved':
+        '\u5df2\u6807\u8bb0\u4e3a\u8d22\u52a1\u5df2\u6838\u9a8c\u3002',
+    'fine.paymentReview.success.needProof':
+        '\u5df2\u6807\u8bb0\u4e3a\u9700\u8865\u5145\u51ed\u8bc1\u3002',
+    'fine.paymentReview.failed':
+        '\u63d0\u4ea4\u8d22\u52a1\u590d\u6838\u5931\u8d25\uff1a@error',
+    'fine.payment.action.uploadProof': '\u8865\u4f20\u652f\u4ed8\u51ed\u8bc1',
+    'fine.payment.proofDialog.title': '\u4e0a\u4f20\u652f\u4ed8\u51ed\u8bc1',
+    'fine.payment.proofDialog.hint':
+        '\u8bf7\u7c98\u8d34\u8fd9\u7b14\u652f\u4ed8\u7684\u6700\u65b0\u6536\u636e\u6216\u51ed\u8bc1\u94fe\u63a5\uff0c\u4ee5\u4fbf\u8d22\u52a1\u7ee7\u7eed\u590d\u6838\u3002',
+    'fine.payment.proof.validation.receiptUrlRequired':
+        '\u63d0\u4ea4\u524d\u8bf7\u5148\u586b\u5199\u652f\u4ed8\u51ed\u8bc1\u94fe\u63a5\u3002',
+    'fine.payment.proof.success':
+        '\u652f\u4ed8\u51ed\u8bc1\u5df2\u66f4\u65b0\u3002',
+    'fine.payment.proof.failed':
+        '\u66f4\u65b0\u652f\u4ed8\u51ed\u8bc1\u5931\u8d25\uff1a@error',
     'fine.qr.alipayHint':
         '\u8bf7\u4f7f\u7528\u652f\u4ed8\u5b9d\u626b\u63cf\u4e0b\u65b9\u4e8c\u7ef4\u7801\u5b8c\u6210\u652f\u4ed8',
     'fine.action.close': '\u5173\u95ed',
     'fine.action.payNow': '\u7acb\u5373\u7f34\u8d39 (\$@amount)',
     'fine.payment.unavailable':
         '\u5f53\u524d\u7f5a\u6b3e\u6682\u65f6\u65e0\u6cd5\u652f\u4ed8',
+    'fine.payment.orderCreated':
+        '\u5df2\u751f\u6210\u5f85\u786e\u8ba4\u652f\u4ed8\u8ba2\u5355\uff1a\$@amount\uff0c\u5b8c\u6210\u4ed8\u6b3e\u540e\u8bf7\u518d\u786e\u8ba4',
+    'fine.payment.confirmAction': '\u786e\u8ba4\u5df2\u652f\u4ed8',
+    'fine.payment.confirmSuccess':
+        '\u652f\u4ed8\u5df2\u786e\u8ba4\uff1a\$@amount',
+    'fine.payment.confirmFailed':
+        '\u786e\u8ba4\u652f\u4ed8\u5931\u8d25\uff1a@error',
+    'fine.payment.confirmDialog.title': '\u786e\u8ba4\u652f\u4ed8',
+    'fine.payment.confirmDialog.hint':
+        '\u8bf7\u586b\u5199\u672c\u6b21\u4ed8\u6b3e\u7684\u771f\u5b9e\u4ea4\u6613\u6d41\u6c34\u53f7\uff0c\u4e5f\u53ef\u4ee5\u8865\u5145\u652f\u4ed8\u51ed\u8bc1\u94fe\u63a5\u4f9b\u540e\u7eed\u6838\u5bf9',
+    'fine.payment.form.transactionId': '\u4ea4\u6613\u6d41\u6c34\u53f7 *',
+    'fine.payment.form.receiptUrl':
+        '\u652f\u4ed8\u51ed\u8bc1\u94fe\u63a5\uff08\u53ef\u9009\uff09',
+    'fine.payment.validation.transactionIdRequired':
+        '\u786e\u8ba4\u652f\u4ed8\u524d\uff0c\u8bf7\u5148\u586b\u5199\u4ea4\u6613\u6d41\u6c34\u53f7',
+    'fine.payment.pendingHint':
+        '\u8be5\u652f\u4ed8\u8ba2\u5355\u6b63\u5728\u7b49\u5f85\u786e\u8ba4\uff0c\u8bf7\u5148\u5b8c\u6210\u4ed8\u6b3e\uff0c\u518d\u5728\u6b64\u786e\u8ba4',
+    'fine.payment.expiredHint':
+        '\u8be5\u5f85\u786e\u8ba4\u652f\u4ed8\u8ba2\u5355\u5df2\u5931\u6548\uff0c\u5982\u4ecd\u9700\u7f34\u8d39\uff0c\u53ef\u91cd\u65b0\u521b\u5efa',
+    'fine.payment.pendingExistsInline':
+        '\u8be5\u7f5a\u6b3e\u5df2\u6709\u4e00\u7b14\u5f85\u786e\u8ba4\u7684\u652f\u4ed8\u8ba2\u5355\uff0c\u8bf7\u5148\u5b8c\u6210\u786e\u8ba4\u518d\u521b\u5efa\u65b0\u8ba2\u5355',
     'fine.payment.success':
         '\u652f\u4ed8\u8bb0\u5f55\u5df2\u751f\u6210: \$@amount',
     'fine.payment.failed':
@@ -3214,6 +3557,8 @@ class AppTranslations extends Translations {
     'appeal.error.submitFailed': '\u7533\u8bc9\u63d0\u4ea4\u5931\u8d25: @error',
     'appeal.error.noOffenseToSubmit':
         '\u60a8\u5f53\u524d\u6ca1\u6709\u8fdd\u6cd5\u8bb0\u5f55\uff0c\u65e0\u6cd5\u63d0\u4ea4\u7533\u8bc9',
+    'appeal.error.completeProfileBeforeSubmit':
+        '\u63d0\u4ea4\u7533\u8bc9\u524d\uff0c\u8bf7\u5148\u5728\u4e2a\u4eba\u8d44\u6599\u4e2d\u8865\u5168\u59d3\u540d\u3001\u8eab\u4efd\u8bc1\u53f7\u7801\u548c\u8054\u7cfb\u7535\u8bdd\u3002',
     'appeal.dialog.submitTitle': '\u63d0\u4ea4\u7533\u8bc9',
     'appeal.form.offense': '\u9009\u62e9\u8fdd\u6cd5\u8bb0\u5f55 *',
     'appeal.form.offenseOption': 'ID: @id - @type',
@@ -3223,7 +3568,13 @@ class AppTranslations extends Translations {
     'appeal.form.appellantName': '\u7533\u8bc9\u4eba\u59d3\u540d *',
     'appeal.form.idCard': '\u8eab\u4efd\u8bc1\u53f7\u7801 *',
     'appeal.form.contact': '\u8054\u7cfb\u7535\u8bdd *',
+    'appeal.form.identityFromProfile':
+        '\u8fd9\u4e9b\u4fe1\u606f\u5c06\u76f4\u63a5\u4f7f\u7528\u4f60\u5f53\u524d\u7684\u4e2a\u4eba\u6863\u6848\u3002',
     'appeal.form.reason': '\u7533\u8bc9\u539f\u56e0 *',
+    'appeal.form.initialEvidenceDescription':
+        '\u8bc1\u636e\u8bf4\u660e\uff08\u53ef\u9009\uff09',
+    'appeal.form.initialEvidenceUrls':
+        '\u8bc1\u636e\u94fe\u63a5\uff08\u53ef\u9009\uff09',
     'appeal.validation.required': '\u8bf7\u586b\u5199@field',
     'appeal.validation.reasonTooLong':
         '\u7533\u8bc9\u539f\u56e0\u4e0d\u80fd\u8d85\u8fc7500\u4e2a\u5b57\u7b26',
@@ -3264,6 +3615,15 @@ class AppTranslations extends Translations {
     'appeal.detail.acceptanceStatus': '\u53d7\u7406\u72b6\u6001',
     'appeal.detail.status': '\u5904\u7406\u72b6\u6001',
     'appeal.detail.result': '\u5904\u7406\u7ed3\u679c',
+    'appeal.detail.reviewHistory': '\u590d\u6838\u5386\u53f2',
+    'appeal.detail.reviewEmpty': '\u6682\u65e0\u590d\u6838\u8bb0\u5f55',
+    'appeal.detail.reviewCount': '\u5171 @count \u6761\u590d\u6838\u8bb0\u5f55',
+    'appeal.detail.reviewReviewer': '\u590d\u6838\u4eba',
+    'appeal.detail.reviewReviewerDept': '\u590d\u6838\u90e8\u95e8',
+    'appeal.detail.reviewLevel': '\u590d\u6838\u7ea7\u522b',
+    'appeal.detail.reviewResult': '\u590d\u6838\u7ed3\u679c',
+    'appeal.detail.reviewOpinion': '\u590d\u6838\u610f\u89c1',
+    'appeal.detail.reviewTime': '\u590d\u6838\u65f6\u95f4',
     'appeal.form.supplementTitle': '\u66f4\u65b0\u7533\u8bc9\u6750\u6599',
     'appeal.form.supplementHint':
         '\u5728\u9001\u56de\u53d7\u7406\u524d\uff0c\u53ef\u5148\u8865\u5145\u6216\u4fee\u6539\u7533\u8bc9\u539f\u56e0\u3001\u8bc1\u636e\u8bf4\u660e\u548c\u94fe\u63a5\u3002',
@@ -3321,14 +3681,89 @@ class AppTranslations extends Translations {
     'appealAdmin.search.processStatus': '\u641c\u7d22\u5904\u7406\u72b6\u6001',
     'appealAdmin.search.timeRangeSelected':
         '\u641c\u7d22\u65f6\u95f4\u8303\u56f4\uff08\u5df2\u9009\u62e9\uff09',
+    'appealAdmin.view.appeals': '\u7533\u8bc9\u8bb0\u5f55',
+    'appealAdmin.view.reviews': '\u590d\u6838\u8bb0\u5f55',
+    'appealAdmin.review.search.reviewer': '\u641c\u7d22\u590d\u6838\u4eba',
+    'appealAdmin.review.search.reviewerDept':
+        '\u641c\u7d22\u590d\u6838\u4eba\u90e8\u95e8',
+    'appealAdmin.review.search.timeRangeSelected':
+        '\u641c\u7d22\u590d\u6838\u65f6\u95f4\u8303\u56f4\uff08\u5df2\u9009\u62e9\uff09',
     'appealAdmin.filter.byAppealReason': '\u6309\u7533\u8bc9\u539f\u56e0',
     'appealAdmin.filter.byAppellantName':
         '\u6309\u7533\u8bc9\u4eba\u59d3\u540d',
     'appealAdmin.filter.byProcessStatus': '\u6309\u5904\u7406\u72b6\u6001',
     'appealAdmin.filter.byTimeRange': '\u6309\u65f6\u95f4\u8303\u56f4',
+    'appealAdmin.review.filter.byReviewer': '\u6309\u590d\u6838\u4eba',
+    'appealAdmin.review.filter.byReviewerDept':
+        '\u6309\u590d\u6838\u4eba\u90e8\u95e8',
+    'appealAdmin.review.filter.byTimeRange':
+        '\u6309\u590d\u6838\u65f6\u95f4\u8303\u56f4',
     'appealAdmin.card.reason': '\u539f\u56e0: @value',
     'appealAdmin.card.status': '\u72b6\u6001: @value',
     'appealAdmin.card.time': '\u65f6\u95f4: @value',
+    'appealAdmin.review.empty':
+        '\u6682\u65e0\u7533\u8bc9\u590d\u6838\u8bb0\u5f55',
+    'appealAdmin.review.empty.filtered':
+        '\u5f53\u524d\u7b5b\u9009\u6761\u4ef6\u4e0b\u65e0\u7533\u8bc9\u590d\u6838\u8bb0\u5f55',
+    'appealAdmin.review.loadFailed':
+        '\u52a0\u8f7d\u7533\u8bc9\u590d\u6838\u8bb0\u5f55\u5931\u8d25: @error',
+    'appealAdmin.review.card.title':
+        '\u7533\u8bc9 #@appealId \u00b7 @level\u590d\u6838',
+    'appealAdmin.review.card.result': '\u7ed3\u679c: @value',
+    'appealAdmin.review.card.reviewer': '\u590d\u6838\u4eba: @value',
+    'appealAdmin.review.card.reviewerDept': '\u90e8\u95e8: @value',
+    'appealAdmin.review.card.time': '\u590d\u6838\u65f6\u95f4: @value',
+    'appealAdmin.review.card.opinion': '\u610f\u89c1: @value',
+    'appealAdmin.review.level.primary': '\u521d\u5ba1',
+    'appealAdmin.review.level.secondary': '\u590d\u5ba1',
+    'appealAdmin.review.level.final': '\u7ec8\u5ba1',
+    'appealAdmin.review.result.approved': '\u901a\u8fc7',
+    'appealAdmin.review.result.rejected': '\u9a73\u56de',
+    'appealAdmin.review.result.needResubmit': '\u9700\u91cd\u65b0\u63d0\u4ea4',
+    'appealAdmin.review.result.transfer': '\u8f6c\u529e',
+    'appealAdmin.review.workbench.title': '\u590d\u6838\u5de5\u4f5c\u53f0',
+    'appealAdmin.review.workbench.subtitle':
+        '\u5728\u4e00\u4e2a\u9762\u677f\u4e2d\u7edf\u4e00\u67e5\u770b\u590d\u6838\u8d1f\u8f7d\u3001\u5f85\u529e\u961f\u5217\u548c\u5f53\u65e5\u4ea7\u51fa',
+    'appealAdmin.review.workbench.loadFailed':
+        '\u52a0\u8f7d\u590d\u6838\u5de5\u4f5c\u53f0\u5931\u8d25: @error',
+    'appealAdmin.review.metric.primary': '\u521d\u5ba1\u603b\u91cf',
+    'appealAdmin.review.metric.primary.helper':
+        '\u5f53\u524d\u5904\u4e8e\u521d\u5ba1\u5c42\u7684\u590d\u6838\u8bb0\u5f55\u603b\u6570',
+    'appealAdmin.review.metric.secondary': '\u590d\u5ba1\u603b\u91cf',
+    'appealAdmin.review.metric.secondary.helper':
+        '\u5f53\u524d\u5904\u4e8e\u590d\u5ba1\u5c42\u7684\u590d\u6838\u8bb0\u5f55\u603b\u6570',
+    'appealAdmin.review.metric.final': '\u7ec8\u5ba1\u603b\u91cf',
+    'appealAdmin.review.metric.final.helper':
+        '\u5f53\u524d\u5904\u4e8e\u7ec8\u5ba1\u5c42\u7684\u590d\u6838\u8bb0\u5f55\u603b\u6570',
+    'appealAdmin.review.metric.today': '\u4eca\u65e5\u5df2\u590d\u6838',
+    'appealAdmin.review.metric.today.helper':
+        '\u5f53\u524d\u5df2\u52a0\u8f7d\u6570\u636e\u96c6\u4e2d\u4eca\u65e5\u5b8c\u6210\u7684\u590d\u6838\u6570',
+    'appealAdmin.review.metric.pendingStart': '\u5f85\u542f\u52a8\u590d\u6838',
+    'appealAdmin.review.metric.pendingStart.helper':
+        '\u5df2\u53d7\u7406\u4f46\u5c1a\u672a\u8fdb\u5165\u6b63\u5f0f\u590d\u6838\u7684\u7533\u8bc9',
+    'appealAdmin.review.metric.inProgress': '\u590d\u6838\u4e2d\u7533\u8bc9',
+    'appealAdmin.review.metric.inProgress.helper':
+        '\u5f53\u524d\u5904\u4e8e\u590d\u6838\u73af\u8282\u7684\u7533\u8bc9\u6570',
+    'appealAdmin.review.metric.visibleTotal':
+        '\u5df2\u52a0\u8f7d\u590d\u6838\u8bb0\u5f55: @count',
+    'appealAdmin.review.metric.visibleApproved':
+        '\u5f53\u524d\u5217\u8868\u901a\u8fc7: @count',
+    'appealAdmin.review.metric.visibleRejected':
+        '\u5f53\u524d\u5217\u8868\u9a73\u56de: @count',
+    'appealAdmin.review.quick.today': '\u67e5\u770b\u4eca\u65e5\u590d\u6838',
+    'appealAdmin.review.quick.pendingStart':
+        '\u67e5\u770b\u5f85\u542f\u52a8\u7533\u8bc9',
+    'appealAdmin.review.quick.inProgress':
+        '\u67e5\u770b\u590d\u6838\u4e2d\u7533\u8bc9',
+    'appealAdmin.review.quick.refreshWorkbench':
+        '\u5237\u65b0\u5de5\u4f5c\u53f0',
+    'appealAdmin.review.queue.title': '\u4f18\u5148\u5f85\u529e\u961f\u5217',
+    'appealAdmin.review.queue.empty':
+        '\u5f53\u524d\u6ca1\u6709\u5df2\u53d7\u7406\u4e14\u7b49\u5f85\u590d\u6838\u7684\u7533\u8bc9',
+    'appealAdmin.review.queue.reason': '\u7533\u8bc9\u539f\u56e0: @value',
+    'appealAdmin.review.queue.status': '\u5f53\u524d\u8282\u70b9: @value',
+    'appealAdmin.review.queue.time':
+        '\u6700\u65b0\u8282\u70b9\u65f6\u95f4: @value',
     'appealAdmin.result.approved': '\u7533\u8bc9\u5df2\u901a\u8fc7',
     'appealAdmin.success.approved':
         '\u7533\u8bc9\u5df2\u5ba1\u6279\u901a\u8fc7',
@@ -3753,11 +4188,21 @@ class AppTranslations extends Translations {
     'questions.user.item3': '交通违法申诉需要哪些材料？',
     'questions.user.item4': '我的罚款什么时候到期？',
     'questions.user.item5': '如何处理超速违章？',
-    'questions.manager.title': '管理员预定义问题',
-    'questions.manager.item1': '如何查看所有未处理的交通违法记录？',
-    'questions.manager.item2': '如何统计本月罚款缴纳总额？',
-    'questions.manager.item3': '有哪些待审核的交通违法申诉？',
-    'questions.manager.item4': '如何批量更新罚款到期状态？',
-    'questions.manager.item5': '超速违章的处理流程是什么？',
+    'questions.admin.title': '管理员预定义问题',
+    'questions.admin.item1': '如何查看所有未处理的交通违法记录？',
+    'questions.admin.item2': '如何统计本月罚款缴纳总额？',
+    'questions.admin.item3': '有哪些待审核的交通违法申诉？',
+    'questions.admin.item4': '如何批量更新罚款到期状态？',
+    'questions.admin.item5': '超速违章的处理流程是什么？',
+    'news.latest.heroLabel': '实时头条',
+    'news.latest.section.liveFeed': '实时交通新闻流',
+    'news.latest.loading': '正在加载实时交通新闻...',
+    'news.latest.emptyRealtime': '当前暂无可展示的实时交通新闻',
+    'news.latest.loadFailed': '加载实时交通新闻失败: @error',
+    'news.latest.action.retry': '重试',
+    'news.latest.action.refresh': '刷新实时新闻',
+    'news.latest.field.source': '来源: @value',
+    'news.latest.field.publishedAt': '发布时间: @value',
+    'news.latest.source.unknown': '未知来源',
   };
 }

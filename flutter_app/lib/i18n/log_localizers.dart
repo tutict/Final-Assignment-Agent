@@ -69,6 +69,71 @@ bool shouldShowLoginLogReloginAction(String message) {
   ]);
 }
 
+String? validateLoginLogField(
+  String field, {
+  String? value,
+  bool required = false,
+}) {
+  final trimmedValue = value?.trim() ?? '';
+  String fieldLabel;
+  int? maxLength;
+  String? requiredKey;
+  String? tooLongKey;
+
+  switch (field) {
+    case 'username':
+      fieldLabel = 'loginLog.field.username'.tr;
+      maxLength = 100;
+      requiredKey = 'loginLog.validation.usernameRequired';
+      tooLongKey = 'loginLog.validation.usernameTooLong';
+      break;
+    case 'loginIp':
+      fieldLabel = 'loginLog.field.loginIp'.tr;
+      maxLength = 50;
+      requiredKey = 'loginLog.validation.loginIpRequired';
+      tooLongKey = 'loginLog.validation.loginIpTooLong';
+      break;
+    case 'loginResult':
+      fieldLabel = 'loginLog.field.loginResult'.tr;
+      maxLength = 50;
+      requiredKey = 'loginLog.validation.loginResultRequired';
+      tooLongKey = 'loginLog.validation.loginResultTooLong';
+      break;
+    case 'browserType':
+      fieldLabel = 'loginLog.field.browserType'.tr;
+      maxLength = 100;
+      tooLongKey = 'loginLog.validation.browserTypeTooLong';
+      break;
+    case 'osVersion':
+      fieldLabel = 'loginLog.field.osVersion'.tr;
+      maxLength = 100;
+      tooLongKey = 'loginLog.validation.osVersionTooLong';
+      break;
+    case 'remarks':
+      fieldLabel = 'loginLog.field.remarks'.tr;
+      maxLength = 500;
+      tooLongKey = 'loginLog.validation.remarksTooLong';
+      break;
+    default:
+      return null;
+  }
+
+  if (required && trimmedValue.isEmpty) {
+    return requiredKey != null
+        ? requiredKey.tr
+        : formatRequiredFieldValidation('loginLog.validation.required', fieldLabel);
+  }
+  if (trimmedValue.isEmpty) {
+    return null;
+  }
+
+  return validateMaxLength(
+    trimmedValue,
+    maxLength: maxLength,
+    key: tooLongKey,
+  );
+}
+
 String localizeOperationLogResult(
   String? result, {
   String emptyKey = 'common.unknown',
@@ -110,6 +175,63 @@ String operationLogSearchTypeLabel(String searchType) {
     default:
       return 'operationLog.search.timeRangeSelected'.tr;
   }
+}
+
+String? validateOperationLogField(
+  String field, {
+  String? value,
+  bool required = false,
+}) {
+  final trimmedValue = value?.trim() ?? '';
+  int? maxLength;
+  String? requiredKey;
+  String? tooLongKey;
+
+  switch (field) {
+    case 'userId':
+      requiredKey = 'operationLog.validation.userIdRequired';
+      if (required && trimmedValue.isEmpty) {
+        return requiredKey.tr;
+      }
+      if (trimmedValue.isEmpty) {
+        return null;
+      }
+      if (trimmedValue.length > 20) {
+        return 'operationLog.validation.userIdTooLong'.tr;
+      }
+      return int.tryParse(trimmedValue) == null
+          ? 'operationLog.validation.userIdNumeric'.tr
+          : null;
+    case 'operationContent':
+      maxLength = 500;
+      requiredKey = 'operationLog.validation.operationContentRequired';
+      tooLongKey = 'operationLog.validation.operationContentTooLong';
+      break;
+    case 'operationResult':
+      maxLength = 100;
+      requiredKey = 'operationLog.validation.operationResultRequired';
+      tooLongKey = 'operationLog.validation.operationResultTooLong';
+      break;
+    case 'remarks':
+      maxLength = 500;
+      tooLongKey = 'operationLog.validation.remarksTooLong';
+      break;
+    default:
+      return null;
+  }
+
+  if (required && trimmedValue.isEmpty) {
+    return requiredKey!.tr;
+  }
+  if (trimmedValue.isEmpty) {
+    return null;
+  }
+
+  return validateMaxLength(
+    trimmedValue,
+    maxLength: maxLength,
+    key: tooLongKey,
+  );
 }
 
 bool shouldShowOperationLogReloginAction(String message) {

@@ -35,22 +35,22 @@ class ThemePalette {
 
 class BasicThemeColors {
   static const light = ThemePalette(
-    seed: Color(0xFF1565C0),
-    scaffold: Color(0xFFF3F7FC),
+    seed: Color(0xFF0B4D6E),
+    scaffold: Color(0xFFF2F5F7),
     surface: Color(0xFFFFFFFF),
-    surfaceAlt: Color(0xFFE8F0FA),
-    surfaceTint: Color(0xFF90CAF9),
-    outline: Color(0xFFB3C3D9),
-    shadow: Color(0x1A0D233F),
+    surfaceAlt: Color(0xFFE4EBEF),
+    surfaceTint: Color(0xFFB7CFD8),
+    outline: Color(0xFFB8C6CC),
+    shadow: Color(0x1A0F1F2A),
   );
 
   static const dark = ThemePalette(
-    seed: Color(0xFF6CB6FF),
-    scaffold: Color(0xFF0B1421),
-    surface: Color(0xFF132033),
-    surfaceAlt: Color(0xFF1A2A40),
-    surfaceTint: Color(0xFF1F3C64),
-    outline: Color(0xFF3D5370),
+    seed: Color(0xFF59B7D9),
+    scaffold: Color(0xFF08131A),
+    surface: Color(0xFF0F1D24),
+    surfaceAlt: Color(0xFF162831),
+    surfaceTint: Color(0xFF1D3945),
+    outline: Color(0xFF40606B),
     shadow: Color(0x66000000),
   );
 }
@@ -115,24 +115,24 @@ class AppTheme {
   static TextTheme _textTheme(Color textColor, Color mutedTextColor) {
     return TextTheme(
       displayLarge: TextStyle(
-        fontSize: 38,
+        fontSize: 44,
         fontWeight: FontWeight.w800,
-        height: 1.08,
-        letterSpacing: -1.2,
+        height: 1.02,
+        letterSpacing: -1.5,
         color: textColor,
       ),
       displayMedium: TextStyle(
-        fontSize: 32,
+        fontSize: 36,
         fontWeight: FontWeight.w800,
-        height: 1.1,
-        letterSpacing: -0.8,
+        height: 1.06,
+        letterSpacing: -1.0,
         color: textColor,
       ),
       displaySmall: TextStyle(
-        fontSize: 28,
+        fontSize: 30,
         fontWeight: FontWeight.w700,
-        height: 1.14,
-        letterSpacing: -0.4,
+        height: 1.1,
+        letterSpacing: -0.6,
         color: textColor,
       ),
       headlineLarge: TextStyle(
@@ -361,20 +361,22 @@ class AppTheme {
       outline: palette.outline,
       outlineVariant: palette.outline.withValues(alpha: 0.72),
       shadow: palette.shadow,
-      scrim: Colors.black.withValues(alpha: brightness == Brightness.light ? 0.2 : 0.45),
+      scrim: Colors.black
+          .withValues(alpha: brightness == Brightness.light ? 0.2 : 0.45),
     );
 
     final isLight = brightness == Brightness.light;
-    final textColor = isLight ? const Color(0xFF102033) : const Color(0xFFF3F7FF);
-    final mutedTextColor = isLight
-        ? const Color(0xFF516174)
-        : const Color(0xFFC0CCDC);
+    final textColor =
+        isLight ? const Color(0xFF10202A) : const Color(0xFFEAF3F7);
+    final mutedTextColor =
+        isLight ? const Color(0xFF5F717C) : const Color(0xFFB8CAD2);
     final textTheme = _textTheme(textColor, mutedTextColor);
 
     return ThemeData(
       useMaterial3: true,
       brightness: brightness,
       colorScheme: colorScheme,
+      fontFamily: 'Poppins',
       fontFamilyFallback: chineseFontFallback,
       scaffoldBackgroundColor: palette.scaffold,
       canvasColor: palette.scaffold,
@@ -398,7 +400,8 @@ class AppTheme {
             : palette.surfaceAlt.withValues(alpha: 0.88),
       ),
       appBarTheme: AppBarTheme(
-        backgroundColor: palette.scaffold.withValues(alpha: isLight ? 0.92 : 0.94),
+        backgroundColor:
+            palette.scaffold.withValues(alpha: isLight ? 0.92 : 0.94),
         foregroundColor: textColor,
         elevation: 0,
         scrolledUnderElevation: 0,
@@ -458,14 +461,16 @@ class AppTheme {
       ),
       cardTheme: CardThemeData(
         color: palette.surface,
-        surfaceTintColor: palette.surfaceTint.withValues(alpha: isLight ? 0.08 : 0.16),
+        surfaceTintColor:
+            palette.surfaceTint.withValues(alpha: isLight ? 0.08 : 0.16),
         elevation: 0,
         shadowColor: Colors.transparent,
         margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(ThemeStyles.cardBorderRadius),
           side: BorderSide(
-            color: colorScheme.outlineVariant.withValues(alpha: isLight ? 0.32 : 0.5),
+            color: colorScheme.outlineVariant
+                .withValues(alpha: isLight ? 0.32 : 0.5),
           ),
         ),
       ),
@@ -511,7 +516,8 @@ class AppTheme {
       ),
       snackBarTheme: SnackBarThemeData(
         behavior: SnackBarBehavior.floating,
-        backgroundColor: isLight ? const Color(0xFF102033) : const Color(0xFFE6EEF9),
+        backgroundColor:
+            isLight ? const Color(0xFF102033) : const Color(0xFFE6EEF9),
         contentTextStyle: textTheme.bodyMedium?.copyWith(
           color: isLight ? Colors.white : const Color(0xFF0B1421),
           fontWeight: FontWeight.w600,

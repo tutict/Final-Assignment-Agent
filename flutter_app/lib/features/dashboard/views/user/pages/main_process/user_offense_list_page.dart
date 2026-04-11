@@ -7,19 +7,15 @@ import 'package:final_assignment_front/features/api/offense_information_controll
 import 'package:final_assignment_front/features/api/user_management_controller_api.dart';
 import 'package:final_assignment_front/features/dashboard/controllers/user_dashboard_screen_controller.dart';
 import 'package:final_assignment_front/features/dashboard/views/shared/widgets/dashboard_page_template.dart';
-import 'package:final_assignment_front/features/model/driver_information.dart';
 import 'package:final_assignment_front/features/model/offense_information.dart';
 import 'package:final_assignment_front/i18n/offense_localizers.dart';
 import 'package:final_assignment_front/utils/helpers/api_exception.dart';
+import 'package:final_assignment_front/utils/helpers/role_utils.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:jwt_decoder/jwt_decoder.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-
-String generateIdempotencyKey() {
-  return DateTime.now().millisecondsSinceEpoch.toString();
-}
 
 class UserOffenseListPage extends StatefulWidget {
   const UserOffenseListPage({super.key});
@@ -69,15 +65,14 @@ class _UserOffenseListPageState extends State<UserOffenseListPage> {
 
   Future<bool> _validateJwtToken() async {
     final prefs = await SharedPreferences.getInstance();
-    String? jwtToken = prefs.getString('jwtToken');
+    final jwtToken = prefs.getString('jwtToken');
     if (jwtToken == null || jwtToken.isEmpty) {
       setState(() => _errorMessage = 'offense.error.unauthorized'.tr);
       return false;
     }
     try {
       final decodedToken = JwtDecoder.decode(jwtToken);
-      final roles = decodedToken['roles']?.toString().split(',') ?? [];
-      _isUser = roles.contains('USER');
+      _isUser = hasAnyRole(decodedToken['roles'], const ['USER']);
       if (!_isUser) {
         setState(() => _errorMessage = 'offense.error.userOnly'.tr);
         return false;
@@ -87,15 +82,14 @@ class _UserOffenseListPageState extends State<UserOffenseListPage> {
         return false;
       }
       await userApi.initializeWithJwt();
-      // Try to get driverName from SharedPreferences first
+      await driverApi.initializeWithJwt();
       _driverName = prefs.getString('driverName') ?? '';
       if (_driverName.isEmpty) {
-        _driverName = await _fetchDriverName(jwtToken) ?? '';
-        if (_driverName.isEmpty) {
-          setState(() => _errorMessage = 'offense.error.driverNameMissing'.tr);
-          return false;
-        }
+        _driverName = await _fetchDriverName() ?? '';
+      }
+      if (_driverName.isNotEmpty) {
         await prefs.setString('driverName', _driverName);
+        await prefs.setString('displayName', _driverName);
         developer.log('Stored driverName: $_driverName');
       }
       return true;
@@ -106,46 +100,17 @@ class _UserOffenseListPageState extends State<UserOffenseListPage> {
     }
   }
 
-  Future<String?> _fetchDriverName(String jwtToken) async {
+  Future<String?> _fetchDriverName() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final storedUsername = prefs.getString('userName');
-      Map<String, dynamic>? decoded;
-      try {
-        decoded = JwtDecoder.decode(jwtToken);
-      } catch (_) {}
-      final username = storedUsername?.isNotEmpty == true
-          ? storedUsername!
-          : decoded?['sub']?.toString();
-      if (username == null || username.isEmpty) {
-        throw Exception('offense.error.usernameMissing'.tr);
-      }
-      await userApi.initializeWithJwt();
-      final user = await userApi.apiUsersSearchUsernameGet(username: username);
-      if (user?.userId == null) {
-        throw Exception('personal.error.currentUserNotFound'.tr);
-      }
-      await driverApi.initializeWithJwt();
-      var driverInfo =
-          await driverApi.apiDriversDriverIdGet(driverId: user!.userId!);
-      if (driverInfo == null) {
-        driverInfo = DriverInformation(
-          driverId: user.userId,
-          name: user.username ?? 'common.unknown'.tr,
-          contactNumber: user.contactNumber ?? '',
-          idCardNumber: '',
-          driverLicenseNumber:
-              '${DateTime.now().millisecondsSinceEpoch.toString().substring(6)}${(1000 + (DateTime.now().millisecondsSinceEpoch % 9000)).toString()}',
-        );
-        await driverApi.apiDriversPost(
-          driverInformation: driverInfo,
-          idempotencyKey: generateIdempotencyKey(),
-        );
-        driverInfo =
-            await driverApi.apiDriversDriverIdGet(driverId: user.userId!);
-      }
-      final driverName =
-          driverInfo?.name ?? user.username ?? 'common.unknown'.tr;
+      final user = await userApi.apiUsersMeGet();
+      final driverInfo = await driverApi.apiDriversMeGet();
+      final driverName = driverInfo?.name ??
+          prefs.getString('displayName') ??
+          user?.realName ??
+          user?.username ??
+          prefs.getString('userName') ??
+          '';
       developer.log('Driver name from API: $driverName');
       return driverName;
     } catch (e) {
@@ -158,11 +123,6 @@ class _UserOffenseListPageState extends State<UserOffenseListPage> {
     setState(() => _isLoading = true);
     try {
       if (!await _validateJwtToken()) {
-        Get.offAllNamed(Routes.login);
-        return;
-      }
-      if (_driverName.isEmpty) {
-        setState(() => _errorMessage = 'offense.error.driverNameMissing'.tr);
         Get.offAllNamed(Routes.login);
         return;
       }
@@ -179,7 +139,7 @@ class _UserOffenseListPageState extends State<UserOffenseListPage> {
   }
 
   Future<void> _loadOffenses({bool reset = false}) async {
-    if (!_hasMore || _driverName.isEmpty) return;
+    if (!_hasMore) return;
 
     if (reset) {
       _currentPage = 1;
@@ -199,17 +159,10 @@ class _UserOffenseListPageState extends State<UserOffenseListPage> {
         Get.offAllNamed(Routes.login);
         return;
       }
-      final offenses = _searchController.text.isNotEmpty
-          ? await offenseApi.apiOffensesByDriverNameGet(
-              query: _driverName,
-              page: _currentPage,
-              size: _pageSize,
-            )
-          : await offenseApi.apiOffensesByDriverNameGet(
-              query: _driverName,
-              page: _currentPage,
-              size: _pageSize,
-            );
+      final offenses = await offenseApi.apiOffensesMeGet(
+        page: _currentPage,
+        size: _pageSize,
+      );
 
       setState(() {
         _offenses.addAll(offenses);
@@ -289,11 +242,12 @@ class _UserOffenseListPageState extends State<UserOffenseListPage> {
 
   Future<List<String>> _fetchAutocompleteSuggestions(String prefix) async {
     try {
-      final offenses = await offenseApi.apiOffensesByDriverNameGet(
-        query: _driverName,
-        page: 1,
-        size: 10,
-      );
+      final offenses = _offenses.isNotEmpty
+          ? _offenses
+          : await offenseApi.apiOffensesMeGet(
+              page: 1,
+              size: 50,
+            );
       final suggestions = <String>{};
       for (var offense in offenses) {
         if (offense.offenseType != null &&

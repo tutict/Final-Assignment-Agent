@@ -67,7 +67,7 @@ class ChatController extends GetxController {
   ];
 
   final List<String> _adminSuggestionKeys = const [
-    'questions.manager.item4',
+    'questions.admin.item4',
     'admin.card.logs.title',
     'admin.card.users.title',
     'admin.card.business.title',

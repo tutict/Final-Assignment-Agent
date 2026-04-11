@@ -16,17 +16,16 @@ class UserManagementControllerApi {
   UserManagementControllerApi([ApiClient? apiClient])
       : apiClient = apiClient ?? defaultApiClient;
 
-  // åå§å?JWT
+  // Loads the JWT token into the ApiClient.
   Future<void> initializeWithJwt() async {
     final jwtToken = (await AuthTokenStore.instance.getJwtToken());
     if (jwtToken == null) {
       throw Exception('api.error.notAuthenticated'.tr);
     }
     apiClient.setJwtToken(jwtToken);
-    debugPrint('Initialized JWT: $jwtToken');
   }
 
-  // è§£ç ååºä½?
+  // Decodes the response body.
   String _decodeBodyBytes(http.Response response) => response.body;
 
   String _errorMessageOrUnknown(http.Response response) {
@@ -35,25 +34,31 @@ class UserManagementControllerApi {
         : localizeUnknownApiError();
   }
 
-  // è·åè¯·æ±å¤?
-  Future<Map<String, String>> _getHeaders() async {
+  // Builds common request headers.
+  Future<Map<String, String>> _getHeaders({String? idempotencyKey}) async {
     final token = (await AuthTokenStore.instance.getJwtToken()) ?? '';
-    debugPrint('Using JWT for request: $token');
-    return {
+    final headers = <String, String>{
       'Content-Type': 'application/json; charset=utf-8',
       if (token.isNotEmpty) 'Authorization': 'Bearer $token',
     };
+    if (idempotencyKey != null && idempotencyKey.trim().isNotEmpty) {
+      headers['Idempotency-Key'] = idempotencyKey.trim();
+    }
+    return headers;
   }
 
 // --- GET /api/users ---
-  Future<http.Response> apiUsersGetWithHttpInfo() async {
+  Future<http.Response> apiUsersGetWithHttpInfo({
+    int page = 1,
+    int size = 20,
+  }) async {
     final path = "/api/users".replaceAll("{format}", "json");
     final headerParams = await _getHeaders();
 
     return await apiClient.invokeAPI(
       path,
       'GET',
-      [],
+      [QueryParam('page', '$page'), QueryParam('size', '$size')],
       null,
       headerParams,
       {},
@@ -62,9 +67,12 @@ class UserManagementControllerApi {
     );
   }
 
-  Future<List<UserManagement>> apiUsersGet() async {
+  Future<List<UserManagement>> apiUsersGet({
+    int page = 1,
+    int size = 20,
+  }) async {
     try {
-      final response = await apiUsersGetWithHttpInfo();
+      final response = await apiUsersGetWithHttpInfo(page: page, size: size);
       debugPrint('Users get response status: ${response.statusCode}');
       debugPrint('Users get response body: ${response.body}');
 
@@ -83,7 +91,111 @@ class UserManagementControllerApi {
     }
   }
 
-  // removed: /api/users/me (not provided by backend controllers)
+  // --- GET /api/users/me ---
+  Future<http.Response> apiUsersMeGetWithHttpInfo() async {
+    final path = "/api/users/me".replaceAll("{format}", "json");
+    final headerParams = await _getHeaders();
+
+    return await apiClient.invokeAPI(
+      path,
+      'GET',
+      [],
+      null,
+      headerParams,
+      {},
+      null,
+      ['bearerAuth'],
+    );
+  }
+
+  Future<UserManagement?> apiUsersMeGet() async {
+    try {
+      final response = await apiUsersMeGetWithHttpInfo();
+      debugPrint('Users me get response status: ${response.statusCode}');
+      debugPrint('Users me get response body: ${response.body}');
+
+      if (response.statusCode >= 400) {
+        final errorMessage = _errorMessageOrUnknown(response);
+        throw ApiException(response.statusCode, errorMessage);
+      } else if (response.body.isNotEmpty) {
+        return UserManagement.fromJson(jsonDecode(_decodeBodyBytes(response)));
+      } else {
+        return null;
+      }
+    } catch (e) {
+      debugPrint('Users me get error: $e');
+      rethrow;
+    }
+  }
+
+  // --- PUT /api/users/me ---
+  Future<UserManagement?> apiUsersMePut({
+    required UserManagement userManagement,
+  }) async {
+    try {
+      final response = await apiClient.invokeAPI(
+        '/api/users/me',
+        'PUT',
+        [],
+        userManagement.toJson(),
+        await _getHeaders(),
+        {},
+        'application/json',
+        ['bearerAuth'],
+      );
+
+      debugPrint('Users me put response status: ${response.statusCode}');
+      debugPrint('Users me put response body: ${response.body}');
+
+      if (response.statusCode >= 400) {
+        final errorMessage = _errorMessageOrUnknown(response);
+        throw ApiException(response.statusCode, errorMessage);
+      } else if (response.body.isNotEmpty) {
+        return UserManagement.fromJson(jsonDecode(_decodeBodyBytes(response)));
+      } else {
+        return null;
+      }
+    } catch (e) {
+      debugPrint('Users me put error: $e');
+      rethrow;
+    }
+  }
+
+  // --- PUT /api/users/me/password ---
+  Future<void> apiUsersMePasswordPut({
+    required String currentPassword,
+    required String newPassword,
+    required String idempotencyKey,
+  }) async {
+    if (currentPassword.trim().isEmpty) {
+      throw ApiException(400, localizeMissingRequiredParam('currentPassword'));
+    }
+    if (newPassword.trim().isEmpty) {
+      throw ApiException(400, localizeMissingRequiredParam('newPassword'));
+    }
+    if (idempotencyKey.isEmpty) {
+      throw ApiException(400, localizeMissingRequiredParam('idempotencyKey'));
+    }
+
+    final response = await apiClient.invokeAPI(
+      '/api/users/me/password',
+      'PUT',
+      [],
+      {
+        'currentPassword': currentPassword.trim(),
+        'newPassword': newPassword.trim(),
+      },
+      await _getHeaders(idempotencyKey: idempotencyKey),
+      {},
+      'application/json',
+      ['bearerAuth'],
+    );
+
+    if (response.statusCode >= 400) {
+      final errorMessage = _errorMessageOrUnknown(response);
+      throw ApiException(response.statusCode, errorMessage);
+    }
+  }
 
   // --- POST /api/users ---
   Future<http.Response> apiUsersPostWithHttpInfo({
@@ -95,13 +207,12 @@ class UserManagementControllerApi {
     }
 
     final path = "/api/users".replaceAll("{format}", "json");
-    final queryParams = [QueryParam("idempotencyKey", idempotencyKey)];
-    final headerParams = await _getHeaders();
+    final headerParams = await _getHeaders(idempotencyKey: idempotencyKey);
 
     return await apiClient.invokeAPI(
       path,
       'POST',
-      queryParams,
+      [],
       userManagement.toJson(),
       headerParams,
       {},
@@ -128,7 +239,7 @@ class UserManagementControllerApi {
       } else if (response.body.isNotEmpty) {
         return UserManagement.fromJson(jsonDecode(_decodeBodyBytes(response)));
       } else if (response.statusCode == 201) {
-        return null; // 201 CREATEDï¼æ ååºä½?
+        return null; // 201 Created with an empty response body.
       } else {
         throw ApiException(
             response.statusCode, localizeEmptyResponseApiError());
@@ -396,6 +507,34 @@ class UserManagementControllerApi {
     return jsonList.map((json) => UserManagement.fromJson(json)).toList();
   }
 
+  Future<List<UserManagement>> apiUsersSearchEmailGet({
+    required String email,
+    int page = 1,
+    int size = 20,
+  }) async {
+    final response = await apiClient.invokeAPI(
+      '/api/users/search/email',
+      'GET',
+      [
+        QueryParam('email', email),
+        QueryParam('page', '$page'),
+        QueryParam('size', '$size'),
+      ],
+      null,
+      await _getHeaders(),
+      {},
+      null,
+      ['bearerAuth'],
+    );
+    if (response.statusCode >= 400) {
+      final errorMessage = _errorMessageOrUnknown(response);
+      throw ApiException(response.statusCode, errorMessage);
+    }
+    if (response.body.isEmpty) return [];
+    final List<dynamic> jsonList = jsonDecode(_decodeBodyBytes(response));
+    return jsonList.map((json) => UserManagement.fromJson(json)).toList();
+  }
+
   // --- POST /api/users/{userId}/roles --- bind user role
   Future<http.Response> apiUsersUserIdRolesPostWithHttpInfo({
     required int userId,
@@ -406,12 +545,11 @@ class UserManagementControllerApi {
       throw ApiException(400, localizeMissingRequiredParam('idempotencyKey'));
     }
     final path = "/api/users/$userId/roles".replaceAll("{format}", "json");
-    final headerParams = await _getHeaders();
-    final queryParams = [QueryParam("idempotencyKey", idempotencyKey)];
+    final headerParams = await _getHeaders(idempotencyKey: idempotencyKey);
     return await apiClient.invokeAPI(
       path,
       'POST',
-      queryParams,
+      [],
       body,
       headerParams,
       {},
@@ -497,11 +635,11 @@ class UserManagementControllerApi {
     }
     final path =
         "/api/users/role-bindings/$relationId".replaceAll("{format}", "json");
-    final headerParams = await _getHeaders();
+    final headerParams = await _getHeaders(idempotencyKey: idempotencyKey);
     final response = await apiClient.invokeAPI(
       path,
       'PUT',
-      [QueryParam("idempotencyKey", idempotencyKey)],
+      [],
       body,
       headerParams,
       {},
@@ -845,13 +983,12 @@ class UserManagementControllerApi {
     }
 
     final path = "/api/users/$userId".replaceAll("{format}", "json");
-    final queryParams = [QueryParam("idempotencyKey", idempotencyKey)];
-    final headerParams = await _getHeaders();
+    final headerParams = await _getHeaders(idempotencyKey: idempotencyKey);
 
     return await apiClient.invokeAPI(
       path,
       'PUT',
-      queryParams,
+      [],
       userManagement.toJson(),
       headerParams,
       {},

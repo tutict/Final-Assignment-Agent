@@ -33,18 +33,48 @@ class VehicleInformationControllerApi {
         : localizeHttpStatusError(response.statusCode);
   }
 
-  Future<Map<String, String>> _headers() async {
+  Future<Map<String, String>> _headers({String? idempotencyKey}) async {
     final token = (await AuthTokenStore.instance.getJwtToken()) ?? '';
-    return {
+    final headers = <String, String>{
       'Content-Type': 'application/json; charset=utf-8',
       if (token.isNotEmpty) 'Authorization': 'Bearer $token',
     };
+    if (idempotencyKey != null && idempotencyKey.trim().isNotEmpty) {
+      headers['Idempotency-Key'] = idempotencyKey.trim();
+    }
+    return headers;
   }
 
   // GET /api/vehicles
-  Future<List<VehicleInformation>> apiVehiclesGet() async {
+  Future<List<VehicleInformation>> apiVehiclesGet({
+    int page = 1,
+    int size = 20,
+  }) async {
     final r = await apiClient.invokeAPI(
       '/api/vehicles',
+      'GET',
+      [
+        QueryParam('page', '$page'),
+        QueryParam('size', '$size'),
+      ],
+      null,
+      await _headers(),
+      const {},
+      null,
+      const ['bearerAuth'],
+    );
+    if (r.statusCode >= 400) {
+      throw ApiException(r.statusCode, _errorMessageOrHttpStatus(r));
+    }
+    if (r.body.isEmpty) return [];
+    final List<dynamic> data = jsonDecode(_decode(r));
+    return data.map((e) => VehicleInformation.fromJson(e)).toList();
+  }
+
+  // GET /api/vehicles/me
+  Future<List<VehicleInformation>> apiVehiclesMeGet() async {
+    final r = await apiClient.invokeAPI(
+      '/api/vehicles/me',
       'GET',
       const [],
       null,
@@ -59,6 +89,64 @@ class VehicleInformationControllerApi {
     if (r.body.isEmpty) return [];
     final List<dynamic> data = jsonDecode(_decode(r));
     return data.map((e) => VehicleInformation.fromJson(e)).toList();
+  }
+
+  // POST /api/vehicles/me
+  Future<VehicleInformation> apiVehiclesMePost({
+    required VehicleInformation vehicle,
+  }) async {
+    final r = await apiClient.invokeAPI(
+      '/api/vehicles/me',
+      'POST',
+      const [],
+      vehicle.toJson(),
+      await _headers(),
+      const {},
+      'application/json',
+      const ['bearerAuth'],
+    );
+    if (r.statusCode >= 400) {
+      throw ApiException(r.statusCode, _errorMessageOrHttpStatus(r));
+    }
+    return VehicleInformation.fromJson(jsonDecode(_decode(r)));
+  }
+
+  // PUT /api/vehicles/me/{vehicleId}
+  Future<VehicleInformation> apiVehiclesMeVehicleIdPut({
+    required int vehicleId,
+    required VehicleInformation vehicle,
+  }) async {
+    final r = await apiClient.invokeAPI(
+      '/api/vehicles/me/$vehicleId',
+      'PUT',
+      const [],
+      vehicle.toJson(),
+      await _headers(),
+      const {},
+      'application/json',
+      const ['bearerAuth'],
+    );
+    if (r.statusCode >= 400) {
+      throw ApiException(r.statusCode, _errorMessageOrHttpStatus(r));
+    }
+    return VehicleInformation.fromJson(jsonDecode(_decode(r)));
+  }
+
+  // DELETE /api/vehicles/me/{vehicleId}
+  Future<void> apiVehiclesMeVehicleIdDelete({required int vehicleId}) async {
+    final r = await apiClient.invokeAPI(
+      '/api/vehicles/me/$vehicleId',
+      'DELETE',
+      const [],
+      null,
+      await _headers(),
+      const {},
+      null,
+      const ['bearerAuth'],
+    );
+    if (r.statusCode != 204) {
+      throw ApiException(r.statusCode, _errorMessageOrHttpStatus(r));
+    }
   }
 
   // GET /api/vehicles/{vehicleId}
@@ -90,9 +178,9 @@ class VehicleInformationControllerApi {
     final r = await apiClient.invokeAPI(
       '/api/vehicles',
       'POST',
-      [QueryParam('idempotencyKey', idempotencyKey)],
+      const [],
       vehicle.toJson(),
-      await _headers(),
+      await _headers(idempotencyKey: idempotencyKey),
       const {},
       'application/json',
       const ['bearerAuth'],
@@ -112,9 +200,9 @@ class VehicleInformationControllerApi {
     final r = await apiClient.invokeAPI(
       '/api/vehicles/$vehicleId',
       'PUT',
-      [QueryParam('idempotencyKey', idempotencyKey)],
+      const [],
       vehicle.toJson(),
-      await _headers(),
+      await _headers(idempotencyKey: idempotencyKey),
       const {},
       'application/json',
       const ['bearerAuth'],
@@ -182,11 +270,15 @@ class VehicleInformationControllerApi {
 
   // GET /api/vehicles/search/owner?idCard=
   Future<List<VehicleInformation>> apiVehiclesSearchOwnerGet(
-      {required String idCard}) async {
+      {required String idCard, int page = 1, int size = 20}) async {
     final r = await apiClient.invokeAPI(
       '/api/vehicles/search/owner',
       'GET',
-      [QueryParam('idCard', idCard)],
+      [
+        QueryParam('idCard', idCard),
+        QueryParam('page', '$page'),
+        QueryParam('size', '$size'),
+      ],
       null,
       await _headers(),
       const {},
@@ -224,11 +316,15 @@ class VehicleInformationControllerApi {
 
   // GET /api/vehicles/search/owner/name?ownerName=
   Future<List<VehicleInformation>> apiVehiclesSearchOwnerNameGet(
-      {required String ownerName}) async {
+      {required String ownerName, int page = 1, int size = 20}) async {
     final r = await apiClient.invokeAPI(
       '/api/vehicles/search/owner/name',
       'GET',
-      [QueryParam('ownerName', ownerName)],
+      [
+        QueryParam('ownerName', ownerName),
+        QueryParam('page', '$page'),
+        QueryParam('size', '$size'),
+      ],
       null,
       await _headers(),
       const {},
@@ -245,11 +341,15 @@ class VehicleInformationControllerApi {
 
   // GET /api/vehicles/search/status?status=
   Future<List<VehicleInformation>> apiVehiclesSearchStatusGet(
-      {required String status}) async {
+      {required String status, int page = 1, int size = 20}) async {
     final r = await apiClient.invokeAPI(
       '/api/vehicles/search/status',
       'GET',
-      [QueryParam('status', status)],
+      [
+        QueryParam('status', status),
+        QueryParam('page', '$page'),
+        QueryParam('size', '$size'),
+      ],
       null,
       await _headers(),
       const {},
@@ -346,6 +446,32 @@ class VehicleInformationControllerApi {
     return data.cast<String>();
   }
 
+  // GET /api/vehicles/me/autocomplete/plates?prefix=&size=
+  Future<List<String>> apiVehiclesMeAutocompletePlatesGet({
+    required String prefix,
+    int size = 10,
+  }) async {
+    final r = await apiClient.invokeAPI(
+      '/api/vehicles/me/autocomplete/plates',
+      'GET',
+      [
+        QueryParam('prefix', prefix),
+        QueryParam('size', '$size'),
+      ],
+      null,
+      await _headers(),
+      const {},
+      null,
+      const ['bearerAuth'],
+    );
+    if (r.statusCode >= 400) {
+      throw ApiException(r.statusCode, _errorMessageOrHttpStatus(r));
+    }
+    if (r.body.isEmpty) return [];
+    final List<dynamic> data = jsonDecode(_decode(r));
+    return data.cast<String>();
+  }
+
   // GET /api/vehicles/autocomplete/types?idCard=&prefix=&size=
   Future<List<String>> apiVehiclesAutocompleteTypesGet({
     required String idCard,
@@ -357,6 +483,32 @@ class VehicleInformationControllerApi {
       'GET',
       [
         QueryParam('idCard', idCard),
+        QueryParam('prefix', prefix),
+        QueryParam('size', '$size'),
+      ],
+      null,
+      await _headers(),
+      const {},
+      null,
+      const ['bearerAuth'],
+    );
+    if (r.statusCode >= 400) {
+      throw ApiException(r.statusCode, _errorMessageOrHttpStatus(r));
+    }
+    if (r.body.isEmpty) return [];
+    final List<dynamic> data = jsonDecode(_decode(r));
+    return data.cast<String>();
+  }
+
+  // GET /api/vehicles/me/autocomplete/types?prefix=&size=
+  Future<List<String>> apiVehiclesMeAutocompleteTypesGet({
+    required String prefix,
+    int size = 10,
+  }) async {
+    final r = await apiClient.invokeAPI(
+      '/api/vehicles/me/autocomplete/types',
+      'GET',
+      [
         QueryParam('prefix', prefix),
         QueryParam('size', '$size'),
       ],

@@ -191,21 +191,25 @@ String? validateVehicleField(
         key: 'vehicle.validation.ownerNameTooLong',
       );
     case kVehicleFieldIdCard:
-      if (trimmedValue.length > 18) {
-        return 'vehicle.validation.idCardTooLong'.tr;
-      }
-      if (!isChineseIdCardNumber(trimmedValue)) {
-        return 'vehicle.validation.idCardInvalid'.tr;
-      }
-      return null;
+      return validateIdCardField(
+        trimmedValue,
+        required: required,
+        fieldLabel: translationKey.tr,
+        allowLowercaseX: true,
+        maxLength: 18,
+        invalidKey: 'vehicle.validation.idCardInvalid',
+        tooLongKey: 'vehicle.validation.idCardTooLong',
+      );
     case kVehicleFieldContact:
-      if (trimmedValue.length > 20) {
-        return 'vehicle.validation.contactTooLong'.tr;
-      }
-      if (!isMainlandPhoneNumber(trimmedValue)) {
-        return 'vehicle.validation.contactInvalid'.tr;
-      }
-      return null;
+      return validateContactNumberField(
+        trimmedValue,
+        required: required,
+        fieldLabel: translationKey.tr,
+        strictPrefix: false,
+        maxLength: 20,
+        invalidKey: 'vehicle.validation.contactInvalid',
+        tooLongKey: 'vehicle.validation.contactTooLong',
+      );
     case kVehicleFieldEngineNumber:
       return validateMaxLength(
         trimmedValue,

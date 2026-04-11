@@ -36,6 +36,7 @@ const String _feedbackStatusRejected = 'Rejected';
 
 const String _backupRestoreStatusPending = 'PENDING';
 const String _backupRestoreStatusRestored = 'RESTORED';
+const String _backupRestoreStatusFailed = 'FAILED';
 
 const String _paymentStatusUnpaid = 'Unpaid';
 const String _paymentStatusPartial = 'Partial';
@@ -404,6 +405,9 @@ String normalizeBackupRestoreStatusCode(String? status) {
     case 'RESTORED':
     case '已恢复':
       return _backupRestoreStatusRestored;
+    case 'FAILED':
+    case '失败':
+      return _backupRestoreStatusFailed;
     default:
       return normalized;
   }
@@ -417,8 +421,12 @@ String localizeBackupRestoreStatus(String? status) {
       return 'backupRestore.status.pending'.tr;
     case _backupRestoreStatusRestored:
       return 'backupRestore.status.restored'.tr;
+    case _backupRestoreStatusFailed:
+      return 'backupRestore.status.failed'.tr;
     default:
-      return 'common.unknown'.tr;
+      return status?.trim().isNotEmpty == true
+          ? status!.trim()
+          : 'common.unknown'.tr;
   }
 }
 

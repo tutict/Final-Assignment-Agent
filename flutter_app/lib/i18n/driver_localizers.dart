@@ -121,29 +121,32 @@ String? validateDriverField(
 
   switch (fieldKey) {
     case 'name':
-      if (trimmedValue.isEmpty) return null;
-      if (trimmedValue.length < 2 || trimmedValue.length > 50) {
-        return 'driverAdmin.validation.nameLength'.tr;
-      }
-      return null;
+      return validatePersonNameField(
+        trimmedValue,
+        required: required,
+        fieldLabel: fieldLabel,
+      );
     case 'idCardNumber':
-      if (trimmedValue.isEmpty) return null;
-      if (!isChineseIdCardNumber(trimmedValue, allowLowercaseX: true)) {
-        return 'driverAdmin.validation.idCardInvalid'.tr;
-      }
-      return null;
+      return validateIdCardField(
+        trimmedValue,
+        required: required,
+        fieldLabel: fieldLabel,
+        allowLowercaseX: true,
+      );
     case 'contactNumber':
-      if (trimmedValue.isEmpty) return null;
-      if (!isMainlandPhoneNumber(trimmedValue, strictPrefix: false)) {
-        return 'driverAdmin.validation.contactInvalid'.tr;
-      }
-      return null;
+      return validateContactNumberField(
+        trimmedValue,
+        required: required,
+        fieldLabel: fieldLabel,
+        strictPrefix: false,
+      );
     case 'driverLicenseNumber':
-      if (trimmedValue.isEmpty) return null;
-      if (!isExactDigits(trimmedValue, 12)) {
-        return 'driverAdmin.validation.licenseInvalid'.tr;
-      }
-      return null;
+      return validateExactDigitsFieldValue(
+        trimmedValue,
+        required: required,
+        fieldLabel: fieldLabel,
+        length: 12,
+      );
     case 'allowedVehicleType':
       return validateMaxLength(
         trimmedValue,

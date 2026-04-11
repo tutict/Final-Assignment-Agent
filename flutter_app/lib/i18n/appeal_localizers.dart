@@ -6,6 +6,10 @@ const String kAppealSearchTypeAppealReason = 'appealReason';
 const String kAppealSearchTypeAppellantName = 'appellantName';
 const String kAppealSearchTypeProcessStatus = 'processStatus';
 const String kAppealSearchTypeTimeRange = 'timeRange';
+const String kAppealReviewSearchTypeReviewer = 'reviewer';
+const String kAppealReviewSearchTypeReviewerDept = 'reviewerDept';
+const String kAppealReviewSearchTypeTimeRange = 'reviewTimeRange';
+const String kAppealFieldReason = 'appeal.form.reason';
 
 String formatAppealDateTime(
   DateTime? value, {
@@ -38,6 +42,29 @@ String formatUserAppealError(Object? error) {
   return formatAppealErrorDetail(error);
 }
 
+String? validateAppealReasonField(
+  String? value, {
+  bool required = false,
+  int maxLength = 500,
+}) {
+  final trimmedValue = value?.trim() ?? '';
+  if (required && trimmedValue.isEmpty) {
+    return formatRequiredFieldValidation(
+      'appeal.validation.required',
+      kAppealFieldReason.tr,
+    );
+  }
+  if (trimmedValue.isEmpty) {
+    return null;
+  }
+
+  return validateMaxLength(
+    trimmedValue,
+    maxLength: maxLength,
+    key: 'appeal.validation.reasonTooLong',
+  );
+}
+
 String appealAdminSearchHintText(String searchType) {
   switch (searchType) {
     case kAppealSearchTypeAppealReason:
@@ -63,6 +90,65 @@ String appealAdminSearchTypeLabel(String searchType) {
     case kAppealSearchTypeTimeRange:
     default:
       return 'appealAdmin.filter.byTimeRange'.tr;
+  }
+}
+
+String appealReviewSearchHintText(String searchType) {
+  switch (searchType) {
+    case kAppealReviewSearchTypeReviewer:
+      return 'appealAdmin.review.search.reviewer'.tr;
+    case kAppealReviewSearchTypeReviewerDept:
+      return 'appealAdmin.review.search.reviewerDept'.tr;
+    case kAppealReviewSearchTypeTimeRange:
+    default:
+      return 'appealAdmin.review.search.timeRangeSelected'.tr;
+  }
+}
+
+String appealReviewSearchTypeLabel(String searchType) {
+  switch (searchType) {
+    case kAppealReviewSearchTypeReviewer:
+      return 'appealAdmin.review.filter.byReviewer'.tr;
+    case kAppealReviewSearchTypeReviewerDept:
+      return 'appealAdmin.review.filter.byReviewerDept'.tr;
+    case kAppealReviewSearchTypeTimeRange:
+    default:
+      return 'appealAdmin.review.filter.byTimeRange'.tr;
+  }
+}
+
+String localizeAppealReviewResult(String? result) {
+  final normalized = result?.trim().toLowerCase() ?? '';
+  switch (normalized) {
+    case 'approved':
+      return 'appealAdmin.review.result.approved'.tr;
+    case 'rejected':
+      return 'appealAdmin.review.result.rejected'.tr;
+    case 'need_resubmit':
+    case 'need resubmit':
+      return 'appealAdmin.review.result.needResubmit'.tr;
+    case 'transfer':
+      return 'appealAdmin.review.result.transfer'.tr;
+    default:
+      return result?.trim().isNotEmpty == true
+          ? result!.trim()
+          : 'common.notFilled'.tr;
+  }
+}
+
+String localizeAppealReviewLevel(String? level) {
+  final normalized = level?.trim().toLowerCase() ?? '';
+  switch (normalized) {
+    case 'primary':
+      return 'appealAdmin.review.level.primary'.tr;
+    case 'secondary':
+      return 'appealAdmin.review.level.secondary'.tr;
+    case 'final':
+      return 'appealAdmin.review.level.final'.tr;
+    default:
+      return level?.trim().isNotEmpty == true
+          ? level!.trim()
+          : 'common.notFilled'.tr;
   }
 }
 

@@ -11,12 +11,89 @@ import 'package:final_assignment_front/features/dashboard/views/shared/widgets/d
 import 'package:final_assignment_front/i18n/status_localizers.dart';
 import 'package:final_assignment_front/i18n/vehicle_field_localizers.dart';
 import 'package:final_assignment_front/utils/helpers/api_exception.dart';
+import 'package:final_assignment_front/utils/helpers/role_utils.dart';
 import 'package:get/get.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:jwt_decoder/jwt_decoder.dart';
 
 String generateIdempotencyKey() {
   return DateTime.now().millisecondsSinceEpoch.toString();
+}
+
+String buildVehicleLicensePlate(String plateSuffix) {
+  return '$kVehiclePlatePrefix${plateSuffix.trim()}';
+}
+
+String? validateProfileBoundVehicleIdCard(String? value) {
+  final validationMessage = validateVehicleField(
+    kVehicleFieldIdCard,
+    value,
+    required: true,
+  );
+  if (validationMessage == null) {
+    return null;
+  }
+
+  return (value?.trim().isEmpty ?? true)
+      ? 'vehicle.error.fillIdCardInProfile'.tr
+      : validationMessage;
+}
+
+Future<bool> ensureVehicleLicensePlateAvailable({
+  required VehicleInformationControllerApi vehicleApi,
+  required String licensePlate,
+  String? currentLicensePlate,
+}) async {
+  if (licensePlate == currentLicensePlate) {
+    return true;
+  }
+
+  return !(await vehicleApi.apiVehiclesExistsLicensePlateGet(
+    licensePlate: licensePlate,
+  ));
+}
+
+String? _trimVehicleProfileValue(String? value) {
+  final normalized = value?.trim();
+  if (normalized == null || normalized.isEmpty) {
+    return null;
+  }
+  return normalized;
+}
+
+String? _resolveVehicleOwnerName({
+  DriverInformation? driverInfo,
+  UserManagement? user,
+  SharedPreferences? prefs,
+  VehicleInformation? vehicle,
+}) {
+  return _trimVehicleProfileValue(driverInfo?.name) ??
+      _trimVehicleProfileValue(user?.realName) ??
+      _trimVehicleProfileValue(prefs?.getString('displayName')) ??
+      _trimVehicleProfileValue(prefs?.getString('driverName')) ??
+      _trimVehicleProfileValue(user?.username) ??
+      _trimVehicleProfileValue(prefs?.getString('userName')) ??
+      _trimVehicleProfileValue(vehicle?.ownerName);
+}
+
+String? _resolveVehicleOwnerIdCard({
+  DriverInformation? driverInfo,
+  UserManagement? user,
+  VehicleInformation? vehicle,
+}) {
+  return _trimVehicleProfileValue(driverInfo?.idCardNumber) ??
+      _trimVehicleProfileValue(user?.idCardNumber) ??
+      _trimVehicleProfileValue(vehicle?.idCardNumber);
+}
+
+String? _resolveVehicleOwnerContact({
+  DriverInformation? driverInfo,
+  UserManagement? user,
+  VehicleInformation? vehicle,
+}) {
+  return _trimVehicleProfileValue(driverInfo?.contactNumber) ??
+      _trimVehicleProfileValue(user?.contactNumber) ??
+      _trimVehicleProfileValue(vehicle?.contactNumber);
 }
 
 class VehicleManagement extends StatefulWidget {
@@ -62,24 +139,22 @@ class _VehicleManagementState extends State<VehicleManagement> {
       if (jwtToken == null) {
         throw Exception('vehicle.error.jwtMissingRelogin'.tr);
       }
-      final decodedToken = JwtDecoder.decode(jwtToken);
-      final username = decodedToken['sub'] ?? '';
-      if (username.isEmpty) {
-        throw Exception('vehicle.error.usernameMissingInJwt'.tr);
-      }
-      debugPrint('Current username from JWT: $username');
 
       await vehicleApi.initializeWithJwt();
       await driverApi.initializeWithJwt();
       await userApi.initializeWithJwt();
 
       final user = await _fetchUserManagement();
-      final userId = user?.userId;
-      final driverInfo = userId != null
-          ? await driverApi.apiDriversDriverIdGet(driverId: userId)
-          : null;
-      _currentDriverName = driverInfo?.name ?? username;
-      _currentDriverIdCardNumber = driverInfo?.idCardNumber;
+      final driverInfo = await _fetchDriverInformation();
+      _currentDriverName = _resolveVehicleOwnerName(
+        driverInfo: driverInfo,
+        user: user,
+        prefs: prefs,
+      );
+      _currentDriverIdCardNumber = _resolveVehicleOwnerIdCard(
+        driverInfo: driverInfo,
+        user: user,
+      );
       debugPrint(
           'Current driver name: $_currentDriverName, idCardNumber: $_currentDriverIdCardNumber');
 
@@ -91,9 +166,8 @@ class _VehicleManagementState extends State<VehicleManagement> {
       await _fetchUserVehicles(reset: true);
     } catch (e) {
       setState(() {
-        _errorMessage =
-            'vehicle.error.initializeFailed'
-                .trParams({'error': formatVehicleError(e)});
+        _errorMessage = 'vehicle.error.initializeFailed'
+            .trParams({'error': formatVehicleError(e)});
       });
     } finally {
       setState(() => _isLoading = false);
@@ -102,16 +176,20 @@ class _VehicleManagementState extends State<VehicleManagement> {
 
   Future<UserManagement?> _fetchUserManagement() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final storedUsername = prefs.getString('userName');
-      if (storedUsername == null || storedUsername.isEmpty) {
-        debugPrint('Username not found in local storage');
-        return null;
-      }
       await userApi.initializeWithJwt();
-      return await userApi.apiUsersSearchUsernameGet(username: storedUsername);
+      return await userApi.apiUsersMeGet();
     } catch (e) {
       debugPrint('Failed to fetch UserManagement: $e');
+      return null;
+    }
+  }
+
+  Future<DriverInformation?> _fetchDriverInformation() async {
+    try {
+      await driverApi.initializeWithJwt();
+      return await driverApi.apiDriversMeGet();
+    } catch (e) {
+      debugPrint('Failed to fetch DriverInformation: $e');
       return null;
     }
   }
@@ -148,9 +226,7 @@ class _VehicleManagementState extends State<VehicleManagement> {
         'Fetching vehicles with query: $searchQuery, searchType: $_searchType');
 
     try {
-      final vehicles = await vehicleApi.apiVehiclesSearchOwnerGet(
-        idCard: _currentDriverIdCardNumber!,
-      );
+      final vehicles = await vehicleApi.apiVehiclesMeGet();
 
       debugPrint(
           'Vehicles fetched: ${vehicles.map((v) => v.toJson()).toList()}');
@@ -227,9 +303,8 @@ class _VehicleManagementState extends State<VehicleManagement> {
       if (_searchType == kVehicleSearchTypeLicensePlate) {
         debugPrint(
             'Fetching license plate suggestions for idCardNumber: $_currentDriverIdCardNumber, prefix: $prefix');
-        final suggestions = await vehicleApi.apiVehiclesAutocompletePlatesGet(
+        final suggestions = await vehicleApi.apiVehiclesMeAutocompletePlatesGet(
           prefix: prefix,
-          idCard: _currentDriverIdCardNumber!,
           size: 5,
         );
         return suggestions
@@ -238,9 +313,8 @@ class _VehicleManagementState extends State<VehicleManagement> {
       } else {
         debugPrint(
             'Fetching vehicle type suggestions for idCardNumber: $_currentDriverIdCardNumber, prefix: $prefix');
-        final suggestions = await vehicleApi.apiVehiclesAutocompleteTypesGet(
+        final suggestions = await vehicleApi.apiVehiclesMeAutocompleteTypesGet(
           prefix: prefix,
-          idCard: _currentDriverIdCardNumber!,
           size: 5,
         );
         return suggestions
@@ -291,12 +365,13 @@ class _VehicleManagementState extends State<VehicleManagement> {
     _showDeleteConfirmationDialog('vehicle.action.delete'.tr, () async {
       setState(() => _isLoading = true);
       try {
-        await vehicleApi.apiVehiclesVehicleIdDelete(vehicleId: vehicleId);
+        await vehicleApi.apiVehiclesMeVehicleIdDelete(vehicleId: vehicleId);
         _showSnackBar('vehicle.success.deleted'.tr);
         _fetchUserVehicles(reset: true);
       } catch (e) {
         _showSnackBar(
-          'vehicle.error.deleteFailed'.trParams({'error': formatVehicleError(e)}),
+          'vehicle.error.deleteFailed'
+              .trParams({'error': formatVehicleError(e)}),
           isError: true,
         );
       } finally {
@@ -714,16 +789,11 @@ class _AddVehiclePageState extends State<AddVehiclePage> {
       final prefs = await SharedPreferences.getInstance();
       final jwtToken = prefs.getString('jwtToken');
       if (jwtToken == null) throw Exception('vehicle.error.jwtMissing'.tr);
-      final decodedToken = JwtDecoder.decode(jwtToken);
-      final username = decodedToken['sub'] ?? '';
-      if (username.isEmpty) {
-        throw Exception('vehicle.error.usernameMissingInJwt'.tr);
-      }
 
       await vehicleApi.initializeWithJwt();
       await driverApi.initializeWithJwt();
       await userApi.initializeWithJwt();
-      await _preFillForm(username);
+      await _preFillForm();
     } catch (e) {
       _showSnackBar(
         'vehicle.error.initializeFailed'
@@ -735,44 +805,51 @@ class _AddVehiclePageState extends State<AddVehiclePage> {
     }
   }
 
-  Future<void> _preFillForm(String username) async {
+  Future<void> _preFillForm() async {
     final user = await _fetchUserManagement();
-    final userId = user?.userId;
-    final driverInfo = userId != null
-        ? await driverApi.apiDriversDriverIdGet(driverId: userId)
-        : null;
+    final driverInfo = await _fetchDriverInformation();
+    final ownerName = _resolveVehicleOwnerName(driverInfo: driverInfo, user: user);
+    final ownerIdCard = _resolveVehicleOwnerIdCard(driverInfo: driverInfo, user: user);
+    final ownerContact =
+        _resolveVehicleOwnerContact(driverInfo: driverInfo, user: user);
 
     debugPrint('Fetched UserManagement: ${user?.toJson()}');
     debugPrint('Fetched DriverInformation: ${driverInfo?.toString()}');
 
-    if (driverInfo == null || driverInfo.name == null) {
+    if (ownerName == null) {
       throw Exception('vehicle.error.driverInfoMissingDetailed'.trParams({
         'driverId': '${user?.userId}',
-        'username': username,
+        'username': user?.username ?? '',
       }));
+    }
+    if (ownerIdCard == null) {
+      throw Exception('vehicle.error.driverIdCardMissing'.tr);
     }
 
     setState(() {
-      _ownerNameController.text = driverInfo.name!;
-      _idCardNumberController.text = driverInfo.idCardNumber ?? '';
-      _contactNumberController.text =
-          driverInfo.contactNumber ?? user?.contactNumber ?? '';
-      debugPrint('Set ownerNameController.text to: ${driverInfo.name}');
+      _ownerNameController.text = ownerName;
+      _idCardNumberController.text = ownerIdCard;
+      _contactNumberController.text = ownerContact ?? '';
+      debugPrint('Set ownerNameController.text to: $ownerName');
     });
   }
 
   Future<UserManagement?> _fetchUserManagement() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final storedUsername = prefs.getString('userName');
-      if (storedUsername == null || storedUsername.isEmpty) {
-        debugPrint('Username missing when fetching user info');
-        return null;
-      }
       await userApi.initializeWithJwt();
-      return await userApi.apiUsersSearchUsernameGet(username: storedUsername);
+      return await userApi.apiUsersMeGet();
     } catch (e) {
       debugPrint('Error fetching UserManagement: $e');
+      return null;
+    }
+  }
+
+  Future<DriverInformation?> _fetchDriverInformation() async {
+    try {
+      await driverApi.initializeWithJwt();
+      return await driverApi.apiDriversMeGet();
+    } catch (e) {
+      debugPrint('Error fetching DriverInformation: $e');
       return null;
     }
   }
@@ -804,25 +881,16 @@ class _AddVehiclePageState extends State<AddVehiclePage> {
   Future<void> _submitVehicle() async {
     if (!_formKey.currentState!.validate()) return;
 
-    final licensePlate =
-        '$kVehiclePlatePrefix${_licensePlateController.text.trim()}';
-    if (!isValidLicensePlate(licensePlate)) {
-      _showSnackBar('vehicle.error.plateInvalid'.tr, isError: true);
-      return;
-    }
-
-    if (await vehicleApi.apiVehiclesExistsLicensePlateGet(
-        licensePlate: licensePlate)) {
+    final licensePlate = buildVehicleLicensePlate(_licensePlateController.text);
+    if (!await ensureVehicleLicensePlateAvailable(
+      vehicleApi: vehicleApi,
+      licensePlate: licensePlate,
+    )) {
       _showSnackBar('vehicle.error.plateExists'.tr, isError: true);
       return;
     }
 
     final idCardNumber = _idCardNumberController.text.trim();
-    if (idCardNumber.isEmpty) {
-      _showSnackBar('vehicle.error.fillIdCardInProfile'.tr, isError: true);
-      return;
-    }
-
     setState(() => _isLoading = true);
     try {
       final vehicle = VehicleInformation(
@@ -849,11 +917,7 @@ class _AddVehiclePageState extends State<AddVehiclePage> {
             : _currentStatusController.text.trim(),
       );
 
-      final idempotencyKey = generateIdempotencyKey();
-      await vehicleApi.apiVehiclesPost(
-        vehicle: vehicle,
-        idempotencyKey: idempotencyKey,
-      );
+      await vehicleApi.apiVehiclesMePost(vehicle: vehicle);
 
       _showSnackBar('vehicle.success.created'.tr);
       if (mounted) {
@@ -941,6 +1005,10 @@ class _AddVehiclePageState extends State<AddVehiclePage> {
               ? Icon(Icons.calendar_today,
                   size: 18, color: themeData.colorScheme.primary)
               : null,
+          hintText: vehicleFieldHintKey(labelKey, readOnly: readOnly)?.tr,
+          hintStyle: TextStyle(
+              color: themeData.colorScheme.onSurfaceVariant
+                  .withValues(alpha: 0.6)),
         ),
         keyboardType: keyboardType,
         readOnly: readOnly,
@@ -1011,10 +1079,13 @@ class _AddVehiclePageState extends State<AddVehiclePage> {
                               _buildTextField(kVehicleFieldIdCard,
                                   _idCardNumberController, themeData,
                                   required: true,
+                                  readOnly: true,
                                   keyboardType: TextInputType.number,
-                                  maxLength: 18),
+                                  maxLength: 18,
+                                  validator: validateProfileBoundVehicleIdCard),
                               _buildTextField(kVehicleFieldContact,
                                   _contactNumberController, themeData,
+                                  readOnly: true,
                                   keyboardType: TextInputType.phone,
                                   maxLength: 20),
                               _buildTextField(kVehicleFieldEngineNumber,
@@ -1108,7 +1179,6 @@ class _EditVehiclePageState extends State<EditVehiclePage> {
     try {
       await vehicleApi.initializeWithJwt();
       await driverApi.initializeWithJwt();
-      await userApi.initializeWithJwt();
       await _initializeFields();
     } catch (e) {
       _showSnackBar(
@@ -1125,19 +1195,31 @@ class _EditVehiclePageState extends State<EditVehiclePage> {
     final prefs = await SharedPreferences.getInstance();
     final jwtToken = prefs.getString('jwtToken');
     if (jwtToken == null) throw Exception('vehicle.error.jwtMissing'.tr);
-    final decodedToken = JwtDecoder.decode(jwtToken);
-    final username = decodedToken['sub'] ?? '';
-    if (username.isEmpty) {
-      throw Exception('vehicle.error.usernameMissingInJwt'.tr);
-    }
 
+    await userApi.initializeWithJwt();
+    final driverInfo = await _fetchDriverInformation();
     final user = await _fetchUserManagement();
-    final userId = user?.userId;
-    final driverInfo = userId != null
-        ? await driverApi.apiDriversDriverIdGet(driverId: userId)
-        : null;
-    if (driverInfo == null || driverInfo.name == null) {
+    final ownerName = _resolveVehicleOwnerName(
+      driverInfo: driverInfo,
+      user: user,
+      vehicle: widget.vehicle,
+    );
+    final ownerIdCard = _resolveVehicleOwnerIdCard(
+      driverInfo: driverInfo,
+      user: user,
+      vehicle: widget.vehicle,
+    );
+    final ownerContact = _resolveVehicleOwnerContact(
+      driverInfo: driverInfo,
+      user: user,
+      vehicle: widget.vehicle,
+    );
+
+    if (ownerName == null) {
       throw Exception('vehicle.error.driverInfoMissing'.tr);
+    }
+    if (ownerIdCard == null) {
+      throw Exception('vehicle.error.driverIdCardMissing'.tr);
     }
 
     setState(() {
@@ -1145,9 +1227,9 @@ class _EditVehiclePageState extends State<EditVehiclePage> {
           widget.vehicle.licensePlate?.replaceFirst(kVehiclePlatePrefix, '') ??
               '';
       _vehicleTypeController.text = widget.vehicle.vehicleType ?? '';
-      _ownerNameController.text = driverInfo.name!;
-      _idCardNumberController.text = widget.vehicle.idCardNumber ?? '';
-      _contactNumberController.text = widget.vehicle.contactNumber ?? '';
+      _ownerNameController.text = ownerName;
+      _idCardNumberController.text = ownerIdCard;
+      _contactNumberController.text = ownerContact ?? '';
       _engineNumberController.text = widget.vehicle.engineNumber ?? '';
       _frameNumberController.text = widget.vehicle.frameNumber ?? '';
       _vehicleColorController.text = widget.vehicle.vehicleColor ?? '';
@@ -1156,16 +1238,20 @@ class _EditVehiclePageState extends State<EditVehiclePage> {
     });
   }
 
+  Future<DriverInformation?> _fetchDriverInformation() async {
+    try {
+      await driverApi.initializeWithJwt();
+      return await driverApi.apiDriversMeGet();
+    } catch (e) {
+      debugPrint('Failed to fetch DriverInformation: $e');
+      return null;
+    }
+  }
+
   Future<UserManagement?> _fetchUserManagement() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final storedUsername = prefs.getString('userName');
-      if (storedUsername == null || storedUsername.isEmpty) {
-        debugPrint('Username missing when fetching user info');
-        return null;
-      }
       await userApi.initializeWithJwt();
-      return await userApi.apiUsersSearchUsernameGet(username: storedUsername);
+      return await userApi.apiUsersMeGet();
     } catch (e) {
       debugPrint('Failed to fetch UserManagement: $e');
       return null;
@@ -1200,15 +1286,12 @@ class _EditVehiclePageState extends State<EditVehiclePage> {
     if (!_formKey.currentState!.validate()) return;
 
     final newLicensePlate =
-        '$kVehiclePlatePrefix${_licensePlateController.text.trim()}';
-    if (!isValidLicensePlate(newLicensePlate)) {
-      _showSnackBar('vehicle.error.plateInvalid'.tr, isError: true);
-      return;
-    }
-
-    if (newLicensePlate != widget.vehicle.licensePlate &&
-        await vehicleApi.apiVehiclesExistsLicensePlateGet(
-            licensePlate: newLicensePlate)) {
+        buildVehicleLicensePlate(_licensePlateController.text);
+    if (!await ensureVehicleLicensePlateAvailable(
+      vehicleApi: vehicleApi,
+      licensePlate: newLicensePlate,
+      currentLicensePlate: widget.vehicle.licensePlate,
+    )) {
       _showSnackBar('vehicle.error.plateExists'.tr, isError: true);
       return;
     }
@@ -1239,11 +1322,9 @@ class _EditVehiclePageState extends State<EditVehiclePage> {
             : _currentStatusController.text.trim(),
       );
 
-      final idempotencyKey = generateIdempotencyKey();
-      await vehicleApi.apiVehiclesVehicleIdPut(
+      await vehicleApi.apiVehiclesMeVehicleIdPut(
         vehicleId: widget.vehicle.vehicleId ?? 0,
         vehicle: vehicle,
-        idempotencyKey: idempotencyKey,
       );
 
       _showSnackBar('vehicle.success.updated'.tr);
@@ -1397,9 +1478,11 @@ class _EditVehiclePageState extends State<EditVehiclePage> {
                                   required: true,
                                   readOnly: true,
                                   keyboardType: TextInputType.number,
-                                  maxLength: 18),
+                                  maxLength: 18,
+                                  validator: validateProfileBoundVehicleIdCard),
                               _buildTextField(kVehicleFieldContact,
                                   _contactNumberController, themeData,
+                                  readOnly: true,
                                   keyboardType: TextInputType.phone,
                                   maxLength: 20),
                               _buildTextField(kVehicleFieldEngineNumber,
@@ -1461,6 +1544,8 @@ class _VehicleDetailPageState extends State<VehicleDetailPage> {
   final VehicleInformationControllerApi vehicleApi =
       VehicleInformationControllerApi();
   final UserManagementControllerApi userApi = UserManagementControllerApi();
+  final DriverInformationControllerApi driverApi =
+      DriverInformationControllerApi();
   bool _isLoading = false;
   bool _isEditable = false;
   String _errorMessage = '';
@@ -1485,52 +1570,41 @@ class _VehicleDetailPageState extends State<VehicleDetailPage> {
       if (jwtToken == null) {
         throw Exception('vehicle.error.jwtMissingRelogin'.tr);
       }
-      final decodedToken = JwtDecoder.decode(jwtToken);
-      final username = decodedToken['sub'] ?? '';
-      if (username.isEmpty) {
-        throw Exception('vehicle.error.usernameMissingInJwt'.tr);
-      }
 
       await vehicleApi.initializeWithJwt();
+      await driverApi.initializeWithJwt();
       await userApi.initializeWithJwt();
       final user = await _fetchUserManagement();
-      final userId = user?.userId;
-      final driverInfo =
-          userId != null ? await _fetchDriverInformation(userId) : null;
-      _currentDriverIdCardNumber = driverInfo?.idCardNumber;
+      final driverInfo = await _fetchDriverInformation();
+      _currentDriverIdCardNumber = _resolveVehicleOwnerIdCard(
+        driverInfo: driverInfo,
+        user: user,
+      );
       await _checkUserRole();
     } catch (e) {
-      setState(() => _errorMessage =
-          'vehicle.error.initializeFailed'
-              .trParams({'error': formatVehicleError(e)}));
+      setState(() => _errorMessage = 'vehicle.error.initializeFailed'
+          .trParams({'error': formatVehicleError(e)}));
     } finally {
       setState(() => _isLoading = false);
     }
   }
 
-  Future<UserManagement?> _fetchUserManagement() async {
+  Future<DriverInformation?> _fetchDriverInformation() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final storedUsername = prefs.getString('userName');
-      if (storedUsername == null || storedUsername.isEmpty) {
-        debugPrint('Username missing when fetching user info');
-        return null;
-      }
-      await userApi.initializeWithJwt();
-      return await userApi.apiUsersSearchUsernameGet(username: storedUsername);
+      await driverApi.initializeWithJwt();
+      return await driverApi.apiDriversMeGet();
     } catch (e) {
-      debugPrint('Failed to fetch UserManagement: $e');
+      debugPrint('Failed to fetch DriverInformation: $e');
       return null;
     }
   }
 
-  Future<DriverInformation?> _fetchDriverInformation(int userId) async {
+  Future<UserManagement?> _fetchUserManagement() async {
     try {
-      final driverApi = DriverInformationControllerApi();
-      await driverApi.initializeWithJwt();
-      return await driverApi.apiDriversDriverIdGet(driverId: userId);
+      await userApi.initializeWithJwt();
+      return await userApi.apiUsersMeGet();
     } catch (e) {
-      debugPrint('Failed to fetch DriverInformation: $e');
+      debugPrint('Failed to fetch UserManagement: $e');
       return null;
     }
   }
@@ -1543,23 +1617,22 @@ class _VehicleDetailPageState extends State<VehicleDetailPage> {
         throw Exception('vehicle.error.jwtMissingRelogin'.tr);
       }
       final decodedToken = JwtDecoder.decode(jwtToken);
-      final roles = decodedToken['roles']?.toString().split(',') ?? [];
+      final roles = decodedToken['roles'];
       setState(() {
-        _isEditable = roles.contains('ROLE_ADMIN') ||
+        _isEditable = hasAnyRole(roles, const ['SUPER_ADMIN', 'ADMIN']) ||
             (_currentDriverIdCardNumber != null &&
                 _currentDriverIdCardNumber == widget.vehicle.idCardNumber);
       });
     } catch (e) {
-      setState(() => _errorMessage =
-          'vehicle.error.permissionLoadFailed'
-              .trParams({'error': formatVehicleError(e)}));
+      setState(() => _errorMessage = 'vehicle.error.permissionLoadFailed'
+          .trParams({'error': formatVehicleError(e)}));
     }
   }
 
   Future<void> _deleteVehicle(int vehicleId) async {
     setState(() => _isLoading = true);
     try {
-      await vehicleApi.apiVehiclesVehicleIdDelete(vehicleId: vehicleId);
+      await vehicleApi.apiVehiclesMeVehicleIdDelete(vehicleId: vehicleId);
       _showSnackBar('vehicle.success.deleted'.tr);
       if (mounted) Navigator.pop(context, true);
     } catch (e) {

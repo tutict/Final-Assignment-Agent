@@ -130,6 +130,78 @@ class PaymentRecordControllerApi {
     return _parseList(_decodeBodyBytes(response));
   }
 
+  /// POST /api/payments/me/{paymentId}/confirm
+  Future<PaymentRecordModel> apiPaymentsMePaymentIdConfirmPost({
+    required int paymentId,
+    required PaymentRecordModel paymentRecord,
+    String? idempotencyKey,
+  }) async {
+    final response = await apiClient.invokeAPI(
+      '/api/payments/me/$paymentId/confirm',
+      'POST',
+      const [],
+      paymentRecord.toJson(),
+      await _getHeaders(idempotencyKey: idempotencyKey),
+      const {},
+      'application/json',
+      ['bearerAuth'],
+    );
+    _ensureSuccess(response);
+    return PaymentRecordModel.fromJson(
+      jsonDecode(_decodeBodyBytes(response)) as Map<String, dynamic>,
+    );
+  }
+
+  /// POST /api/payments/me/{paymentId}/proof
+  Future<PaymentRecordModel> apiPaymentsMePaymentIdProofPost({
+    required int paymentId,
+    required String receiptUrl,
+    String? idempotencyKey,
+  }) async {
+    final response = await apiClient.invokeAPI(
+      '/api/payments/me/$paymentId/proof',
+      'POST',
+      const [],
+      <String, dynamic>{
+        'receiptUrl': receiptUrl,
+      },
+      await _getHeaders(idempotencyKey: idempotencyKey),
+      const {},
+      'application/json',
+      ['bearerAuth'],
+    );
+    _ensureSuccess(response);
+    return PaymentRecordModel.fromJson(
+      jsonDecode(_decodeBodyBytes(response)) as Map<String, dynamic>,
+    );
+  }
+
+  /// POST /api/payments/{paymentId}/finance-review
+  Future<PaymentRecordModel> apiPaymentsPaymentIdFinanceReviewPost({
+    required int paymentId,
+    required String reviewResult,
+    String? reviewOpinion,
+    String? idempotencyKey,
+  }) async {
+    final response = await apiClient.invokeAPI(
+      '/api/payments/$paymentId/finance-review',
+      'POST',
+      const [],
+      <String, dynamic>{
+        'reviewResult': reviewResult,
+        'reviewOpinion': reviewOpinion,
+      },
+      await _getHeaders(idempotencyKey: idempotencyKey),
+      const {},
+      'application/json',
+      ['bearerAuth'],
+    );
+    _ensureSuccess(response);
+    return PaymentRecordModel.fromJson(
+      jsonDecode(_decodeBodyBytes(response)) as Map<String, dynamic>,
+    );
+  }
+
   /// GET /api/payments/{paymentId}
   Future<PaymentRecordModel?> apiPaymentsPaymentIdGet({
     required int paymentId,
@@ -181,6 +253,28 @@ class PaymentRecordControllerApi {
   }) async {
     final response = await apiClient.invokeAPI(
       '/api/payments/fine/$fineId',
+      'GET',
+      [
+        QueryParam('page', '$page'),
+        QueryParam('size', '$size'),
+      ],
+      null,
+      await _getHeaders(),
+      const {},
+      null,
+      ['bearerAuth'],
+    );
+    _ensureSuccess(response);
+    return _parseList(_decodeBodyBytes(response));
+  }
+
+  /// GET /api/payments/review-tasks?page=&size=
+  Future<List<PaymentRecordModel>> apiPaymentsReviewTasksGet({
+    int page = 1,
+    int size = 20,
+  }) async {
+    final response = await apiClient.invokeAPI(
+      '/api/payments/review-tasks',
       'GET',
       [
         QueryParam('page', '$page'),

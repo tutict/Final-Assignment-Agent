@@ -28,11 +28,17 @@ class OperationLogControllerApi {
   }
 
   // GET /api/logs/operation
-  Future<List<OperationLog>> apiLogsOperationGet() async {
+  Future<List<OperationLog>> apiLogsOperationGet({
+    int page = 1,
+    int size = 20,
+  }) async {
     final r = await _apiClient.invokeAPI(
       '/api/logs/operation',
       'GET',
-      const [],
+      [
+        QueryParam('page', '$page'),
+        QueryParam('size', '$size'),
+      ],
       null,
       {},
       {},
@@ -66,66 +72,6 @@ class OperationLogControllerApi {
       throw ApiException(r.statusCode, _errorMessageOrHttpStatus(r));
     }
     return OperationLog.fromJson(jsonDecode(_decode(r)));
-  }
-
-  // POST /api/logs/operation
-  Future<OperationLog> apiLogsOperationPost({
-    required OperationLog operationLog,
-    required String idempotencyKey,
-  }) async {
-    final r = await _apiClient.invokeAPI(
-      '/api/logs/operation',
-      'POST',
-      [QueryParam('idempotencyKey', idempotencyKey)],
-      operationLog.toJson(),
-      {},
-      {},
-      'application/json',
-      const ['bearerAuth'],
-    );
-    if (r.statusCode >= 400) {
-      throw ApiException(r.statusCode, _errorMessageOrHttpStatus(r));
-    }
-    return OperationLog.fromJson(jsonDecode(_decode(r)));
-  }
-
-  // PUT /api/logs/operation/{logId}
-  Future<OperationLog> apiLogsOperationLogIdPut({
-    required int logId,
-    required OperationLog operationLog,
-    required String idempotencyKey,
-  }) async {
-    final r = await _apiClient.invokeAPI(
-      '/api/logs/operation/$logId',
-      'PUT',
-      [QueryParam('idempotencyKey', idempotencyKey)],
-      operationLog.toJson(),
-      {},
-      {},
-      'application/json',
-      const ['bearerAuth'],
-    );
-    if (r.statusCode >= 400) {
-      throw ApiException(r.statusCode, _errorMessageOrHttpStatus(r));
-    }
-    return OperationLog.fromJson(jsonDecode(_decode(r)));
-  }
-
-  // DELETE /api/logs/operation/{logId}
-  Future<void> apiLogsOperationLogIdDelete({required int logId}) async {
-    final r = await _apiClient.invokeAPI(
-      '/api/logs/operation/$logId',
-      'DELETE',
-      const [],
-      null,
-      {},
-      {},
-      null,
-      const ['bearerAuth'],
-    );
-    if (r.statusCode != 204) {
-      throw ApiException(r.statusCode, _errorMessageOrHttpStatus(r));
-    }
   }
 
   // GET /api/logs/operation/search/module?module=&page=&size=

@@ -142,11 +142,17 @@ class OffenseTypeControllerApi {
   }
 
   /// GET /api/offense-types
-  Future<List<OffenseTypeDictModel>> apiOffenseTypesGet() async {
+  Future<List<OffenseTypeDictModel>> apiOffenseTypesGet({
+    int page = 1,
+    int size = 20,
+  }) async {
     final response = await apiClient.invokeAPI(
       '/api/offense-types',
       'GET',
-      const [],
+      [
+        QueryParam('page', '$page'),
+        QueryParam('size', '$size'),
+      ],
       null,
       await _getHeaders(),
       const {},

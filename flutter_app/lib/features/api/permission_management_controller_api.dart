@@ -7,20 +7,20 @@ import 'package:get/get.dart';
 import 'package:http/http.dart' as http;
 import 'package:final_assignment_front/utils/services/auth_token_store.dart';
 
-/// å®ä¹ä¸ä¸ªå
-// ¨å±ç?defaultApiClient
+/// Shared default ApiClient instance.
+
 final ApiClient defaultApiClient = ApiClient();
 
 class PermissionManagementControllerApi {
   final ApiClient apiClient;
 
-  /// æé å½æ°ï¼å¯ä¼ å
-// ?ApiClientï¼å¦åä½¿ç¨å
-// ¨å±é»è®¤å®ä¾
+  /// Allows injecting a custom ApiClient and otherwise uses the shared default instance.
+
+
   PermissionManagementControllerApi([ApiClient? apiClient])
       : apiClient = apiClient ?? defaultApiClient;
 
-  /// ä»?SharedPreferences ä¸­è¯»å?jwtToken å¹¶è®¾ç½®å° ApiClient ä¸?
+  /// Loads the JWT token from storage and applies it to the ApiClient.
   Future<void> initializeWithJwt() async {
     final jwtToken = (await AuthTokenStore.instance.getJwtToken());
     if (jwtToken == null) {
@@ -31,7 +31,7 @@ class PermissionManagementControllerApi {
         'Initialized PermissionManagementControllerApi with token: $jwtToken');
   }
 
-  /// è§£ç ååºä½å­èå°å­ç¬¦ä¸?
+  /// Decodes the response body.
   String _decodeBodyBytes(http.Response response) => response.body;
 
   String _errorMessageOrHttpStatus(http.Response response) {
@@ -47,20 +47,26 @@ class PermissionManagementControllerApi {
     }
   }
 
-  /// è¾
-// å©æ¹æ³ï¼æ·»å æ¥è¯¢åæ°ï¼å¦åç§°æç´¢ï¼
+  /// Builds query parameters for optional name filters.
+
   List<QueryParam> _addQueryParams({String? name}) {
     final queryParams = <QueryParam>[];
     if (name != null) queryParams.add(QueryParam('name', name));
     return queryParams;
   }
 
-  /// GET /api/permissions - è·åæææé?
-  Future<List<PermissionManagement>> apiPermissionsGet() async {
+  /// GET /api/permissions - fetch all permissions.
+  Future<List<PermissionManagement>> apiPermissionsGet({
+    int page = 1,
+    int size = 50,
+  }) async {
     final response = await apiClient.invokeAPI(
       '/api/permissions',
       'GET',
-      [],
+      [
+        QueryParam('page', '$page'),
+        QueryParam('size', '$size'),
+      ],
       '',
       {},
       {},
@@ -73,8 +79,8 @@ class PermissionManagementControllerApi {
     return PermissionManagement.listFromJson(data);
   }
 
-  /// DELETE /api/permissions/name/{permissionName} - æ ¹æ®åç§°å é¤æé (ä»
-// ç®¡çå)
+  /// DELETE /api/permissions/name/{permissionName} - delete a permission by name (admin only).
+
   Future<void> apiPermissionsNamePermissionNameDelete(
       {required String permissionName}) async {
     if (permissionName.isEmpty) {
@@ -93,7 +99,7 @@ class PermissionManagementControllerApi {
     _throwIfError(response);
   }
 
-  /// GET /api/permissions/name/{permissionName} - æ ¹æ®åç§°è·åæé
+  /// GET /api/permissions/name/{permissionName} - fetch a permission by name.
   Future<PermissionManagement?> apiPermissionsNamePermissionNameGet(
       {required String permissionName}) async {
     if (permissionName.isEmpty) {
@@ -116,8 +122,8 @@ class PermissionManagementControllerApi {
     return PermissionManagement.fromJson(data);
   }
 
-  /// DELETE /api/permissions/{permissionId} - æ ¹æ®IDå é¤æé (ä»
-// ç®¡çå)
+  /// DELETE /api/permissions/{permissionId} - delete a permission by ID (admin only).
+
   Future<void> apiPermissionsPermissionIdDelete(
       {required String permissionId}) async {
     if (permissionId.isEmpty) {
@@ -136,7 +142,7 @@ class PermissionManagementControllerApi {
     _throwIfError(response);
   }
 
-  /// GET /api/permissions/{permissionId} - æ ¹æ®IDè·åæé
+  /// GET /api/permissions/{permissionId} - fetch a permission by ID.
   Future<PermissionManagement?> apiPermissionsPermissionIdGet(
       {required String permissionId}) async {
     if (permissionId.isEmpty) {
@@ -159,8 +165,8 @@ class PermissionManagementControllerApi {
     return PermissionManagement.fromJson(data);
   }
 
-  /// PUT /api/permissions/{permissionId} - æ´æ°æé (ä»
-// ç®¡çå)
+  /// PUT /api/permissions/{permissionId} - update a permission (admin only).
+
   Future<PermissionManagement> apiPermissionsPermissionIdPut({
     required String permissionId,
     required PermissionManagement permissionManagement,
@@ -184,8 +190,8 @@ class PermissionManagementControllerApi {
     return PermissionManagement.fromJson(data);
   }
 
-  /// POST /api/permissions - åå»ºæé (ä»
-// ç®¡çå)
+  /// POST /api/permissions - create a permission (admin only).
+
   Future<PermissionManagement> apiPermissionsPost(
       {required PermissionManagement permissionManagement}) async {
     final response = await apiClient.invokeAPI(
@@ -204,7 +210,7 @@ class PermissionManagementControllerApi {
     return PermissionManagement.fromJson(data);
   }
 
-  /// GET /api/permissions/search - æ ¹æ®åç§°æ¨¡ç³æç´¢æé
+  /// GET /api/permissions/search - search permissions by name.
   Future<List<PermissionManagement>> apiPermissionsSearchGet(
       {String? name}) async {
     final response = await apiClient.invokeAPI(
@@ -226,7 +232,7 @@ class PermissionManagementControllerApi {
   // WebSocket Methods (Aligned with HTTP Endpoints)
 
   /// GET /api/permissions (WebSocket)
-  /// å¯¹åºåç«¯: @WsAction(service="PermissionManagement", action="getAllPermissions")
+  /// Maps to @WsAction(service="PermissionManagement", action="getAllPermissions")
   Future<List<Object>?> eventbusPermissionsGet() async {
     final msg = {
       "service": "PermissionManagement",
@@ -245,7 +251,7 @@ class PermissionManagementControllerApi {
   }
 
   /// DELETE /api/permissions/name/{permissionName} (WebSocket)
-  /// å¯¹åºåç«¯: @WsAction(service="PermissionManagement", action="deletePermissionByName")
+  /// Maps to @WsAction(service="PermissionManagement", action="deletePermissionByName")
   Future<bool> eventbusPermissionsNamePermissionNameDelete(
       {required String permissionName}) async {
     if (permissionName.isEmpty) {
@@ -265,7 +271,7 @@ class PermissionManagementControllerApi {
   }
 
   /// GET /api/permissions/name/{permissionName} (WebSocket)
-  /// å¯¹åºåç«¯: @WsAction(service="PermissionManagement", action="getPermissionByName")
+  /// Maps to @WsAction(service="PermissionManagement", action="getPermissionByName")
   Future<Object?> eventbusPermissionsNamePermissionNameGet(
       {required String permissionName}) async {
     if (permissionName.isEmpty) {
@@ -285,7 +291,7 @@ class PermissionManagementControllerApi {
   }
 
   /// DELETE /api/permissions/{permissionId} (WebSocket)
-  /// å¯¹åºåç«¯: @WsAction(service="PermissionManagement", action="deletePermission")
+  /// Maps to @WsAction(service="PermissionManagement", action="deletePermission")
   Future<bool> eventbusPermissionsPermissionIdDelete(
       {required String permissionId}) async {
     if (permissionId.isEmpty) {
@@ -305,7 +311,7 @@ class PermissionManagementControllerApi {
   }
 
   /// GET /api/permissions/{permissionId} (WebSocket)
-  /// å¯¹åºåç«¯: @WsAction(service="PermissionManagement", action="getPermissionById")
+  /// Maps to @WsAction(service="PermissionManagement", action="getPermissionById")
   Future<Object?> eventbusPermissionsPermissionIdGet(
       {required String permissionId}) async {
     if (permissionId.isEmpty) {
@@ -325,7 +331,7 @@ class PermissionManagementControllerApi {
   }
 
   /// PUT /api/permissions/{permissionId} (WebSocket)
-  /// å¯¹åºåç«¯: @WsAction(service="PermissionManagement", action="updatePermission")
+  /// Maps to @WsAction(service="PermissionManagement", action="updatePermission")
   Future<Object?> eventbusPermissionsPermissionIdPut({
     required String permissionId,
     required PermissionManagement permissionManagement,
@@ -347,7 +353,7 @@ class PermissionManagementControllerApi {
   }
 
   /// POST /api/permissions (WebSocket)
-  /// å¯¹åºåç«¯: @WsAction(service="PermissionManagement", action="createPermission")
+  /// Maps to @WsAction(service="PermissionManagement", action="createPermission")
   Future<Object?> eventbusPermissionsPost(
       {required PermissionManagement permissionManagement}) async {
     final msg = {
@@ -364,7 +370,7 @@ class PermissionManagementControllerApi {
   }
 
   /// GET /api/permissions/search (WebSocket)
-  /// å¯¹åºåç«¯: @WsAction(service="PermissionManagement", action="getPermissionsByNameLike")
+  /// Maps to @WsAction(service="PermissionManagement", action="getPermissionsByNameLike")
   Future<List<Object>?> eventbusPermissionsSearchGet({String? name}) async {
     final msg = {
       "service": "PermissionManagement",
@@ -382,7 +388,7 @@ class PermissionManagementControllerApi {
     return null;
   }
 
-  // HTTP: GET /api/permissions/parent/{parentId} - æç¶èç¹æ¥è¯¢æé
+  // HTTP: GET /api/permissions/parent/{parentId} - fetch permissions by parent ID.
   Future<List<PermissionManagement>> apiPermissionsParentParentIdGet({
     required int parentId,
     int page = 1,

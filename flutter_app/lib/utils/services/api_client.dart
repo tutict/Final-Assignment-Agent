@@ -17,6 +17,7 @@ export 'package:final_assignment_front/utils/services/query_param.dart';
 /// Generic API client for HTTP/WebSocket
 class ApiClient {
   static final http.Client _sharedClient = IOClient(_buildHttpClient());
+  static const String _defaultWebSocketPath = '/eventbus';
 
   static HttpClient _buildHttpClient() {
     final client = HttpClient();
@@ -28,6 +29,9 @@ class ApiClient {
 
   /// Base URL (defaults to the Spring backend 8080)
   String basePath;
+
+  /// WebSocket base URL (defaults to the Vert.x event bus 8081)
+  String webSocketBasePath;
 
   /// HTTP client
   http.Client client;
@@ -48,7 +52,11 @@ class ApiClient {
   WebSocketChannel? _wsChannel;
   String? _wsUrl;
 
-  ApiClient({this.basePath = "http://localhost:8080", http.Client? client})
+  ApiClient({
+    this.basePath = "http://localhost:8080",
+    this.webSocketBasePath = "http://localhost:8081",
+    http.Client? client,
+  })
       : client = client ?? _sharedClient;
 
   void addDefaultHeader(String key, String value) {
@@ -246,8 +254,10 @@ class ApiClient {
             '${Uri.encodeQueryComponent(p.name)}=${Uri.encodeQueryComponent(p.value)}');
     final queryString = ps.isNotEmpty ? '?${ps.join('&')}' : '';
 
-    final wsScheme = basePath.startsWith('https') ? 'wss://' : 'ws://';
-    final stripped = basePath.replaceFirst(RegExp(r'^https?://'), '');
+    final wsScheme =
+        webSocketBasePath.startsWith('https') ? 'wss://' : 'ws://';
+    final stripped =
+        webSocketBasePath.replaceFirst(RegExp(r'^https?://'), '');
     final wsUrl = wsScheme + stripped + path + queryString;
 
     final headers = <String, dynamic>{};
@@ -286,9 +296,11 @@ class ApiClient {
   Future<Map<String, dynamic>> sendWsMessage(
       Map<String, dynamic> message) async {
     if (_wsChannel == null) {
-      throw ApiException(500, 'WebSocket not connected');
+      await connectWebSocket(_defaultWebSocketPath, const []);
     }
-    final encoded = jsonEncode(message);
+    final payload = Map<String, dynamic>.from(message);
+    payload.putIfAbsent('token', () => jwtToken ?? '');
+    final encoded = jsonEncode(payload);
     _wsChannel!.sink.add(encoded);
 
     try {
@@ -321,5 +333,15 @@ class ApiClient {
     }
     _wsChannel = null;
     _wsUrl = null;
+  }
+
+  String resolveWebSocketUrl(String path) {
+    final normalizedBase = webSocketBasePath.endsWith('/')
+        ? webSocketBasePath.substring(0, webSocketBasePath.length - 1)
+        : webSocketBasePath;
+    final wsScheme =
+        normalizedBase.startsWith('https://') ? 'wss://' : 'ws://';
+    final wsBase = normalizedBase.replaceFirst(RegExp(r'^https?://'), '');
+    return '$wsScheme$wsBase$path';
   }
 }

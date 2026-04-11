@@ -1,48 +1,125 @@
 import 'package:flutter/material.dart';
 
-/// 用于构建响应式UI的组件。
-///
-/// 该组件根据设备屏幕大小使用不同的构建器函数来返回不同的UI结构。
-/// 主要用于处理移动设备、平板电脑和桌面屏幕的响应式布局。
+enum ResponsiveTier {
+  phone,
+  tablet,
+  desktop,
+  wide,
+}
+
+class ResponsiveMetrics {
+  const ResponsiveMetrics._({
+    required this.width,
+    required this.tier,
+  });
+
+  factory ResponsiveMetrics.of(BuildContext context) {
+    return ResponsiveMetrics.fromWidth(MediaQuery.of(context).size.width);
+  }
+
+  factory ResponsiveMetrics.fromWidth(double width) {
+    return ResponsiveMetrics._(
+      width: width,
+      tier: _tierForWidth(width),
+    );
+  }
+
+  final double width;
+  final ResponsiveTier tier;
+
+  bool get isPhone => tier == ResponsiveTier.phone;
+  bool get isTablet => tier == ResponsiveTier.tablet;
+  bool get isDesktop => tier == ResponsiveTier.desktop;
+  bool get isWide => tier == ResponsiveTier.wide;
+
+  double get pagePadding {
+    switch (tier) {
+      case ResponsiveTier.phone:
+        return 16;
+      case ResponsiveTier.tablet:
+        return 20;
+      case ResponsiveTier.desktop:
+        return 24;
+      case ResponsiveTier.wide:
+        return 32;
+    }
+  }
+
+  double get sectionGap {
+    switch (tier) {
+      case ResponsiveTier.phone:
+        return 12;
+      case ResponsiveTier.tablet:
+        return 16;
+      case ResponsiveTier.desktop:
+        return 18;
+      case ResponsiveTier.wide:
+        return 24;
+    }
+  }
+
+  double get contentMaxWidth {
+    switch (tier) {
+      case ResponsiveTier.phone:
+        return width;
+      case ResponsiveTier.tablet:
+        return 960;
+      case ResponsiveTier.desktop:
+        return 1280;
+      case ResponsiveTier.wide:
+        return 1480;
+    }
+  }
+
+  static ResponsiveTier _tierForWidth(double width) {
+    if (width >= 1440) return ResponsiveTier.wide;
+    if (width >= 1100) return ResponsiveTier.desktop;
+    if (width >= 700) return ResponsiveTier.tablet;
+    return ResponsiveTier.phone;
+  }
+}
+
 class ResponsiveBuilder extends StatelessWidget {
-  /// ResponsiveBuilder 的构造函数。
   const ResponsiveBuilder({
     required this.mobileBuilder,
     required this.tabletBuilder,
     required this.desktopBuilder,
+    this.wideBuilder,
     super.key,
   });
 
-  // 移动设备屏幕的构建器函数。
   final Widget Function(
     BuildContext context,
     BoxConstraints constraints,
   ) mobileBuilder;
 
-  // 平板电脑屏幕的构建器函数。
   final Widget Function(
     BuildContext context,
     BoxConstraints constraints,
   ) tabletBuilder;
 
-  // 桌面屏幕的构建器函数。
   final Widget Function(
     BuildContext context,
     BoxConstraints constraints,
   ) desktopBuilder;
 
-  /// 判断当前设备是否为移动设备屏幕。
+  final Widget Function(
+    BuildContext context,
+    BoxConstraints constraints,
+  )? wideBuilder;
+
   static bool isMobile(BuildContext context) =>
-      MediaQuery.of(context).size.width < 700;
+      ResponsiveMetrics.of(context).isPhone;
 
-  /// 判断当前设备是否为平板电脑屏幕。
   static bool isTablet(BuildContext context) =>
-      MediaQuery.of(context).size.width < 1100 &&
-      MediaQuery.of(context).size.width >= 700;
+      ResponsiveMetrics.of(context).isTablet;
 
-  /// 判断当前设备是否为桌面屏幕。
   static bool isDesktop(BuildContext context) =>
-      MediaQuery.of(context).size.width >= 1100;
+      ResponsiveMetrics.of(context).isDesktop ||
+      ResponsiveMetrics.of(context).isWide;
+
+  static bool isWideDesktop(BuildContext context) =>
+      ResponsiveMetrics.of(context).isWide;
 
   @override
   Widget build(BuildContext context) {
@@ -55,13 +132,18 @@ class ResponsiveBuilder extends StatelessWidget {
       child: LayoutBuilder(
         key: ValueKey(MediaQuery.of(context).size.width),
         builder: (context, constraints) {
-          // 根据屏幕宽度选择合适的构建器函数。
-          if (constraints.maxWidth >= 1100) {
-            return desktopBuilder(context, constraints);
-          } else if (constraints.maxWidth >= 700) {
-            return tabletBuilder(context, constraints);
-          } else {
-            return mobileBuilder(context, constraints);
+          final metrics = ResponsiveMetrics.fromWidth(constraints.maxWidth);
+
+          switch (metrics.tier) {
+            case ResponsiveTier.wide:
+              return wideBuilder?.call(context, constraints) ??
+                  desktopBuilder(context, constraints);
+            case ResponsiveTier.desktop:
+              return desktopBuilder(context, constraints);
+            case ResponsiveTier.tablet:
+              return tabletBuilder(context, constraints);
+            case ResponsiveTier.phone:
+              return mobileBuilder(context, constraints);
           }
         },
       ),

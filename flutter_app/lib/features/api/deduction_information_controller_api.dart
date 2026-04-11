@@ -33,15 +33,17 @@ class DeductionInformationControllerApi {
         : localizeHttpStatusError(response.statusCode);
   }
 
-  Future<Map<String, String>> _headers() async {
+  Future<Map<String, String>> _headers({String? idempotencyKey}) async {
     final token = (await AuthTokenStore.instance.getJwtToken()) ?? '';
-    return {
+    final headers = <String, String>{
       'Content-Type': 'application/json; charset=utf-8',
       if (token.isNotEmpty) 'Authorization': 'Bearer $token',
     };
+    if (idempotencyKey != null && idempotencyKey.trim().isNotEmpty) {
+      headers['Idempotency-Key'] = idempotencyKey.trim();
+    }
+    return headers;
   }
-
-  List<QueryParam> _idem(String key) => [QueryParam('idempotencyKey', key)];
 
   // POST /api/deductions
   Future<DeductionRecordModel> apiDeductionsPost({
@@ -54,9 +56,9 @@ class DeductionInformationControllerApi {
     final r = await apiClient.invokeAPI(
       '/api/deductions',
       'POST',
-      _idem(idempotencyKey),
+      const [],
       body.toJson(),
-      await _headers(),
+      await _headers(idempotencyKey: idempotencyKey),
       const {},
       'application/json',
       const ['bearerAuth'],
@@ -90,11 +92,14 @@ class DeductionInformationControllerApi {
   }
 
   // GET /api/deductions
-  Future<List<DeductionRecordModel>> apiDeductionsGet() async {
+  Future<List<DeductionRecordModel>> apiDeductionsGet({
+    int page = 1,
+    int size = 20,
+  }) async {
     final r = await apiClient.invokeAPI(
       '/api/deductions',
       'GET',
-      const [],
+      [QueryParam('page', '$page'), QueryParam('size', '$size')],
       null,
       await _headers(),
       const {},
@@ -107,49 +112,6 @@ class DeductionInformationControllerApi {
     if (r.body.isEmpty) return [];
     final List<dynamic> data = jsonDecode(_decode(r));
     return data.map((e) => DeductionRecordModel.fromJson(e)).toList();
-  }
-
-  // PUT /api/deductions/{deductionId}
-  Future<DeductionRecordModel> apiDeductionsDeductionIdPut({
-    required int deductionId,
-    required DeductionRecordModel body,
-    required String idempotencyKey,
-  }) async {
-    if (idempotencyKey.isEmpty) {
-      throw ApiException(400, localizeMissingRequiredParam('idempotencyKey'));
-    }
-    final r = await apiClient.invokeAPI(
-      '/api/deductions/$deductionId',
-      'PUT',
-      _idem(idempotencyKey),
-      body.toJson(),
-      await _headers(),
-      const {},
-      'application/json',
-      const ['bearerAuth'],
-    );
-    if (r.statusCode >= 400) {
-      throw ApiException(r.statusCode, _errorMessageOrHttpStatus(r));
-    }
-    return DeductionRecordModel.fromJson(jsonDecode(_decode(r)));
-  }
-
-  // DELETE /api/deductions/{deductionId}
-  Future<void> apiDeductionsDeductionIdDelete(
-      {required int deductionId}) async {
-    final r = await apiClient.invokeAPI(
-      '/api/deductions/$deductionId',
-      'DELETE',
-      const [],
-      null,
-      await _headers(),
-      const {},
-      null,
-      const ['bearerAuth'],
-    );
-    if (r.statusCode != 204) {
-      throw ApiException(r.statusCode, _errorMessageOrHttpStatus(r));
-    }
   }
 
   // GET /api/deductions/driver/{driverId}?page=&size=

@@ -4,7 +4,7 @@ import 'package:final_assignment_front/features/dashboard/views/user/widgets/use
 import 'package:final_assignment_front/features/dashboard/views/shared/widgets/dashboard_page_app_bar.dart';
 import 'package:flutter/material.dart';
 
-enum DashboardPageType { manager, user, custom }
+enum DashboardPageType { admin, manager, user, custom }
 
 class DashboardPageTemplate extends StatelessWidget {
   const DashboardPageTemplate({
@@ -12,7 +12,7 @@ class DashboardPageTemplate extends StatelessWidget {
     required this.theme,
     required this.title,
     required this.body,
-    this.pageType = DashboardPageType.manager,
+    this.pageType = DashboardPageType.admin,
     this.actions = const [],
     this.onRefresh,
     this.onThemeToggle,
@@ -111,6 +111,7 @@ class DashboardPageTemplate extends StatelessWidget {
           onThemeToggle: onThemeToggle,
           automaticallyImplyLeading: true,
         );
+      case DashboardPageType.admin:
       case DashboardPageType.manager:
         return DashboardPageAppBar(
           theme: theme,

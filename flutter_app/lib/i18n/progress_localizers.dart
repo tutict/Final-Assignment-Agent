@@ -7,6 +7,9 @@ const String progressStatusPending = 'Pending';
 const String progressStatusProcessing = 'Processing';
 const String progressStatusCompleted = 'Completed';
 const String progressStatusArchived = 'Archived';
+const String progressViewItems = 'items';
+const String progressViewRefunds = 'refunds';
+const String refundAuditStatusAll = 'ALL';
 
 const List<String> kProgressStatusCategories = [
   progressStatusPending,
@@ -14,6 +17,54 @@ const List<String> kProgressStatusCategories = [
   progressStatusCompleted,
   progressStatusArchived,
 ];
+
+const List<String> kRefundAuditStatusCategories = [
+  refundAuditStatusAll,
+  'SUCCESS',
+  'FAILED',
+];
+
+String? validateProgressField(
+  String field, {
+  String? value,
+  bool required = false,
+}) {
+  final trimmedValue = value?.trim() ?? '';
+  String fieldLabel;
+  int? maxLength;
+  String tooLongKey;
+
+  switch (field) {
+    case 'title':
+      fieldLabel = 'progress.field.title'.tr;
+      maxLength = 100;
+      tooLongKey = 'progress.validation.titleTooLong';
+      break;
+    case 'details':
+      fieldLabel = 'progress.field.detailsOptional'.tr;
+      maxLength = 500;
+      tooLongKey = 'progress.validation.detailsTooLong';
+      break;
+    default:
+      return null;
+  }
+
+  if (required && trimmedValue.isEmpty) {
+    return formatRequiredFieldValidation(
+      'progress.validation.required',
+      fieldLabel,
+    );
+  }
+  if (trimmedValue.isEmpty) {
+    return null;
+  }
+
+  return validateMaxLength(
+    trimmedValue,
+    maxLength: maxLength,
+    key: tooLongKey,
+  );
+}
 
 String formatProgressDateTime(
   DateTime? value, {
@@ -90,5 +141,64 @@ Color progressStatusColor(String? status, ThemeData themeData) {
       return themeData.colorScheme.outline;
     default:
       return themeData.colorScheme.outlineVariant;
+  }
+}
+
+String normalizeRefundAuditStatusCode(String? status) {
+  final normalized = status?.trim();
+  if (normalized == null || normalized.isEmpty) {
+    return '';
+  }
+
+  switch (normalized.toUpperCase()) {
+    case 'SUCCESS':
+      return 'SUCCESS';
+    case 'FAILED':
+      return 'FAILED';
+    case 'ALL':
+      return refundAuditStatusAll;
+    default:
+      return normalized.toUpperCase();
+  }
+}
+
+String localizeRefundAuditStatus(String? status) {
+  switch (normalizeRefundAuditStatusCode(status)) {
+    case refundAuditStatusAll:
+      return 'progress.refund.status.all'.tr;
+    case 'SUCCESS':
+      return 'common.success'.tr;
+    case 'FAILED':
+      return 'common.failed'.tr;
+    default:
+      return 'common.unknown'.tr;
+  }
+}
+
+String localizeRefundBusinessType(String? businessType) {
+  switch ((businessType ?? '').trim().toUpperCase()) {
+    case 'PARTIAL_REFUND':
+      return 'progress.refund.type.partial'.tr;
+    case 'WAIVE_AND_REFUND':
+      return 'progress.refund.type.waive'.tr;
+    case 'PARTIAL_REFUND_FAILED':
+      return 'progress.refund.type.partialFailed'.tr;
+    case 'WAIVE_AND_REFUND_FAILED':
+      return 'progress.refund.type.waiveFailed'.tr;
+    default:
+      return businessType?.trim().isNotEmpty == true
+          ? businessType!.trim()
+          : 'common.unknown'.tr;
+  }
+}
+
+Color refundAuditStatusColor(String? status, ThemeData themeData) {
+  switch (normalizeRefundAuditStatusCode(status)) {
+    case 'SUCCESS':
+      return themeData.colorScheme.tertiary;
+    case 'FAILED':
+      return themeData.colorScheme.error;
+    default:
+      return themeData.colorScheme.outline;
   }
 }

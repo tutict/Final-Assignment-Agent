@@ -1,10 +1,13 @@
 // ignore_for_file: use_build_context_synchronously
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:get/get.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:final_assignment_front/constants/app_constants.dart';
 import 'package:final_assignment_front/config/routes/app_routes.dart';
 import 'package:final_assignment_front/config/themes/app_theme.dart';
 import 'package:final_assignment_front/features/api/auth_controller_api.dart';
@@ -12,11 +15,12 @@ import 'package:final_assignment_front/features/api/driver_information_controlle
 import 'package:final_assignment_front/features/api/user_management_controller_api.dart';
 import 'package:final_assignment_front/features/dashboard/controllers/chat_controller.dart';
 import 'package:final_assignment_front/i18n/auth_localizers.dart';
-import 'package:final_assignment_front/features/model/driver_information.dart';
 import 'package:final_assignment_front/features/model/login_request.dart';
 import 'package:final_assignment_front/features/model/register_request.dart';
 import 'package:final_assignment_front/shared_components/local_captcha_main.dart';
+import 'package:final_assignment_front/shared_components/responsive_builder.dart';
 import 'package:final_assignment_front/utils/helpers/api_exception.dart';
+import 'package:final_assignment_front/utils/helpers/role_utils.dart';
 import 'package:final_assignment_front/utils/services/auth_token_store.dart';
 
 String generateIdempotencyKey() =>
@@ -198,16 +202,26 @@ class _LoginScreenState extends State<LoginScreen> with ValidatorMixin {
 
       final jwtToken = result['jwtToken'];
       final decodedJwt = _decodeJwt(jwtToken);
-      _userRole = (decodedJwt['roles'] ?? 'USER') as String;
+      final roleCodes = normalizeRoleCodes(decodedJwt['roles']);
+      _userRole = resolveStoredUserRole(roleCodes);
 
       final prefs = await SharedPreferences.getInstance();
       await AuthTokenStore.instance.setJwtToken(jwtToken);
+      final refreshToken = result['refreshToken']?.toString();
+      if (refreshToken != null && refreshToken.isNotEmpty) {
+        await prefs.setString('refreshToken', refreshToken);
+      } else {
+        await prefs.remove('refreshToken');
+      }
       await prefs.setString('userRole', _userRole!);
+      await prefs.setStringList('userRoles', roleCodes);
       await prefs.setString('userName', username);
 
       final userData = result['user'] ?? {};
       final int? userIdFromLogin = userData['userId'];
-      String resolvedName = userData['name'] ?? username.split('@').first;
+      String resolvedName = userData['realName'] ??
+          userData['username'] ??
+          username.split('@').first;
       String resolvedEmail = userData['email'] ?? username;
 
       await driverApi.initializeWithJwt();
@@ -216,8 +230,7 @@ class _LoginScreenState extends State<LoginScreen> with ValidatorMixin {
 
       int? userId = userIdFromLogin;
       try {
-        final userInfo = await userManagementApi.apiUsersSearchUsernameGet(
-            username: username);
+        final userInfo = await userManagementApi.apiUsersMeGet();
         if (userInfo != null) {
           userId = userInfo.userId ?? userId;
           resolvedName = userInfo.realName ?? userInfo.username ?? resolvedName;
@@ -226,28 +239,18 @@ class _LoginScreenState extends State<LoginScreen> with ValidatorMixin {
       } catch (_) {}
 
       String driverName = resolvedName;
-      if (userId != null) {
-        try {
-          final driverInfo =
-              await driverApi.apiDriversDriverIdGet(driverId: userId);
-          if (driverInfo?.name != null && driverInfo!.name!.isNotEmpty) {
-            driverName = driverInfo.name!;
-          }
-        } catch (error) {
-          if (error is ApiException && error.code == 404) {
-            await driverApi.apiDriversPost(
-              driverInformation: DriverInformation(
-                driverId: userId,
-                name: resolvedName,
-                contactNumber: '',
-                idCardNumber: '',
-              ),
-              idempotencyKey: generateIdempotencyKey(),
-            );
-          }
+      try {
+        final driverInfo = await driverApi.apiDriversMeGet();
+        if (driverInfo?.name != null && driverInfo!.name!.isNotEmpty) {
+          driverName = driverInfo.name!;
+        }
+      } catch (error) {
+        if (error is! ApiException || error.code != 404) {
+          rethrow;
         }
       }
 
+      await prefs.setString('displayName', driverName);
       await prefs.setString('driverName', driverName);
       await prefs.setString('userEmail', resolvedEmail);
       if (userId != null) {
@@ -291,111 +294,169 @@ class _LoginScreenState extends State<LoginScreen> with ValidatorMixin {
   }
 
   Future<void> _showResetPasswordDialog() async {
-    final emailController = TextEditingController(
-      text: _loginEmailController.text.trim(),
-    );
-    final passwordController = TextEditingController();
-
-    final result = await showDialog<bool>(
-      context: context,
-      builder: (context) => Theme(
-        data: _pageTheme,
-        child: AlertDialog(
-          title: Text('auth.resetPassword'.tr),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: emailController,
-                decoration: InputDecoration(labelText: 'auth.email'.tr),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: passwordController,
-                obscureText: true,
-                decoration: InputDecoration(labelText: 'auth.newPassword'.tr),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: Text('common.cancel'.tr),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: Text('common.continue'.tr),
-            ),
-          ],
-        ),
-      ),
-    );
-
-    if (result != true) return;
-    final emailError = validateEmail(emailController.text.trim());
-    if (emailError != null) {
-      _showMessage(emailError, isError: true);
-      return;
-    }
-    final passwordError = validatePassword(passwordController.text.trim());
-    if (passwordError != null) {
-      _showMessage(passwordError, isError: true);
-      return;
-    }
-    final isCaptchaValid = await showDialog<bool>(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => const LocalCaptchaMain(),
-    );
-    if (isCaptchaValid != true) {
-      _showMessage('auth.error.passwordResetCancelled'.tr, isError: true);
-      return;
-    }
-
-    final jwtToken = await AuthTokenStore.instance.getJwtToken();
-    if (jwtToken == null) {
-      _showMessage('auth.error.loginRequiredForReset'.tr, isError: true);
-      return;
-    }
+    final formKey = GlobalKey<FormState>();
+    final currentPasswordController = TextEditingController();
+    final newPasswordController = TextEditingController();
+    final confirmPasswordController = TextEditingController();
+    bool obscureCurrentPassword = true;
+    bool obscureNewPassword = true;
+    bool obscureConfirmPassword = true;
 
     try {
-      final response = await authApi.apiClient.invokeAPI(
-        '/api/users/me/password?idempotencyKey=${generateIdempotencyKey()}',
-        'PUT',
-        const [],
-        passwordController.text.trim(),
-        {
-          'Authorization': 'Bearer $jwtToken',
-          'Content-Type': 'text/plain; charset=utf-8',
-        },
-        const {},
-        'text/plain',
-        const ['bearerAuth'],
+      final result = await showDialog<bool>(
+        context: context,
+        builder: (context) => Theme(
+          data: _pageTheme,
+          child: StatefulBuilder(
+            builder: (context, dialogSetState) => AlertDialog(
+              title: Text('auth.resetPassword'.tr),
+              content: Form(
+                key: formKey,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextFormField(
+                      controller: currentPasswordController,
+                      validator: validatePassword,
+                      obscureText: obscureCurrentPassword,
+                      decoration: InputDecoration(
+                        labelText: 'auth.currentPassword'.tr,
+                        suffixIcon: IconButton(
+                          onPressed: () {
+                            dialogSetState(() {
+                              obscureCurrentPassword = !obscureCurrentPassword;
+                            });
+                          },
+                          icon: Icon(
+                            obscureCurrentPassword
+                                ? Icons.visibility_outlined
+                                : Icons.visibility_off_outlined,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextFormField(
+                      controller: newPasswordController,
+                      validator: validatePassword,
+                      obscureText: obscureNewPassword,
+                      decoration: InputDecoration(
+                        labelText: 'auth.newPassword'.tr,
+                        suffixIcon: IconButton(
+                          onPressed: () {
+                            dialogSetState(() {
+                              obscureNewPassword = !obscureNewPassword;
+                            });
+                          },
+                          icon: Icon(
+                            obscureNewPassword
+                                ? Icons.visibility_outlined
+                                : Icons.visibility_off_outlined,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextFormField(
+                      controller: confirmPasswordController,
+                      validator: (value) {
+                        final passwordError = validatePassword(value);
+                        if (passwordError != null) {
+                          return passwordError;
+                        }
+                        if (value!.trim() !=
+                            newPasswordController.text.trim()) {
+                          return 'auth.error.passwordMismatch'.tr;
+                        }
+                        return null;
+                      },
+                      obscureText: obscureConfirmPassword,
+                      decoration: InputDecoration(
+                        labelText: 'auth.confirmPassword'.tr,
+                        suffixIcon: IconButton(
+                          onPressed: () {
+                            dialogSetState(() {
+                              obscureConfirmPassword = !obscureConfirmPassword;
+                            });
+                          },
+                          icon: Icon(
+                            obscureConfirmPassword
+                                ? Icons.visibility_outlined
+                                : Icons.visibility_off_outlined,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context, false),
+                  child: Text('common.cancel'.tr),
+                ),
+                FilledButton(
+                  onPressed: () {
+                    if (formKey.currentState?.validate() != true) {
+                      return;
+                    }
+                    Navigator.pop(context, true);
+                  },
+                  child: Text('common.continue'.tr),
+                ),
+              ],
+            ),
+          ),
+        ),
       );
-      if (response.statusCode == 200) {
+
+      if (result != true) return;
+      final isCaptchaValid = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => const LocalCaptchaMain(),
+      );
+      if (isCaptchaValid != true) {
+        _showMessage('auth.error.passwordResetCancelled'.tr, isError: true);
+        return;
+      }
+
+      final jwtToken = await AuthTokenStore.instance.getJwtToken();
+      if (jwtToken == null) {
+        _showMessage('auth.error.loginRequiredForReset'.tr, isError: true);
+        return;
+      }
+
+      try {
+        final userManagementApi = UserManagementControllerApi();
+        await userManagementApi.apiUsersMePasswordPut(
+          currentPassword: currentPasswordController.text.trim(),
+          newPassword: newPasswordController.text.trim(),
+          idempotencyKey: generateIdempotencyKey(),
+        );
         _showMessage('auth.success.passwordUpdated'.tr);
-      } else {
+      } on ApiException catch (error) {
         _showMessage(
-          'auth.error.passwordResetFailed'
-              .trParams({'code': '${response.statusCode}'}),
+          formatAuthApiError(
+            error,
+            'auth.error.passwordResetFailed'.trParams(
+              {'code': '${error.code}'},
+            ),
+          ),
+          isError: true,
+        );
+      } catch (error) {
+        _showMessage(
+          'auth.error.passwordResetError'.trParams({
+            'error': formatAuthErrorDetail(error),
+          }),
           isError: true,
         );
       }
-    } on ApiException catch (error) {
-      _showMessage(
-        formatAuthApiError(
-          error,
-          'auth.error.passwordResetFailed'.trParams({'code': '${error.code}'}),
-        ),
-        isError: true,
-      );
-    } catch (error) {
-      _showMessage(
-        'auth.error.passwordResetError'.trParams({
-          'error': formatAuthErrorDetail(error),
-        }),
-        isError: true,
-      );
+    } finally {
+      currentPasswordController.dispose();
+      newPasswordController.dispose();
+      confirmPasswordController.dispose();
     }
   }
 
@@ -412,7 +473,7 @@ class _LoginScreenState extends State<LoginScreen> with ValidatorMixin {
   @override
   Widget build(BuildContext context) {
     final theme = _pageTheme;
-    final isWide = MediaQuery.of(context).size.width >= 980;
+    final metrics = ResponsiveMetrics.of(context);
 
     return Theme(
       data: theme,
@@ -422,90 +483,220 @@ class _LoginScreenState extends State<LoginScreen> with ValidatorMixin {
           children: [
             const _LoginBackdrop(),
             SafeArea(
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Column(
-                  children: [
-                    Row(
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  if (metrics.isDesktop || metrics.isWide) {
+                    final authWidth = math.min(
+                      constraints.maxWidth * 0.34,
+                      430.0,
+                    );
+
+                    return Stack(
                       children: [
-                        Container(
-                          width: 44,
-                          height: 44,
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              colors: [
-                                theme.colorScheme.primary,
-                                theme.colorScheme.tertiary,
-                              ],
+                        Positioned.fill(
+                          child: _RevealIn(
+                            child: _BrandPanel(
+                              theme: theme,
+                              darkMode: _isDarkMode,
+                              fullBleed: true,
                             ),
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                          child: Icon(
-                            Icons.motion_photos_auto_rounded,
-                            color: theme.colorScheme.onPrimary,
                           ),
                         ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
+                        Positioned(
+                          top: 20,
+                          left: 20,
+                          right: 20,
+                          child: Row(
                             children: [
-                              Text('app.name'.tr,
-                                  style: theme.textTheme.titleLarge),
                               Text(
-                                'auth.brandTitle'.tr,
-                                style: theme.textTheme.bodySmall,
+                                'app.name'.tr,
+                                style: theme.textTheme.titleLarge?.copyWith(
+                                  color: Colors.white,
+                                ),
+                              ),
+                              const Spacer(),
+                              IconButton.filledTonal(
+                                onPressed: _toggleTheme,
+                                icon: const Icon(Icons.contrast_rounded),
+                                tooltip: 'common.toggleTheme'.tr,
                               ),
                             ],
                           ),
                         ),
-                        IconButton(
-                          onPressed: _toggleTheme,
-                          icon: const Icon(Icons.contrast_rounded),
-                          tooltip: 'common.toggleTheme'.tr,
+                        Positioned(
+                          top: 88,
+                          right: 32,
+                          bottom: 32,
+                          child: SizedBox(
+                            width: authWidth,
+                            child: Align(
+                              alignment: Alignment.centerRight,
+                              child: SingleChildScrollView(
+                                padding: EdgeInsets.zero,
+                                child: _RevealIn(
+                                  child: _AuthPanel(state: this, theme: theme),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    );
+                  }
+
+                  if (metrics.isTablet) {
+                    final splitLayout = constraints.maxWidth >= 900 &&
+                        constraints.maxWidth > constraints.maxHeight;
+
+                    if (splitLayout) {
+                      return Padding(
+                        padding: EdgeInsets.all(metrics.pagePadding),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Expanded(
+                              flex: 6,
+                              child: _RevealIn(
+                                child: _BrandPanel(
+                                  theme: theme,
+                                  darkMode: _isDarkMode,
+                                  compact: true,
+                                ),
+                              ),
+                            ),
+                            SizedBox(width: metrics.sectionGap),
+                            SizedBox(
+                              width: math.min(
+                                constraints.maxWidth * 0.36,
+                                400.0,
+                              ),
+                              child: Column(
+                                children: [
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: Text(
+                                          'app.name'.tr,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: theme.textTheme.titleLarge,
+                                        ),
+                                      ),
+                                      IconButton.filledTonal(
+                                        onPressed: _toggleTheme,
+                                        icon:
+                                            const Icon(Icons.contrast_rounded),
+                                        tooltip: 'common.toggleTheme'.tr,
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 12),
+                                  Expanded(
+                                    child: Align(
+                                      alignment: Alignment.center,
+                                      child: SingleChildScrollView(
+                                        child: _RevealIn(
+                                          child: _AuthPanel(
+                                            state: this,
+                                            theme: theme,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    }
+
+                    return SingleChildScrollView(
+                      padding: EdgeInsets.all(metrics.pagePadding),
+                      child: Center(
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 900),
+                          child: Column(
+                            children: [
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      'app.name'.tr,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: theme.textTheme.titleLarge,
+                                    ),
+                                  ),
+                                  IconButton.filledTonal(
+                                    onPressed: _toggleTheme,
+                                    icon: const Icon(Icons.contrast_rounded),
+                                    tooltip: 'common.toggleTheme'.tr,
+                                  ),
+                                ],
+                              ),
+                              SizedBox(height: metrics.sectionGap),
+                              _RevealIn(
+                                child: _BrandPanel(
+                                  theme: theme,
+                                  darkMode: _isDarkMode,
+                                  compact: true,
+                                ),
+                              ),
+                              SizedBox(height: metrics.sectionGap),
+                              ConstrainedBox(
+                                constraints:
+                                    const BoxConstraints(maxWidth: 520),
+                                child: _RevealIn(
+                                  child: _AuthPanel(state: this, theme: theme),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
+                  }
+
+                  return SingleChildScrollView(
+                    padding: EdgeInsets.all(metrics.pagePadding),
+                    child: Column(
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                'app.name'.tr,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.titleLarge,
+                              ),
+                            ),
+                            IconButton(
+                              onPressed: _toggleTheme,
+                              icon: const Icon(Icons.contrast_rounded),
+                              tooltip: 'common.toggleTheme'.tr,
+                            ),
+                          ],
+                        ),
+                        SizedBox(height: metrics.sectionGap),
+                        _RevealIn(
+                          child: _BrandPanel(
+                            theme: theme,
+                            darkMode: _isDarkMode,
+                            compact: true,
+                            fullBleed: true,
+                          ),
+                        ),
+                        SizedBox(height: metrics.sectionGap),
+                        _RevealIn(
+                          child: _AuthPanel(state: this, theme: theme),
                         ),
                       ],
                     ),
-                    const SizedBox(height: 24),
-                    Expanded(
-                      child: Center(
-                        child: ConstrainedBox(
-                          constraints: const BoxConstraints(maxWidth: 1240),
-                          child: isWide
-                              ? Row(
-                                  children: [
-                                    Expanded(
-                                      child: _BrandPanel(
-                                        theme: theme,
-                                        darkMode: _isDarkMode,
-                                      ),
-                                    ),
-                                    const SizedBox(width: 24),
-                                    SizedBox(
-                                      width: 460,
-                                      child:
-                                          _AuthPanel(state: this, theme: theme),
-                                    ),
-                                  ],
-                                )
-                              : SingleChildScrollView(
-                                  child: Column(
-                                    children: [
-                                      _BrandPanel(
-                                        theme: theme,
-                                        darkMode: _isDarkMode,
-                                        compact: true,
-                                      ),
-                                      const SizedBox(height: 18),
-                                      _AuthPanel(state: this, theme: theme),
-                                    ],
-                                  ),
-                                ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
+                  );
+                },
               ),
             ),
           ],
@@ -526,50 +717,54 @@ class _AuthPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surface.withValues(alpha: 0.94),
-        borderRadius: BorderRadius.circular(32),
-        border: Border.all(color: theme.colorScheme.outlineVariant),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('auth.enterWorkspace'.tr, style: theme.textTheme.headlineSmall),
-          const SizedBox(height: 8),
-          Text(
-            'auth.enterWorkspaceBody'.tr,
-            style: theme.textTheme.bodyMedium,
-          ),
-          const SizedBox(height: 18),
-          SegmentedButton<_AuthMode>(
-            showSelectedIcon: false,
-            segments: [
-              ButtonSegment(
-                value: _AuthMode.login,
-                label: Text('common.login'.tr),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final narrow = constraints.maxWidth < 360;
+
+        return _SurfaceFrame(
+          padding: EdgeInsets.all(narrow ? 18 : 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'auth.enterWorkspace'.tr,
+                style: theme.textTheme.headlineSmall,
               ),
-              ButtonSegment(
-                value: _AuthMode.register,
-                label: Text('common.register'.tr),
+              const SizedBox(height: 8),
+              Text(
+                'auth.enterWorkspaceBody'.tr,
+                style: theme.textTheme.bodyMedium,
+              ),
+              const SizedBox(height: 18),
+              SegmentedButton<_AuthMode>(
+                showSelectedIcon: false,
+                segments: [
+                  ButtonSegment(
+                    value: _AuthMode.login,
+                    label: Text('common.login'.tr),
+                  ),
+                  ButtonSegment(
+                    value: _AuthMode.register,
+                    label: Text('common.register'.tr),
+                  ),
+                ],
+                selected: {state._mode},
+                onSelectionChanged: (selection) {
+                  state.setMode(selection.first);
+                },
+              ),
+              const SizedBox(height: 20),
+              AnimatedSwitcher(
+                duration: const Duration(milliseconds: 220),
+                child: state._mode == _AuthMode.login
+                    ? _LoginForm(state: state)
+                    : _RegisterForm(state: state),
               ),
             ],
-            selected: {state._mode},
-            onSelectionChanged: (selection) {
-              state.setMode(selection.first);
-            },
           ),
-          const SizedBox(height: 20),
-          AnimatedSwitcher(
-            duration: const Duration(milliseconds: 220),
-            child: state._mode == _AuthMode.login
-                ? _LoginForm(state: state)
-                : _RegisterForm(state: state),
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 }
@@ -625,21 +820,51 @@ class _LoginForm extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 12),
-          Row(
-            children: [
-              TextButton(
-                onPressed:
-                    state._isSubmitting ? null : state._showResetPasswordDialog,
-                child: Text('auth.resetPassword'.tr),
-              ),
-              const Spacer(),
-              TextButton(
-                onPressed: state._isSubmitting
-                    ? null
-                    : () => state.setMode(_AuthMode.register),
-                child: Text('auth.createAccount'.tr),
-              ),
-            ],
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final compactActions = constraints.maxWidth < 360;
+
+              if (compactActions) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    TextButton(
+                      onPressed: state._isSubmitting
+                          ? null
+                          : state._showResetPasswordDialog,
+                      child: Text('auth.resetPassword'.tr),
+                    ),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: TextButton(
+                        onPressed: state._isSubmitting
+                            ? null
+                            : () => state.setMode(_AuthMode.register),
+                        child: Text('auth.createAccount'.tr),
+                      ),
+                    ),
+                  ],
+                );
+              }
+
+              return Row(
+                children: [
+                  TextButton(
+                    onPressed: state._isSubmitting
+                        ? null
+                        : state._showResetPasswordDialog,
+                    child: Text('auth.resetPassword'.tr),
+                  ),
+                  const Spacer(),
+                  TextButton(
+                    onPressed: state._isSubmitting
+                        ? null
+                        : () => state.setMode(_AuthMode.register),
+                    child: Text('auth.createAccount'.tr),
+                  ),
+                ],
+              );
+            },
           ),
         ],
       ),
@@ -738,112 +963,308 @@ class _BrandPanel extends StatelessWidget {
     required this.theme,
     required this.darkMode,
     this.compact = false,
+    this.fullBleed = false,
   });
 
   final ThemeData theme;
   final bool darkMode;
   final bool compact;
+  final bool fullBleed;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: EdgeInsets.all(compact ? 22 : 32),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surface.withValues(alpha: 0.84),
-        borderRadius: BorderRadius.circular(32),
-        border: Border.all(color: theme.colorScheme.outlineVariant),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            decoration: BoxDecoration(
-              color: theme.colorScheme.primaryContainer,
-              borderRadius: BorderRadius.circular(999),
-            ),
-            child: Text(
-              'auth.brandBadge'.tr,
-              style: theme.textTheme.labelLarge?.copyWith(
-                color: theme.colorScheme.onPrimaryContainer,
-              ),
-            ),
+    final content = LayoutBuilder(
+      builder: (context, constraints) {
+        final stacked = compact || constraints.maxWidth < 760;
+        final hero = _BrandHero(
+          theme: theme,
+          compact: compact,
+          fullBleed: fullBleed,
+        );
+        final rails = [
+          _MetricRail(
+            label: 'auth.metric.mode'.tr,
+            value: darkMode ? 'common.dark'.tr : 'common.light'.tr,
           ),
-          const SizedBox(height: 20),
-          Text(
-            'auth.brandTitle'.tr,
-            style: theme.textTheme.displaySmall,
+          _MetricRail(
+            label: 'auth.metric.flow'.tr,
+            value: 'auth.metric.flowValue'.tr,
           ),
-          const SizedBox(height: 12),
-          Text(
-            'auth.brandBody'.tr,
-            style: theme.textTheme.bodyLarge,
+          _MetricRail(
+            label: 'auth.metric.agent'.tr,
+            value: 'auth.metric.agentValue'.tr,
           ),
-          const SizedBox(height: 24),
-          Wrap(
-            spacing: 14,
-            runSpacing: 14,
+        ];
+
+        if (stacked) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _MetricTile(
-                label: 'auth.metric.mode'.tr,
-                value: darkMode ? 'common.dark'.tr : 'common.light'.tr,
-                tone: theme.colorScheme.primary,
-              ),
-              _MetricTile(
-                label: 'auth.metric.flow'.tr,
-                value: 'auth.metric.flowValue'.tr,
-                tone: theme.colorScheme.tertiary,
-              ),
-              _MetricTile(
-                label: 'auth.metric.agent'.tr,
-                value: 'auth.metric.agentValue'.tr,
-                tone: const Color(0xFF0F766E),
-              ),
+              hero,
+              const SizedBox(height: 20),
+              ...rails
+                  .expand((rail) => [rail, const SizedBox(height: 12)])
+                  .toList()
+                ..removeLast(),
             ],
-          ),
-          const SizedBox(height: 24),
-          _CommandCard(
-            theme: theme,
-            lines: [
-              'auth.promptLine1'.tr,
-              'auth.promptLine2'.tr,
-            ],
-          ),
-        ],
-      ),
+          );
+        }
+
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Expanded(flex: 8, child: hero),
+            const SizedBox(width: 24),
+            Expanded(
+              flex: 3,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  for (var i = 0; i < rails.length; i++) ...[
+                    rails[i],
+                    if (i != rails.length - 1) const SizedBox(height: 18),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (fullBleed) {
+      return content;
+    }
+
+    return _SurfaceFrame(
+      padding: EdgeInsets.all(compact ? 20 : 28),
+      child: content,
     );
   }
 }
 
-class _MetricTile extends StatelessWidget {
-  const _MetricTile({
+class _BrandHero extends StatelessWidget {
+  const _BrandHero({
+    required this.theme,
+    required this.compact,
+    required this.fullBleed,
+  });
+
+  final ThemeData theme;
+  final bool compact;
+  final bool fullBleed;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final narrow = constraints.maxWidth < 360;
+        final contentPadding = fullBleed
+            ? EdgeInsets.fromLTRB(
+                compact ? (narrow ? 18 : 24) : 44,
+                compact ? (narrow ? 22 : 28) : 48,
+                compact ? (narrow ? 18 : 24) : 40,
+                compact ? (narrow ? 24 : 28) : 42,
+              )
+            : EdgeInsets.all(compact ? 18 : 24);
+
+        return Container(
+          constraints: BoxConstraints(minHeight: compact ? 360 : 560),
+          padding: contentPadding,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(fullBleed ? 0 : 28),
+            gradient: const LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                Color(0xFF061722),
+                Color(0xFF0B3142),
+                Color(0xFF145C65),
+              ],
+              stops: [0.08, 0.52, 1],
+            ),
+          ),
+          child: Stack(
+            children: [
+              Positioned(
+                top: -40,
+                right: -40,
+                child: Container(
+                  width: compact ? (narrow ? 140 : 180) : 260,
+                  height: compact ? (narrow ? 140 : 180) : 260,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: RadialGradient(
+                      colors: [
+                        Colors.white.withValues(alpha: 0.22),
+                        Colors.white.withValues(alpha: 0.02),
+                        Colors.transparent,
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              Positioned(
+                left: compact ? -80 : -20,
+                bottom: compact ? (narrow ? 104 : 84) : 118,
+                child: Container(
+                  width: compact ? (narrow ? 140 : 180) : 260,
+                  height: compact ? (narrow ? 140 : 180) : 260,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: RadialGradient(
+                      colors: [
+                        theme.colorScheme.tertiary.withValues(alpha: 0.16),
+                        Colors.transparent,
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              Positioned(
+                right: compact ? (narrow ? -28 : -18) : 24,
+                bottom: compact ? (narrow ? 6 : -6) : 0,
+                child: IgnorePointer(
+                  child: Opacity(
+                    opacity: 0.84,
+                    child: SizedBox(
+                      width: compact ? (narrow ? 148 : 200) : 360,
+                      height: compact ? (narrow ? 112 : 150) : 260,
+                      child: SvgPicture.asset(
+                        ImageVectorPath.wavyBus,
+                        fit: BoxFit.contain,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxWidth: compact ? double.infinity : 560,
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 8,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.10),
+                        borderRadius: BorderRadius.circular(999),
+                        border: Border.all(
+                          color: Colors.white.withValues(alpha: 0.12),
+                        ),
+                      ),
+                      child: Text(
+                        'auth.brandBadge'.tr,
+                        style: theme.textTheme.labelLarge?.copyWith(
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                    SizedBox(height: compact ? (narrow ? 18 : 22) : 30),
+                    Text(
+                      'app.name'.tr,
+                      style: theme.textTheme.labelLarge?.copyWith(
+                        color: Colors.white.withValues(alpha: 0.72),
+                        letterSpacing: 1.6,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Text(
+                      'auth.brandTitle'.tr,
+                      style: (compact
+                              ? (narrow
+                                  ? theme.textTheme.headlineLarge
+                                  : theme.textTheme.displaySmall)
+                              : theme.textTheme.displayLarge)
+                          ?.copyWith(
+                        color: Colors.white,
+                        height: 0.94,
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 460),
+                      child: Text(
+                        'auth.brandBody'.tr,
+                        style: theme.textTheme.bodyLarge?.copyWith(
+                          color: Colors.white.withValues(alpha: 0.80),
+                          height: 1.45,
+                        ),
+                      ),
+                    ),
+                    SizedBox(height: compact ? (narrow ? 18 : 22) : 28),
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 430),
+                      child: _CommandCard(
+                        theme: theme,
+                        lines: [
+                          'auth.promptLine1'.tr,
+                          'auth.promptLine2'.tr,
+                        ],
+                        darkSurface: true,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _MetricRail extends StatelessWidget {
+  const _MetricRail({
     required this.label,
     required this.value,
-    required this.tone,
   });
 
   final String label;
   final String value;
-  final Color tone;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Container(
-      width: 170,
-      padding: const EdgeInsets.all(16),
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(vertical: 14),
       decoration: BoxDecoration(
-        color: theme.colorScheme.surface.withValues(alpha: 0.72),
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: theme.colorScheme.outlineVariant),
+        border: Border(
+          top: BorderSide(
+            color: Colors.white.withValues(alpha: 0.18),
+          ),
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label, style: theme.textTheme.labelMedium),
-          const SizedBox(height: 8),
-          Text(value,
-              style: theme.textTheme.titleMedium?.copyWith(color: tone)),
+          Text(
+            label,
+            style: theme.textTheme.labelMedium?.copyWith(
+              color: Colors.white.withValues(alpha: 0.66),
+              letterSpacing: 0.6,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Container(
+            width: 28,
+            height: 2,
+            color: Colors.white.withValues(alpha: 0.42),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            value,
+            style: theme.textTheme.headlineSmall?.copyWith(
+              color: Colors.white,
+              height: 1,
+            ),
+          ),
         ],
       ),
     );
@@ -854,10 +1275,12 @@ class _CommandCard extends StatelessWidget {
   const _CommandCard({
     required this.theme,
     required this.lines,
+    this.darkSurface = false,
   });
 
   final ThemeData theme;
   final List<String> lines;
+  final bool darkSurface;
 
   @override
   Widget build(BuildContext context) {
@@ -865,23 +1288,37 @@ class _CommandCard extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [
-            theme.colorScheme.primary.withValues(alpha: 0.14),
-            theme.colorScheme.tertiary.withValues(alpha: 0.10),
-          ],
-        ),
+        color: darkSurface
+            ? Colors.white.withValues(alpha: 0.08)
+            : theme.colorScheme.primary.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(24),
+        border: Border.all(
+          color: darkSurface
+              ? Colors.white.withValues(alpha: 0.10)
+              : theme.colorScheme.outlineVariant.withValues(alpha: 0.40),
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('auth.promptIdeas'.tr, style: theme.textTheme.titleMedium),
+          Text(
+            'auth.promptIdeas'.tr,
+            style: theme.textTheme.titleMedium?.copyWith(
+              color: darkSurface ? Colors.white : null,
+            ),
+          ),
           const SizedBox(height: 12),
           ...lines.map(
             (line) => Padding(
               padding: const EdgeInsets.only(bottom: 8),
-              child: Text('> $line', style: theme.textTheme.bodyMedium),
+              child: Text(
+                '> $line',
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: darkSurface
+                      ? Colors.white.withValues(alpha: 0.78)
+                      : theme.textTheme.bodyMedium?.color,
+                ),
+              ),
             ),
           ),
         ],
@@ -898,12 +1335,13 @@ class _LoginBackdrop extends StatelessWidget {
     final theme = Theme.of(context);
     return Stack(
       children: [
+        const Positioned.fill(child: _BackdropGrid()),
         Positioned(
           top: -140,
           left: -90,
           child: _Blob(
-            size: 300,
-            color: theme.colorScheme.primary.withValues(alpha: 0.12),
+            size: 320,
+            color: theme.colorScheme.primary.withValues(alpha: 0.14),
           ),
         ),
         Positioned(
@@ -911,15 +1349,15 @@ class _LoginBackdrop extends StatelessWidget {
           top: 120,
           child: _Blob(
             size: 260,
-            color: theme.colorScheme.tertiary.withValues(alpha: 0.12),
+            color: theme.colorScheme.primaryContainer.withValues(alpha: 0.18),
           ),
         ),
         Positioned(
           bottom: -120,
           right: 120,
           child: _Blob(
-            size: 340,
-            color: theme.colorScheme.primaryContainer.withValues(alpha: 0.20),
+            size: 360,
+            color: theme.colorScheme.tertiary.withValues(alpha: 0.12),
           ),
         ),
       ],
@@ -948,5 +1386,111 @@ class _Blob extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+class _SurfaceFrame extends StatelessWidget {
+  const _SurfaceFrame({
+    required this.child,
+    this.padding = const EdgeInsets.all(20),
+  });
+
+  final Widget child;
+  final EdgeInsetsGeometry padding;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Container(
+      width: double.infinity,
+      padding: padding,
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface.withValues(alpha: 0.88),
+        borderRadius: BorderRadius.circular(30),
+        border: Border.all(
+          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.46),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: theme.colorScheme.shadow.withValues(alpha: 0.08),
+            blurRadius: 30,
+            offset: const Offset(0, 18),
+          ),
+        ],
+      ),
+      child: child,
+    );
+  }
+}
+
+class _RevealIn extends StatelessWidget {
+  const _RevealIn({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return TweenAnimationBuilder<double>(
+      duration: const Duration(milliseconds: 420),
+      curve: Curves.easeOutCubic,
+      tween: Tween(begin: 0, end: 1),
+      builder: (context, value, widget) {
+        return Opacity(
+          opacity: value,
+          child: Transform.translate(
+            offset: Offset(0, (1 - value) * 18),
+            child: widget,
+          ),
+        );
+      },
+      child: child,
+    );
+  }
+}
+
+class _BackdropGrid extends StatelessWidget {
+  const _BackdropGrid();
+
+  @override
+  Widget build(BuildContext context) {
+    return IgnorePointer(
+      child: CustomPaint(
+        painter: _BackdropGridPainter(
+          color: Theme.of(context)
+              .colorScheme
+              .outlineVariant
+              .withValues(alpha: 0.12),
+        ),
+        child: const SizedBox.expand(),
+      ),
+    );
+  }
+}
+
+class _BackdropGridPainter extends CustomPainter {
+  const _BackdropGridPainter({required this.color});
+
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = 1;
+
+    const gap = 52.0;
+
+    for (double x = 0; x < size.width; x += gap) {
+      canvas.drawLine(Offset(x, 0), Offset(x, size.height), paint);
+    }
+    for (double y = 0; y < size.height; y += gap) {
+      canvas.drawLine(Offset(0, y), Offset(size.width, y), paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _BackdropGridPainter oldDelegate) {
+    return oldDelegate.color != color;
   }
 }

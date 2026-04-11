@@ -1,4 +1,3 @@
-
 /// 用于切换页面
 class Routes {
   /// 首页路由
@@ -68,9 +67,13 @@ class Routes {
   static const fineList = RoutePaths.fineList;
 
   // 管理员个人主页页面路由
+  static const adminPersonalPage = RoutePaths.adminPersonalPage;
+  @Deprecated('Use adminPersonalPage instead.')
   static const managerPersonalPage = RoutePaths.managerPersonalPage;
 
   // 管理员设置页面路由
+  static const adminSetting = RoutePaths.adminSetting;
+  @Deprecated('Use adminSetting instead.')
   static const managerSetting = RoutePaths.managerSetting;
 
   // 违章列表页面路由
@@ -98,6 +101,8 @@ class Routes {
   static const businessProgress = RoutePaths.businessProgress;
 
   // 管理员用户业务处理页面
+  static const adminBusinessProcessing = RoutePaths.adminBusinessProcessing;
+  @Deprecated('Use adminBusinessProcessing instead.')
   static const managerBusinessProcessing = RoutePaths.managerBusinessProcessing;
 
   // 事故现场证据介绍页路由
@@ -195,6 +200,7 @@ class RoutePaths {
   static const userSetting = '/userSetting';
 
   /// 管理员设置路由
+  static const adminSetting = '/adminSetting';
   static const managerSetting = '/managerSetting';
 
   /// 咨询路由
@@ -222,6 +228,7 @@ class RoutePaths {
   static const fineList = '/fineList';
 
   // 管理员个人主页路由
+  static const adminPersonalPage = '/adminPersonalPage';
   static const managerPersonalPage = '/managerPersonalPage';
 
   // 违章列表路由
@@ -249,6 +256,7 @@ class RoutePaths {
   static const businessProgress = '/businessProgress';
 
   // 管理员用户业务处理页面
+  static const adminBusinessProcessing = '/adminBusinessProcessing';
   static const managerBusinessProcessing = '/managerBusinessProcessing';
 
   // 事故现场证据介绍页路由
