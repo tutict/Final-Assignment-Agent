@@ -25,7 +25,7 @@ import java.util.logging.Logger;
 
 @RestController
 @RequestMapping("/api/offense-types")
-@Tag(name = "Offense Type Dictionary", description = "违法类型字典管理接口")
+@Tag(name = "", description = " endpoints")
 @SecurityRequirement(name = "bearerAuth")
 @RolesAllowed({"SUPER_ADMIN", "ADMIN", "TRAFFIC_POLICE"})
 public class OffenseTypeController {
@@ -39,7 +39,7 @@ public class OffenseTypeController {
     }
 
     @PostMapping
-    @Operation(summary = "创建违法类型")
+    @Operation(summary = "Create")
     public ResponseEntity<OffenseTypeDict> create(@RequestBody OffenseTypeDict request,
                                                   @RequestHeader(value = "Idempotency-Key", required = false)
                                                   String idempotencyKey) {
@@ -66,7 +66,7 @@ public class OffenseTypeController {
     }
 
     @PutMapping("/{typeId}")
-    @Operation(summary = "更新违法类型")
+    @Operation(summary = "Update")
     public ResponseEntity<OffenseTypeDict> update(@PathVariable Integer typeId,
                                                   @RequestBody OffenseTypeDict request,
                                                   @RequestHeader(value = "Idempotency-Key", required = false)
@@ -75,6 +75,9 @@ public class OffenseTypeController {
         try {
             request.setTypeId(typeId);
             if (useKey) {
+                if (offenseTypeDictService.shouldSkipProcessing(idempotencyKey)) {
+                    return ResponseEntity.status(HttpStatus.ALREADY_REPORTED).build();
+                }
                 offenseTypeDictService.checkAndInsertIdempotency(idempotencyKey, request, "update");
             }
             OffenseTypeDict updated = offenseTypeDictService.updateDict(request);
@@ -92,7 +95,7 @@ public class OffenseTypeController {
     }
 
     @DeleteMapping("/{typeId}")
-    @Operation(summary = "删除违法类型")
+    @Operation(summary = "Delete")
     public ResponseEntity<Void> delete(@PathVariable Integer typeId) {
         try {
             offenseTypeDictService.deleteDict(typeId);
@@ -104,7 +107,7 @@ public class OffenseTypeController {
     }
 
     @GetMapping("/{typeId}")
-    @Operation(summary = "查询违法类型详情")
+    @Operation(summary = "Get")
     public ResponseEntity<OffenseTypeDict> get(@PathVariable Integer typeId) {
         try {
             OffenseTypeDict dict = offenseTypeDictService.findById(typeId);
@@ -116,10 +119,11 @@ public class OffenseTypeController {
     }
 
     @GetMapping
-    @Operation(summary = "查询全部违法类型")
-    public ResponseEntity<List<OffenseTypeDict>> list() {
+    @Operation(summary = "List")
+    public ResponseEntity<List<OffenseTypeDict>> list(@RequestParam(defaultValue = "1") int page,
+                                                      @RequestParam(defaultValue = "20") int size) {
         try {
-            return ResponseEntity.ok(offenseTypeDictService.findAll());
+            return ResponseEntity.ok(offenseTypeDictService.findAll(page, size));
         } catch (Exception ex) {
             LOG.log(Level.WARNING, "List offense types failed", ex);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
@@ -127,7 +131,7 @@ public class OffenseTypeController {
     }
 
     @GetMapping("/search/code/prefix")
-    @Operation(summary = "Search offense types by code prefix")
+    @Operation(summary = "Search By Code Prefix")
     public ResponseEntity<List<OffenseTypeDict>> searchByCodePrefix(@RequestParam String offenseCode,
                                                                      @RequestParam(defaultValue = "1") int page,
                                                                      @RequestParam(defaultValue = "20") int size) {
@@ -135,7 +139,7 @@ public class OffenseTypeController {
     }
 
     @GetMapping("/search/code/fuzzy")
-    @Operation(summary = "Search offense types by code fuzzy")
+    @Operation(summary = "Search By Code Fuzzy")
     public ResponseEntity<List<OffenseTypeDict>> searchByCodeFuzzy(@RequestParam String offenseCode,
                                                                     @RequestParam(defaultValue = "1") int page,
                                                                     @RequestParam(defaultValue = "20") int size) {
@@ -143,7 +147,7 @@ public class OffenseTypeController {
     }
 
     @GetMapping("/search/name/prefix")
-    @Operation(summary = "Search offense types by name prefix")
+    @Operation(summary = "Search By Name Prefix")
     public ResponseEntity<List<OffenseTypeDict>> searchByNamePrefix(@RequestParam String offenseName,
                                                                      @RequestParam(defaultValue = "1") int page,
                                                                      @RequestParam(defaultValue = "20") int size) {
@@ -151,7 +155,7 @@ public class OffenseTypeController {
     }
 
     @GetMapping("/search/name/fuzzy")
-    @Operation(summary = "Search offense types by name fuzzy")
+    @Operation(summary = "Search By Name Fuzzy")
     public ResponseEntity<List<OffenseTypeDict>> searchByNameFuzzy(@RequestParam String offenseName,
                                                                     @RequestParam(defaultValue = "1") int page,
                                                                     @RequestParam(defaultValue = "20") int size) {
@@ -159,7 +163,7 @@ public class OffenseTypeController {
     }
 
     @GetMapping("/search/category")
-    @Operation(summary = "Search offense types by category")
+    @Operation(summary = "Search By Category")
     public ResponseEntity<List<OffenseTypeDict>> searchByCategory(@RequestParam String category,
                                                                    @RequestParam(defaultValue = "1") int page,
                                                                    @RequestParam(defaultValue = "20") int size) {
@@ -167,7 +171,7 @@ public class OffenseTypeController {
     }
 
     @GetMapping("/search/severity")
-    @Operation(summary = "Search offense types by severity level")
+    @Operation(summary = "Search By Severity")
     public ResponseEntity<List<OffenseTypeDict>> searchBySeverity(@RequestParam String severityLevel,
                                                                    @RequestParam(defaultValue = "1") int page,
                                                                    @RequestParam(defaultValue = "20") int size) {
@@ -175,7 +179,7 @@ public class OffenseTypeController {
     }
 
     @GetMapping("/search/status")
-    @Operation(summary = "Search offense types by status")
+    @Operation(summary = "Search By Status")
     public ResponseEntity<List<OffenseTypeDict>> searchByStatus(@RequestParam String status,
                                                                  @RequestParam(defaultValue = "1") int page,
                                                                  @RequestParam(defaultValue = "20") int size) {
@@ -183,7 +187,7 @@ public class OffenseTypeController {
     }
 
     @GetMapping("/search/fine-range")
-    @Operation(summary = "Search offense types by standard fine amount range")
+    @Operation(summary = "Search By Fine Range")
     public ResponseEntity<List<OffenseTypeDict>> searchByFineRange(@RequestParam double minAmount,
                                                                     @RequestParam double maxAmount,
                                                                     @RequestParam(defaultValue = "1") int page,
@@ -192,7 +196,7 @@ public class OffenseTypeController {
     }
 
     @GetMapping("/search/points-range")
-    @Operation(summary = "Search offense types by deducted points range")
+    @Operation(summary = "Search By Points Range")
     public ResponseEntity<List<OffenseTypeDict>> searchByPointsRange(@RequestParam int minPoints,
                                                                       @RequestParam int maxPoints,
                                                                       @RequestParam(defaultValue = "1") int page,

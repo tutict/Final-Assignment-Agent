@@ -25,7 +25,7 @@ import java.util.logging.Logger;
 
 @RestController
 @RequestMapping("/api/deductions")
-@Tag(name = "Deduction Management", description = "驾照扣分记录管理接口")
+@Tag(name = "", description = " endpoints")
 @SecurityRequirement(name = "bearerAuth")
 @RolesAllowed({"SUPER_ADMIN", "ADMIN", "TRAFFIC_POLICE"})
 public class DeductionInformationController {
@@ -39,7 +39,7 @@ public class DeductionInformationController {
     }
 
     @PostMapping
-    @Operation(summary = "创建扣分记录")
+    @Operation(summary = "Create")
     public ResponseEntity<DeductionRecord> create(@RequestBody DeductionRecord request,
                                                   @RequestHeader(value = "Idempotency-Key", required = false)
                                                   String idempotencyKey) {
@@ -66,45 +66,22 @@ public class DeductionInformationController {
     }
 
     @PutMapping("/{deductionId}")
-    @Operation(summary = "更新扣分记录")
+    @Operation(summary = "Update")
     public ResponseEntity<DeductionRecord> update(@PathVariable Long deductionId,
                                                   @RequestBody DeductionRecord request,
                                                   @RequestHeader(value = "Idempotency-Key", required = false)
                                                   String idempotencyKey) {
-        boolean useKey = hasKey(idempotencyKey);
-        try {
-            request.setDeductionId(deductionId);
-            if (useKey) {
-                deductionRecordService.checkAndInsertIdempotency(idempotencyKey, request, "update");
-            }
-            DeductionRecord updated = deductionRecordService.updateDeductionRecord(request);
-            if (useKey && updated.getDeductionId() != null) {
-                deductionRecordService.markHistorySuccess(idempotencyKey, updated.getDeductionId());
-            }
-            return ResponseEntity.ok(updated);
-        } catch (Exception ex) {
-            if (useKey) {
-                deductionRecordService.markHistoryFailure(idempotencyKey, ex.getMessage());
-            }
-            LOG.log(Level.SEVERE, "Update deduction failed", ex);
-            return ResponseEntity.status(resolveStatus(ex)).build();
-        }
+        return ResponseEntity.status(HttpStatus.METHOD_NOT_ALLOWED).build();
     }
 
     @DeleteMapping("/{deductionId}")
-    @Operation(summary = "删除扣分记录")
+    @Operation(summary = "Delete")
     public ResponseEntity<Void> delete(@PathVariable Long deductionId) {
-        try {
-            deductionRecordService.deleteDeductionRecord(deductionId);
-            return ResponseEntity.noContent().build();
-        } catch (Exception ex) {
-            LOG.log(Level.WARNING, "Delete deduction failed", ex);
-            return ResponseEntity.status(resolveStatus(ex)).build();
-        }
+        return ResponseEntity.status(HttpStatus.METHOD_NOT_ALLOWED).build();
     }
 
     @GetMapping("/{deductionId}")
-    @Operation(summary = "查询扣分详情")
+    @Operation(summary = "Get")
     public ResponseEntity<DeductionRecord> get(@PathVariable Long deductionId) {
         try {
             DeductionRecord record = deductionRecordService.findById(deductionId);
@@ -116,10 +93,11 @@ public class DeductionInformationController {
     }
 
     @GetMapping
-    @Operation(summary = "查询全部扣分记录")
-    public ResponseEntity<List<DeductionRecord>> list() {
+    @Operation(summary = "List")
+    public ResponseEntity<List<DeductionRecord>> list(@RequestParam(defaultValue = "1") int page,
+                                                      @RequestParam(defaultValue = "20") int size) {
         try {
-            return ResponseEntity.ok(deductionRecordService.findAll());
+            return ResponseEntity.ok(deductionRecordService.listDeductions(page, size));
         } catch (Exception ex) {
             LOG.log(Level.WARNING, "List deductions failed", ex);
             return ResponseEntity.status(resolveStatus(ex)).build();
@@ -127,7 +105,7 @@ public class DeductionInformationController {
     }
 
     @GetMapping("/driver/{driverId}")
-    @Operation(summary = "按驾驶证分页查询扣分")
+    @Operation(summary = "By Driver")
     public ResponseEntity<List<DeductionRecord>> byDriver(@PathVariable Long driverId,
                                                           @RequestParam(defaultValue = "1") int page,
                                                           @RequestParam(defaultValue = "20") int size) {
@@ -140,7 +118,7 @@ public class DeductionInformationController {
     }
 
     @GetMapping("/offense/{offenseId}")
-    @Operation(summary = "按违法记录分页查询扣分")
+    @Operation(summary = "By Offense")
     public ResponseEntity<List<DeductionRecord>> byOffense(@PathVariable Long offenseId,
                                                            @RequestParam(defaultValue = "1") int page,
                                                            @RequestParam(defaultValue = "20") int size) {
@@ -153,7 +131,7 @@ public class DeductionInformationController {
     }
 
     @GetMapping("/search/handler")
-    @Operation(summary = "按经办人模糊搜索")
+    @Operation(summary = "Search By Handler")
     public ResponseEntity<List<DeductionRecord>> searchByHandler(@RequestParam String handler,
                                                                  @RequestParam(defaultValue = "prefix") String mode,
                                                                  @RequestParam(defaultValue = "1") int page,
@@ -170,7 +148,7 @@ public class DeductionInformationController {
     }
 
     @GetMapping("/search/status")
-    @Operation(summary = "按处理状态分页查询")
+    @Operation(summary = "Search By Status")
     public ResponseEntity<List<DeductionRecord>> searchByStatus(@RequestParam String status,
                                                                 @RequestParam(defaultValue = "1") int page,
                                                                 @RequestParam(defaultValue = "20") int size) {
@@ -183,7 +161,7 @@ public class DeductionInformationController {
     }
 
     @GetMapping("/search/time-range")
-    @Operation(summary = "按时间范围分页查询")
+    @Operation(summary = "Search By Time Range")
     public ResponseEntity<List<DeductionRecord>> searchByTimeRange(@RequestParam String startTime,
                                                                    @RequestParam String endTime,
                                                                    @RequestParam(defaultValue = "1") int page,

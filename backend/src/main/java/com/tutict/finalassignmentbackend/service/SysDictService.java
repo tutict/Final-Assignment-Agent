@@ -22,7 +22,6 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.stream.Collectors;
@@ -62,20 +61,10 @@ public class SysDictService {
             throw new RuntimeException("Duplicate SysDict request detected");
         }
 
-        SysRequestHistory history = new SysRequestHistory();
-        history.setIdempotencyKey(idempotencyKey);
-        history.setBusinessStatus("PROCESSING");
-        history.setCreatedAt(LocalDateTime.now());
-        history.setUpdatedAt(LocalDateTime.now());
+        SysRequestHistory history = buildHistory(idempotencyKey, sysDict, action);
         sysRequestHistoryMapper.insert(history);
 
         sendKafkaMessage("sys_dict_" + action, idempotencyKey, sysDict);
-
-        history.setBusinessStatus("SUCCESS");
-        history.setBusinessId(Optional.ofNullable(sysDict.getDictId()).map(Long::valueOf).orElse(null));
-        history.setRequestParams("PENDING");
-        history.setUpdatedAt(LocalDateTime.now());
-        sysRequestHistoryMapper.updateById(history);
     }
 
     @Transactional
@@ -108,12 +97,7 @@ public class SysDictService {
         if (rows == 0) {
             throw new IllegalStateException("No SysDict deleted for id=" + dictId);
         }
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                sysDictSearchRepository.deleteById(dictId);
-            }
-        });
+        runAfterCommitOrNow(() -> sysDictSearchRepository.deleteById(dictId));
     }
 
     @Transactional(readOnly = true)
@@ -141,11 +125,21 @@ public class SysDictService {
             return fromIndex;
         }
         List<SysDict> fromDb = sysDictMapper.selectList(null);
-        fromDb.stream()
-                .map(SysDictDocument::fromEntity)
-                .filter(Objects::nonNull)
-                .forEach(sysDictSearchRepository::save);
+        syncBatchToIndexAfterCommit(fromDb);
         return fromDb;
+    }
+
+    @Transactional(readOnly = true)
+    @Cacheable(
+            cacheNames = CACHE_NAME,
+            key = "'all:' + #page + ':' + #size",
+            unless = "#result == null || #result.isEmpty()")
+    public List<SysDict> findAll(int page, int size) {
+        validatePagination(page, size);
+        QueryWrapper<SysDict> wrapper = new QueryWrapper<>();
+        wrapper.orderByAsc("sort_order")
+                .orderByAsc("dict_id");
+        return fetchFromDatabase(wrapper, page, size);
     }
 
     @Cacheable(cacheNames = CACHE_NAME, key = "'type:' + #dictType + ':' + #page + ':' + #size",
@@ -265,7 +259,8 @@ public class SysDictService {
         SysRequestHistory history = sysRequestHistoryMapper.selectByIdempotencyKey(idempotencyKey);
         return history != null
                 && "SUCCESS".equalsIgnoreCase(history.getBusinessStatus())
-                && "DONE".equalsIgnoreCase(history.getRequestParams());
+                && history.getBusinessId() != null
+                && history.getBusinessId() > 0;
     }
 
     public void markHistorySuccess(String idempotencyKey, Integer dictId) {
@@ -276,7 +271,6 @@ public class SysDictService {
         }
         history.setBusinessStatus("SUCCESS");
         history.setBusinessId(dictId != null ? dictId.longValue() : null);
-        history.setRequestParams("DONE");
         history.setUpdatedAt(LocalDateTime.now());
         sysRequestHistoryMapper.updateById(history);
     }
@@ -288,9 +282,65 @@ public class SysDictService {
             return;
         }
         history.setBusinessStatus("FAILED");
-        history.setRequestParams(truncate(reason));
+        history.setRequestParams(appendFailureReason(history.getRequestParams(), reason));
         history.setUpdatedAt(LocalDateTime.now());
         sysRequestHistoryMapper.updateById(history);
+    }
+
+    private SysRequestHistory buildHistory(String idempotencyKey, SysDict sysDict, String action) {
+        SysRequestHistory history = new SysRequestHistory();
+        history.setIdempotencyKey(idempotencyKey);
+        history.setRequestMethod("POST");
+        history.setRequestUrl("/api/sys/dicts");
+        history.setRequestParams(buildRequestParams(sysDict));
+        history.setBusinessType(resolveBusinessType(action));
+        history.setBusinessStatus("PROCESSING");
+        history.setCreatedAt(LocalDateTime.now());
+        history.setUpdatedAt(LocalDateTime.now());
+        return history;
+    }
+
+    private String buildRequestParams(SysDict sysDict) {
+        if (sysDict == null) {
+            return null;
+        }
+        StringBuilder builder = new StringBuilder();
+        appendParam(builder, "dictType", sysDict.getDictType());
+        appendParam(builder, "dictCode", sysDict.getDictCode());
+        appendParam(builder, "dictLabel", sysDict.getDictLabel());
+        appendParam(builder, "parentId", sysDict.getParentId());
+        appendParam(builder, "status", sysDict.getStatus());
+        return truncate(builder.toString());
+    }
+
+    private String resolveBusinessType(String action) {
+        String normalized = isBlank(action) ? "CREATE" : action.trim().toUpperCase();
+        return "SYS_DICT_" + normalized;
+    }
+
+    private void appendParam(StringBuilder builder, String key, Object value) {
+        if (builder == null || value == null) {
+            return;
+        }
+        String normalized = value.toString().trim();
+        if (normalized.isEmpty()) {
+            return;
+        }
+        if (!builder.isEmpty()) {
+            builder.append(',');
+        }
+        builder.append(key).append('=').append(normalized);
+    }
+
+    private String appendFailureReason(String existing, String reason) {
+        String normalizedReason = truncate(reason);
+        if (isBlank(normalizedReason)) {
+            return existing;
+        }
+        if (isBlank(existing)) {
+            return "failure=" + normalizedReason;
+        }
+        return truncate(existing + ",failure=" + normalizedReason);
     }
 
     private void sendKafkaMessage(String topic, String idempotencyKey, SysDict sysDict) {
@@ -307,13 +357,26 @@ public class SysDictService {
         if (sysDict == null) {
             return;
         }
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                SysDictDocument doc = SysDictDocument.fromEntity(sysDict);
-                if (doc != null) {
-                    sysDictSearchRepository.save(doc);
-                }
+        runAfterCommitOrNow(() -> {
+            SysDictDocument doc = SysDictDocument.fromEntity(sysDict);
+            if (doc != null) {
+                sysDictSearchRepository.save(doc);
+            }
+        });
+    }
+
+    private void syncBatchToIndexAfterCommit(List<SysDict> records) {
+        if (records == null || records.isEmpty()) {
+            return;
+        }
+        runAfterCommitOrNow(() -> {
+            List<SysDictDocument> documents = records.stream()
+                    .filter(Objects::nonNull)
+                    .map(SysDictDocument::fromEntity)
+                    .filter(Objects::nonNull)
+                    .collect(Collectors.toList());
+            if (!documents.isEmpty()) {
+                sysDictSearchRepository.saveAll(documents);
             }
         });
     }
@@ -332,10 +395,7 @@ public class SysDictService {
         Page<SysDict> mpPage = new Page<>(Math.max(page, 1), Math.max(size, 1));
         sysDictMapper.selectPage(mpPage, wrapper);
         List<SysDict> records = mpPage.getRecords();
-        records.stream()
-                .map(SysDictDocument::fromEntity)
-                .filter(Objects::nonNull)
-                .forEach(sysDictSearchRepository::save);
+        syncBatchToIndexAfterCommit(records);
         return records;
     }
 
@@ -374,5 +434,21 @@ public class SysDictService {
             return null;
         }
         return value.length() <= 500 ? value : value.substring(0, 500);
+    }
+
+    private void runAfterCommitOrNow(Runnable task) {
+        if (task == null) {
+            return;
+        }
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    task.run();
+                }
+            });
+            return;
+        }
+        task.run();
     }
 }

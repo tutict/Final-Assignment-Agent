@@ -177,6 +177,20 @@ public class AppealReviewService {
         return fetchFromDatabase(wrapper, page, size);
     }
 
+    @Cacheable(
+            cacheNames = CACHE_NAME,
+            key = "'appealId:' + #appealId + ':' + #page + ':' + #size",
+            unless = "#result == null || #result.isEmpty()")
+    public List<AppealReview> findByAppealId(Long appealId, int page, int size) {
+        requirePositive(appealId);
+        validatePagination(page, size);
+        QueryWrapper<AppealReview> wrapper = new QueryWrapper<>();
+        wrapper.eq("appeal_id", appealId)
+                .orderByDesc("review_time")
+                .orderByDesc("review_id");
+        return fetchFromDatabase(wrapper, page, size);
+    }
+
     @Cacheable(cacheNames = CACHE_NAME, key = "'reviewer:' + #reviewer + ':' + #page + ':' + #size", unless = "#result == null || #result.isEmpty()")
     public List<AppealReview> searchByReviewer(String reviewer, int page, int size) {
         if (isBlank(reviewer)) {

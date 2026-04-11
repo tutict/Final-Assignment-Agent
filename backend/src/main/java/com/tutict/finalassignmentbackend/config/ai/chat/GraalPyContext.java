@@ -18,6 +18,8 @@ public class GraalPyContext {
         try {
             String os = System.getProperty("os.name").toLowerCase();
             Path venvDir = locateExistingPath(List.of(
+                    Path.of(System.getProperty("user.dir"), "target", "classes", "GRAALPY-VFS", "com.tutict", "finalAssignmentBackend", "venv"),
+                    Path.of(System.getProperty("user.dir"), "backend", "target", "classes", "GRAALPY-VFS", "com.tutict", "finalAssignmentBackend", "venv"),
                     Path.of(System.getProperty("user.dir"), "target", "classes", "org.graalvm.python.vfs", "venv"),
                     Path.of(System.getProperty("user.dir"), "backend", "target", "classes", "org.graalvm.python.vfs", "venv")
             ), "GraalPy virtual environment");

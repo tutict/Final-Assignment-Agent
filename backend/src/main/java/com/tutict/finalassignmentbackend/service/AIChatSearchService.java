@@ -8,6 +8,7 @@ import org.graalvm.polyglot.PolyglotException;
 import org.graalvm.polyglot.Value;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 
 import java.util.Collections;
@@ -21,6 +22,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 @Service
+@ConditionalOnProperty(name = "app.ai.search.enabled", havingValue = "true")
 public class AIChatSearchService {
 
     private static final Logger logger = LoggerFactory.getLogger(AIChatSearchService.class);

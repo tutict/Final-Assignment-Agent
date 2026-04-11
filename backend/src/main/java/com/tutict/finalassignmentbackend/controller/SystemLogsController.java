@@ -23,11 +23,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import java.util.stream.Collectors;
-
 @RestController
 @RequestMapping("/api/system/logs")
-@Tag(name = "System Logs", description = "系统日志汇总查询接口")
+@Tag(name = "System Logs", description = "System Logs endpoints")
 @SecurityRequirement(name = "bearerAuth")
 @RolesAllowed({"SUPER_ADMIN", "ADMIN"})
 public class SystemLogsController {
@@ -47,13 +45,13 @@ public class SystemLogsController {
     }
 
     @GetMapping("/overview")
-    @Operation(summary = "获取系统日志概览")
+    @Operation(summary = "Overview")
     public ResponseEntity<Map<String, Object>> overview() {
         try {
             Map<String, Object> result = new HashMap<>();
-            result.put("loginLogCount", auditLoginLogService.findAll().size());
-            result.put("operationLogCount", auditOperationLogService.findAll().size());
-            result.put("requestHistoryCount", sysRequestHistoryService.findAll().size());
+            result.put("loginLogCount", auditLoginLogService.countAll());
+            result.put("operationLogCount", auditOperationLogService.countAll());
+            result.put("requestHistoryCount", sysRequestHistoryService.countAll());
             return ResponseEntity.ok(result);
         } catch (Exception ex) {
             LOG.log(Level.WARNING, "Fetch log overview failed", ex);
@@ -62,12 +60,10 @@ public class SystemLogsController {
     }
 
     @GetMapping("/login/recent")
-    @Operation(summary = "最近的登录日志")
+    @Operation(summary = "Recent Login Logs")
     public ResponseEntity<List<AuditLoginLog>> recentLoginLogs(@RequestParam(defaultValue = "10") int limit) {
         try {
-            List<AuditLoginLog> recent = auditLoginLogService.findAll().stream()
-                    .limit(Math.max(limit, 1))
-                    .collect(Collectors.toList());
+            List<AuditLoginLog> recent = auditLoginLogService.listLogs(1, Math.max(limit, 1));
             return ResponseEntity.ok(recent);
         } catch (Exception ex) {
             LOG.log(Level.WARNING, "Fetch recent login logs failed", ex);
@@ -76,12 +72,10 @@ public class SystemLogsController {
     }
 
     @GetMapping("/operation/recent")
-    @Operation(summary = "最近的操作日志")
+    @Operation(summary = "Recent Operation Logs")
     public ResponseEntity<List<AuditOperationLog>> recentOperationLogs(@RequestParam(defaultValue = "10") int limit) {
         try {
-            List<AuditOperationLog> recent = auditOperationLogService.findAll().stream()
-                    .limit(Math.max(limit, 1))
-                    .collect(Collectors.toList());
+            List<AuditOperationLog> recent = auditOperationLogService.listLogs(1, Math.max(limit, 1));
             return ResponseEntity.ok(recent);
         } catch (Exception ex) {
             LOG.log(Level.WARNING, "Fetch recent operation logs failed", ex);
@@ -90,7 +84,7 @@ public class SystemLogsController {
     }
 
     @GetMapping("/requests/{historyId}")
-    @Operation(summary = "查询幂等请求进度详情")
+    @Operation(summary = "Request History")
     public ResponseEntity<SysRequestHistory> requestHistory(@PathVariable Long historyId) {
         try {
             SysRequestHistory history = sysRequestHistoryService.findById(historyId);
@@ -102,7 +96,7 @@ public class SystemLogsController {
     }
 
     @GetMapping("/requests/search/idempotency")
-    @Operation(summary = "Search request history by idempotency key")
+    @Operation(summary = "Search By Idempotency")
     public ResponseEntity<List<SysRequestHistory>> searchByIdempotency(@RequestParam String key,
                                                                        @RequestParam(defaultValue = "1") int page,
                                                                        @RequestParam(defaultValue = "20") int size) {
@@ -110,7 +104,7 @@ public class SystemLogsController {
     }
 
     @GetMapping("/requests/search/method")
-    @Operation(summary = "Search request history by request method")
+    @Operation(summary = "Search By Request Method")
     public ResponseEntity<List<SysRequestHistory>> searchByRequestMethod(@RequestParam String requestMethod,
                                                                          @RequestParam(defaultValue = "1") int page,
                                                                          @RequestParam(defaultValue = "20") int size) {
@@ -118,7 +112,7 @@ public class SystemLogsController {
     }
 
     @GetMapping("/requests/search/url")
-    @Operation(summary = "Search request history by request URL prefix")
+    @Operation(summary = "Search By Request Url")
     public ResponseEntity<List<SysRequestHistory>> searchByRequestUrl(@RequestParam String requestUrl,
                                                                       @RequestParam(defaultValue = "1") int page,
                                                                       @RequestParam(defaultValue = "20") int size) {
@@ -126,7 +120,7 @@ public class SystemLogsController {
     }
 
     @GetMapping("/requests/search/business-type")
-    @Operation(summary = "Search request history by business type")
+    @Operation(summary = "Search By Business Type")
     public ResponseEntity<List<SysRequestHistory>> searchByBusinessType(@RequestParam String businessType,
                                                                         @RequestParam(defaultValue = "1") int page,
                                                                         @RequestParam(defaultValue = "20") int size) {
@@ -134,7 +128,7 @@ public class SystemLogsController {
     }
 
     @GetMapping("/requests/search/business-id")
-    @Operation(summary = "Search request history by business id")
+    @Operation(summary = "Search By Business Id")
     public ResponseEntity<List<SysRequestHistory>> searchByBusinessId(@RequestParam Long businessId,
                                                                       @RequestParam(defaultValue = "1") int page,
                                                                       @RequestParam(defaultValue = "20") int size) {
@@ -142,7 +136,7 @@ public class SystemLogsController {
     }
 
     @GetMapping("/requests/search/status")
-    @Operation(summary = "Search request history by business status")
+    @Operation(summary = "Search By Business Status")
     public ResponseEntity<List<SysRequestHistory>> searchByBusinessStatus(@RequestParam String status,
                                                                           @RequestParam(defaultValue = "1") int page,
                                                                           @RequestParam(defaultValue = "20") int size) {
@@ -150,7 +144,7 @@ public class SystemLogsController {
     }
 
     @GetMapping("/requests/search/user")
-    @Operation(summary = "Search request history by user id")
+    @Operation(summary = "Search By User")
     public ResponseEntity<List<SysRequestHistory>> searchByUser(@RequestParam Long userId,
                                                                 @RequestParam(defaultValue = "1") int page,
                                                                 @RequestParam(defaultValue = "20") int size) {
@@ -158,7 +152,7 @@ public class SystemLogsController {
     }
 
     @GetMapping("/requests/search/ip")
-    @Operation(summary = "Search request history by request IP")
+    @Operation(summary = "Search By Request Ip")
     public ResponseEntity<List<SysRequestHistory>> searchByRequestIp(@RequestParam String requestIp,
                                                                      @RequestParam(defaultValue = "1") int page,
                                                                      @RequestParam(defaultValue = "20") int size) {
@@ -166,7 +160,7 @@ public class SystemLogsController {
     }
 
     @GetMapping("/requests/search/time-range")
-    @Operation(summary = "Search request history by created time range")
+    @Operation(summary = "Search By Created Time Range")
     public ResponseEntity<List<SysRequestHistory>> searchByCreatedTimeRange(@RequestParam String startTime,
                                                                             @RequestParam String endTime,
                                                                             @RequestParam(defaultValue = "1") int page,

@@ -364,6 +364,19 @@ public class AppealManagementController {
         }
     }
 
+    @GetMapping("/{appealId}/reviews")
+    @Operation(summary = "List Reviews By Appeal")
+    public ResponseEntity<List<AppealReview>> listReviewsByAppeal(@PathVariable Long appealId,
+                                                                  @RequestParam(defaultValue = "1") int page,
+                                                                  @RequestParam(defaultValue = "20") int size) {
+        try {
+            return ResponseEntity.ok(appealReviewService.findByAppealId(appealId, page, size));
+        } catch (Exception ex) {
+            LOG.log(Level.WARNING, "List appeal reviews by appeal failed", ex);
+            return ResponseEntity.status(resolveStatus(ex)).build();
+        }
+    }
+
     @GetMapping("/reviews/search/reviewer")
     @Operation(summary = "Search Reviews By Reviewer")
     public ResponseEntity<List<AppealReview>> searchReviewsByReviewer(@RequestParam String reviewer,

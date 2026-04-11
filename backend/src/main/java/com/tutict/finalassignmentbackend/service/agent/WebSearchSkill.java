@@ -1,12 +1,14 @@
 package com.tutict.finalassignmentbackend.service.agent;
 
 import com.tutict.finalassignmentbackend.service.AIChatSearchService;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
 import java.util.Map;
 
 @Component
+@ConditionalOnProperty(name = "app.ai.search.enabled", havingValue = "true")
 public class WebSearchSkill implements AgentSkill {
 
     private final AIChatSearchService searchService;

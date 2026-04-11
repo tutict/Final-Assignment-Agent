@@ -2,21 +2,32 @@ package com.tutict.finalassignmentbackend.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.tutict.finalassignmentbackend.config.statemachine.states.DeductionState;
 import com.tutict.finalassignmentbackend.config.websocket.WsAction;
+import com.tutict.finalassignmentbackend.entity.DriverInformation;
 import com.tutict.finalassignmentbackend.entity.DeductionRecord;
+import com.tutict.finalassignmentbackend.entity.OffenseRecord;
 import com.tutict.finalassignmentbackend.entity.SysRequestHistory;
+import com.tutict.finalassignmentbackend.entity.SysUser;
 import com.tutict.finalassignmentbackend.entity.elastic.DeductionRecordDocument;
 import com.tutict.finalassignmentbackend.mapper.DeductionRecordMapper;
 import com.tutict.finalassignmentbackend.mapper.SysRequestHistoryMapper;
 import com.tutict.finalassignmentbackend.repository.DeductionRecordSearchRepository;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.security.authentication.AnonymousAuthenticationToken;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.web.context.request.RequestAttributes;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeParseException;
@@ -36,16 +47,25 @@ public class DeductionRecordService {
     private final DeductionRecordMapper deductionRecordMapper;
     private final SysRequestHistoryMapper sysRequestHistoryMapper;
     private final DeductionRecordSearchRepository deductionRecordSearchRepository;
+    private final OffenseRecordService offenseRecordService;
+    private final DriverInformationService driverInformationService;
+    private final SysUserService sysUserService;
     private final KafkaTemplate<String, DeductionRecord> kafkaTemplate;
 
     @Autowired
     public DeductionRecordService(DeductionRecordMapper deductionRecordMapper,
                                   SysRequestHistoryMapper sysRequestHistoryMapper,
                                   DeductionRecordSearchRepository deductionRecordSearchRepository,
+                                  OffenseRecordService offenseRecordService,
+                                  DriverInformationService driverInformationService,
+                                  SysUserService sysUserService,
                                   KafkaTemplate<String, DeductionRecord> kafkaTemplate) {
         this.deductionRecordMapper = deductionRecordMapper;
         this.sysRequestHistoryMapper = sysRequestHistoryMapper;
         this.deductionRecordSearchRepository = deductionRecordSearchRepository;
+        this.offenseRecordService = offenseRecordService;
+        this.driverInformationService = driverInformationService;
+        this.sysUserService = sysUserService;
         this.kafkaTemplate = kafkaTemplate;
     }
 
@@ -58,27 +78,22 @@ public class DeductionRecordService {
             throw new RuntimeException("Duplicate deduction record request detected");
         }
 
-        SysRequestHistory history = new SysRequestHistory();
-        history.setIdempotencyKey(idempotencyKey);
-        history.setBusinessStatus("PROCESSING");
-        history.setCreatedAt(LocalDateTime.now());
-        history.setUpdatedAt(LocalDateTime.now());
+        SysRequestHistory history = buildHistory(idempotencyKey, deductionRecord, action);
         sysRequestHistoryMapper.insert(history);
 
         sendKafkaMessage("deduction_record_" + action, idempotencyKey, deductionRecord);
-
-        history.setBusinessStatus("SUCCESS");
-        history.setBusinessId(deductionRecord.getDeductionId());
-        history.setRequestParams("PENDING");
-        history.setUpdatedAt(LocalDateTime.now());
-        sysRequestHistoryMapper.updateById(history);
     }
 
     @Transactional
     @CacheEvict(cacheNames = CACHE_NAME, allEntries = true)
     public DeductionRecord createDeductionRecord(DeductionRecord deductionRecord) {
+        populateDriverIdentityFromOffense(deductionRecord);
+        deductionRecord.setStatus(DeductionState.EFFECTIVE.getCode());
+        deductionRecord.setRestoreTime(null);
+        deductionRecord.setRestoreReason(null);
         validateDeductionRecord(deductionRecord);
         deductionRecordMapper.insert(deductionRecord);
+        syncDriverPoints(deductionRecord.getDriverId());
         syncToIndexAfterCommit(deductionRecord);
         return deductionRecord;
     }
@@ -86,30 +101,32 @@ public class DeductionRecordService {
     @Transactional
     @CacheEvict(cacheNames = CACHE_NAME, allEntries = true)
     public DeductionRecord updateDeductionRecord(DeductionRecord deductionRecord) {
+        throw new IllegalStateException("Deduction records are enforcement evidence and cannot be manually updated");
+    }
+
+    @Transactional
+    @CacheEvict(cacheNames = CACHE_NAME, allEntries = true)
+    public DeductionRecord updateDeductionRecordSystemManaged(DeductionRecord deductionRecord) {
+        populateDriverIdentityFromOffense(deductionRecord);
         validateDeductionRecord(deductionRecord);
         requirePositive(deductionRecord.getDeductionId(), "Deduction ID");
-        int rows = deductionRecordMapper.updateById(deductionRecord);
-        if (rows == 0) {
-            throw new IllegalStateException("No DeductionRecord updated for id=" + deductionRecord.getDeductionId());
-        }
-        syncToIndexAfterCommit(deductionRecord);
-        return deductionRecord;
+        return persistDeductionRecordUpdate(deductionRecord);
     }
 
     @Transactional
     @CacheEvict(cacheNames = CACHE_NAME, allEntries = true)
     public void deleteDeductionRecord(Long deductionId) {
-        requirePositive(deductionId, "Deduction ID");
-        int rows = deductionRecordMapper.deleteById(deductionId);
+        throw new IllegalStateException("Deduction records are enforcement evidence and cannot be manually deleted");
+    }
+
+    private DeductionRecord persistDeductionRecordUpdate(DeductionRecord deductionRecord) {
+        int rows = deductionRecordMapper.updateById(deductionRecord);
         if (rows == 0) {
-            throw new IllegalStateException("No DeductionRecord deleted for id=" + deductionId);
+            throw new IllegalStateException("No DeductionRecord updated for id=" + deductionRecord.getDeductionId());
         }
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                deductionRecordSearchRepository.deleteById(deductionId);
-            }
-        });
+        syncDriverPoints(deductionRecord.getDriverId());
+        syncToIndexAfterCommit(deductionRecord);
+        return deductionRecord;
     }
 
     @Transactional(readOnly = true)
@@ -141,6 +158,16 @@ public class DeductionRecordService {
         return fromDb;
     }
 
+    @Transactional(readOnly = true)
+    @Cacheable(cacheNames = CACHE_NAME, key = "'list:' + #page + ':' + #size", unless = "#result == null || #result.isEmpty()")
+    public List<DeductionRecord> listDeductions(int page, int size) {
+        validatePagination(page, size);
+        QueryWrapper<DeductionRecord> wrapper = new QueryWrapper<>();
+        wrapper.orderByDesc("deduction_time")
+                .orderByDesc("deduction_id");
+        return fetchFromDatabase(wrapper, page, size);
+    }
+
     @Cacheable(cacheNames = CACHE_NAME, key = "'driver:' + #driverId + ':' + #page + ':' + #size", unless = "#result == null || #result.isEmpty()")
     public List<DeductionRecord> findByDriverId(Long driverId, int page, int size) {
         requirePositive(driverId, "Driver ID");
@@ -151,6 +178,26 @@ public class DeductionRecordService {
         }
         QueryWrapper<DeductionRecord> wrapper = new QueryWrapper<>();
         wrapper.eq("driver_id", driverId)
+                .orderByDesc("deduction_time");
+        return fetchFromDatabase(wrapper, page, size);
+    }
+
+    @Transactional(readOnly = true)
+    public List<DeductionRecord> findByDriverIds(Iterable<Long> driverIds, int page, int size) {
+        validatePagination(page, size);
+        List<Long> normalizedIds = driverIds == null
+                ? List.of()
+                : StreamSupport.stream(driverIds.spliterator(), false)
+                .filter(Objects::nonNull)
+                .filter(id -> id > 0)
+                .distinct()
+                .collect(Collectors.toList());
+        if (normalizedIds.isEmpty()) {
+            return List.of();
+        }
+        QueryWrapper<DeductionRecord> wrapper = new QueryWrapper<>();
+        wrapper.in("driver_id", normalizedIds)
+                .orderByDesc("updated_at")
                 .orderByDesc("deduction_time");
         return fetchFromDatabase(wrapper, page, size);
     }
@@ -237,7 +284,8 @@ public class DeductionRecordService {
         SysRequestHistory history = sysRequestHistoryMapper.selectByIdempotencyKey(idempotencyKey);
         return history != null
                 && "SUCCESS".equalsIgnoreCase(history.getBusinessStatus())
-                && "DONE".equalsIgnoreCase(history.getRequestParams());
+                && history.getBusinessId() != null
+                && history.getBusinessId() > 0;
     }
 
     public void markHistorySuccess(String idempotencyKey, Long deductionId) {
@@ -248,7 +296,6 @@ public class DeductionRecordService {
         }
         history.setBusinessStatus("SUCCESS");
         history.setBusinessId(deductionId);
-        history.setRequestParams("DONE");
         history.setUpdatedAt(LocalDateTime.now());
         sysRequestHistoryMapper.updateById(history);
     }
@@ -260,22 +307,77 @@ public class DeductionRecordService {
             return;
         }
         history.setBusinessStatus("FAILED");
-        history.setRequestParams(truncate(reason));
+        history.setRequestParams(appendFailureReason(history.getRequestParams(), reason));
         history.setUpdatedAt(LocalDateTime.now());
         sysRequestHistoryMapper.updateById(history);
+    }
+
+    private SysRequestHistory buildHistory(String idempotencyKey, DeductionRecord deductionRecord, String action) {
+        SysRequestHistory history = new SysRequestHistory();
+        history.setIdempotencyKey(idempotencyKey);
+        history.setRequestMethod(resolveRequestMethod("POST"));
+        history.setRequestUrl(resolveRequestUrl("/api/deductions"));
+        history.setRequestParams(buildRequestParams(deductionRecord));
+        history.setBusinessType(resolveBusinessType(action));
+        history.setBusinessStatus("PROCESSING");
+        history.setUserId(resolveCurrentUserId());
+        history.setRequestIp(resolveRequestIp());
+        history.setCreatedAt(LocalDateTime.now());
+        history.setUpdatedAt(LocalDateTime.now());
+        return history;
+    }
+
+    private String buildRequestParams(DeductionRecord deductionRecord) {
+        if (deductionRecord == null) {
+            return null;
+        }
+        StringBuilder builder = new StringBuilder();
+        appendParam(builder, "offenseId", deductionRecord.getOffenseId());
+        appendParam(builder, "driverId", deductionRecord.getDriverId());
+        appendParam(builder, "deductedPoints", deductionRecord.getDeductedPoints());
+        appendParam(builder, "deductionTime", deductionRecord.getDeductionTime());
+        appendParam(builder, "handler", deductionRecord.getHandler());
+        return truncate(builder.toString());
+    }
+
+    private String resolveBusinessType(String action) {
+        String normalized = isBlank(action) ? "CREATE" : action.trim().toUpperCase();
+        return "DEDUCTION_" + normalized;
+    }
+
+    private void appendParam(StringBuilder builder, String key, Object value) {
+        if (builder == null || value == null) {
+            return;
+        }
+        String normalized = value.toString().trim();
+        if (normalized.isEmpty()) {
+            return;
+        }
+        if (!builder.isEmpty()) {
+            builder.append(',');
+        }
+        builder.append(key).append('=').append(normalized);
+    }
+
+    private String appendFailureReason(String existing, String reason) {
+        String normalizedReason = truncate(reason);
+        if (isBlank(normalizedReason)) {
+            return existing;
+        }
+        if (isBlank(existing)) {
+            return "failure=" + normalizedReason;
+        }
+        return truncate(existing + ",failure=" + normalizedReason);
     }
 
     private void syncToIndexAfterCommit(DeductionRecord deductionRecord) {
         if (deductionRecord == null) {
             return;
         }
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                DeductionRecordDocument doc = DeductionRecordDocument.fromEntity(deductionRecord);
-                if (doc != null) {
-                    deductionRecordSearchRepository.save(doc);
-                }
+        runAfterCommitOrNow(() -> {
+            DeductionRecordDocument doc = DeductionRecordDocument.fromEntity(deductionRecord);
+            if (doc != null) {
+                deductionRecordSearchRepository.save(doc);
             }
         });
     }
@@ -284,19 +386,42 @@ public class DeductionRecordService {
         if (records == null || records.isEmpty()) {
             return;
         }
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                List<DeductionRecordDocument> documents = records.stream()
-                        .filter(Objects::nonNull)
-                        .map(DeductionRecordDocument::fromEntity)
-                        .filter(Objects::nonNull)
-                        .collect(Collectors.toList());
-                if (!documents.isEmpty()) {
-                    deductionRecordSearchRepository.saveAll(documents);
-                }
+        runAfterCommitOrNow(() -> {
+            List<DeductionRecordDocument> documents = records.stream()
+                    .filter(Objects::nonNull)
+                    .map(DeductionRecordDocument::fromEntity)
+                    .filter(Objects::nonNull)
+                    .collect(Collectors.toList());
+            if (!documents.isEmpty()) {
+                deductionRecordSearchRepository.saveAll(documents);
             }
         });
+    }
+
+    private void populateDriverIdentityFromOffense(DeductionRecord deductionRecord) {
+        if (deductionRecord == null || deductionRecord.getOffenseId() == null || deductionRecord.getDriverId() != null) {
+            return;
+        }
+        OffenseRecord offenseRecord = offenseRecordService.findById(deductionRecord.getOffenseId());
+        if (offenseRecord != null && offenseRecord.getDriverId() != null) {
+            deductionRecord.setDriverId(offenseRecord.getDriverId());
+        }
+    }
+
+    private void runAfterCommitOrNow(Runnable task) {
+        if (task == null) {
+            return;
+        }
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    task.run();
+                }
+            });
+            return;
+        }
+        task.run();
     }
 
     private void sendKafkaMessage(String topic, String idempotencyKey, DeductionRecord deductionRecord) {
@@ -334,11 +459,42 @@ public class DeductionRecordService {
 
     private void validateDeductionRecord(DeductionRecord deductionRecord) {
         Objects.requireNonNull(deductionRecord, "DeductionRecord must not be null");
+        requirePositive(deductionRecord.getOffenseId(), "Offense ID");
+        requirePositive(deductionRecord.getDriverId(), "Driver ID");
+        OffenseRecord offenseRecord = offenseRecordService.findById(deductionRecord.getOffenseId());
+        if (offenseRecord == null) {
+            throw new IllegalArgumentException("Offense record does not exist");
+        }
+        DriverInformation driverInformation = driverInformationService.getDriverById(deductionRecord.getDriverId());
+        if (driverInformation == null) {
+            throw new IllegalArgumentException("Driver does not exist");
+        }
+        if (offenseRecord.getDriverId() != null
+                && !Objects.equals(offenseRecord.getDriverId(), deductionRecord.getDriverId())) {
+            throw new IllegalArgumentException("Deduction driver must match the offense driver");
+        }
+        if (deductionRecord.getDeductionId() != null) {
+            DeductionRecord existing = deductionRecordMapper.selectById(deductionRecord.getDeductionId());
+            if (existing != null) {
+                if (existing.getOffenseId() != null
+                        && !Objects.equals(existing.getOffenseId(), deductionRecord.getOffenseId())) {
+                    throw new IllegalArgumentException("Offense ID cannot be changed for an existing deduction record");
+                }
+                if (existing.getDriverId() != null
+                        && !Objects.equals(existing.getDriverId(), deductionRecord.getDriverId())) {
+                    throw new IllegalArgumentException("Driver ID cannot be changed for an existing deduction record");
+                }
+            }
+        }
+        ensureSingleDeductionPerOffense(deductionRecord);
+        if (deductionRecord.getDeductedPoints() == null || deductionRecord.getDeductedPoints() <= 0) {
+            throw new IllegalArgumentException("Deducted points must be greater than zero");
+        }
         if (deductionRecord.getDeductionTime() == null) {
             deductionRecord.setDeductionTime(LocalDateTime.now());
         }
         if (deductionRecord.getStatus() == null || deductionRecord.getStatus().isBlank()) {
-            deductionRecord.setStatus("Pending");
+            deductionRecord.setStatus(DeductionState.EFFECTIVE.getCode());
         }
     }
 
@@ -375,5 +531,81 @@ public class DeductionRecordService {
             return null;
         }
         return value.length() <= 500 ? value : value.substring(0, 500);
+    }
+
+    private String resolveRequestMethod(String fallback) {
+        RequestAttributes requestAttributes = RequestContextHolder.getRequestAttributes();
+        if (!(requestAttributes instanceof ServletRequestAttributes servletRequestAttributes)) {
+            return fallback;
+        }
+        HttpServletRequest request = servletRequestAttributes.getRequest();
+        if (request == null || isBlank(request.getMethod())) {
+            return fallback;
+        }
+        return request.getMethod().trim().toUpperCase();
+    }
+
+    private String resolveRequestUrl(String fallback) {
+        RequestAttributes requestAttributes = RequestContextHolder.getRequestAttributes();
+        if (!(requestAttributes instanceof ServletRequestAttributes servletRequestAttributes)) {
+            return fallback;
+        }
+        HttpServletRequest request = servletRequestAttributes.getRequest();
+        if (request == null || isBlank(request.getRequestURI())) {
+            return fallback;
+        }
+        return request.getRequestURI().trim();
+    }
+
+    private Long resolveCurrentUserId() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication == null
+                || !authentication.isAuthenticated()
+                || authentication instanceof AnonymousAuthenticationToken
+                || isBlank(authentication.getName())) {
+            return null;
+        }
+        SysUser user = sysUserService.findByUsername(authentication.getName());
+        return user == null ? null : user.getUserId();
+    }
+
+    private String resolveRequestIp() {
+        RequestAttributes requestAttributes = RequestContextHolder.getRequestAttributes();
+        if (!(requestAttributes instanceof ServletRequestAttributes servletRequestAttributes)) {
+            return null;
+        }
+        HttpServletRequest request = servletRequestAttributes.getRequest();
+        if (request == null) {
+            return null;
+        }
+        String forwardedFor = request.getHeader("X-Forwarded-For");
+        if (!isBlank(forwardedFor)) {
+            return forwardedFor.split(",")[0].trim();
+        }
+        String realIp = request.getHeader("X-Real-IP");
+        if (!isBlank(realIp)) {
+            return realIp.trim();
+        }
+        String remoteAddr = request.getRemoteAddr();
+        return isBlank(remoteAddr) ? null : remoteAddr.trim();
+    }
+
+    private void ensureSingleDeductionPerOffense(DeductionRecord deductionRecord) {
+        QueryWrapper<DeductionRecord> wrapper = new QueryWrapper<>();
+        wrapper.eq("offense_id", deductionRecord.getOffenseId());
+        List<DeductionRecord> existingRecords = deductionRecordMapper.selectList(wrapper);
+        for (DeductionRecord existing : existingRecords) {
+            if (existing == null || Objects.equals(existing.getDeductionId(), deductionRecord.getDeductionId())) {
+                continue;
+            }
+            throw new IllegalStateException("Only one deduction record is allowed for each offense");
+        }
+    }
+
+    private void syncDriverPoints(Long driverId) {
+        if (driverId == null) {
+            return;
+        }
+        driverInformationService.syncPointsFromDeductionRecords(driverId);
     }
 }

@@ -22,7 +22,6 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.stream.Collectors;
@@ -61,20 +60,10 @@ public class OffenseTypeDictService {
         if (sysRequestHistoryMapper.selectByIdempotencyKey(idempotencyKey) != null) {
             throw new RuntimeException("Duplicate offense type dict request detected");
         }
-        SysRequestHistory history = new SysRequestHistory();
-        history.setIdempotencyKey(idempotencyKey);
-        history.setBusinessStatus("PROCESSING");
-        history.setCreatedAt(LocalDateTime.now());
-        history.setUpdatedAt(LocalDateTime.now());
+        SysRequestHistory history = buildHistory(idempotencyKey, dict, action);
         sysRequestHistoryMapper.insert(history);
 
         sendKafkaMessage("offense_type_dict_" + action, idempotencyKey, dict);
-
-        history.setBusinessStatus("SUCCESS");
-        history.setBusinessId(Optional.ofNullable(dict.getTypeId()).map(Long::valueOf).orElse(null));
-        history.setRequestParams("PENDING");
-        history.setUpdatedAt(LocalDateTime.now());
-        sysRequestHistoryMapper.updateById(history);
     }
 
     @Transactional
@@ -107,12 +96,7 @@ public class OffenseTypeDictService {
         if (rows == 0) {
             throw new IllegalStateException("No OffenseTypeDict deleted for id=" + typeId);
         }
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                offenseTypeDictSearchRepository.deleteById(typeId);
-            }
-        });
+        runAfterCommitOrNow(() -> offenseTypeDictSearchRepository.deleteById(typeId));
     }
 
     @Transactional(readOnly = true)
@@ -142,6 +126,19 @@ public class OffenseTypeDictService {
         List<OffenseTypeDict> fromDb = offenseTypeDictMapper.selectList(null);
         syncBatchToIndexAfterCommit(fromDb);
         return fromDb;
+    }
+
+    @Transactional(readOnly = true)
+    @Cacheable(
+            cacheNames = CACHE_NAME,
+            key = "'all:' + #page + ':' + #size",
+            unless = "#result == null || #result.isEmpty()")
+    public List<OffenseTypeDict> findAll(int page, int size) {
+        validatePagination(page, size);
+        QueryWrapper<OffenseTypeDict> wrapper = new QueryWrapper<>();
+        wrapper.orderByAsc("offense_code")
+                .orderByAsc("type_id");
+        return fetchFromDatabase(wrapper, page, size);
     }
 
     @Cacheable(cacheNames = CACHE_NAME, key = "'codePrefix:' + #offenseCode + ':' + #page + ':' + #size", unless = "#result == null || #result.isEmpty()")
@@ -283,7 +280,8 @@ public class OffenseTypeDictService {
         SysRequestHistory history = sysRequestHistoryMapper.selectByIdempotencyKey(idempotencyKey);
         return history != null
                 && "SUCCESS".equalsIgnoreCase(history.getBusinessStatus())
-                && "DONE".equalsIgnoreCase(history.getRequestParams());
+                && history.getBusinessId() != null
+                && history.getBusinessId() > 0;
     }
 
     public void markHistorySuccess(String idempotencyKey, Integer typeId) {
@@ -294,7 +292,6 @@ public class OffenseTypeDictService {
         }
         history.setBusinessStatus("SUCCESS");
         history.setBusinessId(typeId != null ? typeId.longValue() : null);
-        history.setRequestParams("DONE");
         history.setUpdatedAt(LocalDateTime.now());
         sysRequestHistoryMapper.updateById(history);
     }
@@ -306,9 +303,65 @@ public class OffenseTypeDictService {
             return;
         }
         history.setBusinessStatus("FAILED");
-        history.setRequestParams(truncate(reason));
+        history.setRequestParams(appendFailureReason(history.getRequestParams(), reason));
         history.setUpdatedAt(LocalDateTime.now());
         sysRequestHistoryMapper.updateById(history);
+    }
+
+    private SysRequestHistory buildHistory(String idempotencyKey, OffenseTypeDict dict, String action) {
+        SysRequestHistory history = new SysRequestHistory();
+        history.setIdempotencyKey(idempotencyKey);
+        history.setRequestMethod("POST");
+        history.setRequestUrl("/api/offense-types");
+        history.setRequestParams(buildRequestParams(dict));
+        history.setBusinessType(resolveBusinessType(action));
+        history.setBusinessStatus("PROCESSING");
+        history.setCreatedAt(LocalDateTime.now());
+        history.setUpdatedAt(LocalDateTime.now());
+        return history;
+    }
+
+    private String buildRequestParams(OffenseTypeDict dict) {
+        if (dict == null) {
+            return null;
+        }
+        StringBuilder builder = new StringBuilder();
+        appendParam(builder, "offenseCode", dict.getOffenseCode());
+        appendParam(builder, "offenseName", dict.getOffenseName());
+        appendParam(builder, "category", dict.getCategory());
+        appendParam(builder, "severityLevel", dict.getSeverityLevel());
+        appendParam(builder, "status", dict.getStatus());
+        return truncate(builder.toString());
+    }
+
+    private String resolveBusinessType(String action) {
+        String normalized = isBlank(action) ? "CREATE" : action.trim().toUpperCase();
+        return "OFFENSE_TYPE_DICT_" + normalized;
+    }
+
+    private void appendParam(StringBuilder builder, String key, Object value) {
+        if (builder == null || value == null) {
+            return;
+        }
+        String normalized = value.toString().trim();
+        if (normalized.isEmpty()) {
+            return;
+        }
+        if (!builder.isEmpty()) {
+            builder.append(',');
+        }
+        builder.append(key).append('=').append(normalized);
+    }
+
+    private String appendFailureReason(String existing, String reason) {
+        String normalizedReason = truncate(reason);
+        if (isBlank(normalizedReason)) {
+            return existing;
+        }
+        if (isBlank(existing)) {
+            return "failure=" + normalizedReason;
+        }
+        return truncate(existing + ",failure=" + normalizedReason);
     }
 
     private void sendKafkaMessage(String topic, String idempotencyKey, OffenseTypeDict dict) {
@@ -325,13 +378,10 @@ public class OffenseTypeDictService {
         if (dict == null) {
             return;
         }
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                OffenseTypeDictDocument doc = OffenseTypeDictDocument.fromEntity(dict);
-                if (doc != null) {
-                    offenseTypeDictSearchRepository.save(doc);
-                }
+        runAfterCommitOrNow(() -> {
+            OffenseTypeDictDocument doc = OffenseTypeDictDocument.fromEntity(dict);
+            if (doc != null) {
+                offenseTypeDictSearchRepository.save(doc);
             }
         });
     }
@@ -340,17 +390,14 @@ public class OffenseTypeDictService {
         if (dicts == null || dicts.isEmpty()) {
             return;
         }
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                List<OffenseTypeDictDocument> documents = dicts.stream()
-                        .filter(Objects::nonNull)
-                        .map(OffenseTypeDictDocument::fromEntity)
-                        .filter(Objects::nonNull)
-                        .collect(Collectors.toList());
-                if (!documents.isEmpty()) {
-                    offenseTypeDictSearchRepository.saveAll(documents);
-                }
+        runAfterCommitOrNow(() -> {
+            List<OffenseTypeDictDocument> documents = dicts.stream()
+                    .filter(Objects::nonNull)
+                    .map(OffenseTypeDictDocument::fromEntity)
+                    .filter(Objects::nonNull)
+                    .collect(Collectors.toList());
+            if (!documents.isEmpty()) {
+                offenseTypeDictSearchRepository.saveAll(documents);
             }
         });
     }
@@ -417,5 +464,21 @@ public class OffenseTypeDictService {
             return null;
         }
         return value.length() <= 500 ? value : value.substring(0, 500);
+    }
+
+    private void runAfterCommitOrNow(Runnable task) {
+        if (task == null) {
+            return;
+        }
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    task.run();
+                }
+            });
+            return;
+        }
+        task.run();
     }
 }

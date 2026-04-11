@@ -1,6 +1,7 @@
 package com.tutict.finalassignmentbackend.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tutict.finalassignmentbackend.config.login.jwt.TokenProvider;
 import com.tutict.finalassignmentbackend.config.statemachine.events.AppealAcceptanceEvent;
@@ -1164,6 +1165,220 @@ class BusinessFlowConsistencyTest {
         assertNotNull(history.getRequestParams());
         assertTrue(history.getRequestParams().contains("fineId=91"));
         assertTrue(history.getRequestParams().contains("paymentAmount=120"));
+    }
+
+    @Test
+    void checkAndInsertPaymentConfirmIdempotencyShouldPopulateConfirmHistoryMetadata() {
+        PaymentRecordMapper paymentRecordMapper = Mockito.mock(PaymentRecordMapper.class);
+        SysRequestHistoryMapper requestHistoryMapper = Mockito.mock(SysRequestHistoryMapper.class);
+        PaymentRecordSearchRepository searchRepository = Mockito.mock(PaymentRecordSearchRepository.class);
+        FineRecordService fineRecordService = Mockito.mock(FineRecordService.class);
+        SysUserService sysUserService = Mockito.mock(SysUserService.class);
+        @SuppressWarnings("unchecked")
+        KafkaTemplate<String, String> kafkaTemplate = Mockito.mock(KafkaTemplate.class);
+        PlatformTransactionManager transactionManager = Mockito.mock(PlatformTransactionManager.class);
+        StateMachineService stateMachineService = Mockito.mock(StateMachineService.class);
+
+        PaymentRecordService service = new PaymentRecordService(
+                paymentRecordMapper,
+                requestHistoryMapper,
+                searchRepository,
+                fineRecordService,
+                sysUserService,
+                kafkaTemplate,
+                new ObjectMapper(),
+                transactionManager,
+                stateMachineService);
+
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken("driver", "n/a", Collections.emptyList()));
+        SysUser user = new SysUser();
+        user.setUserId(99L);
+        when(sysUserService.findByUsername("driver")).thenReturn(user);
+
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.addHeader("X-Forwarded-For", "203.0.113.9");
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
+
+        PaymentRecord confirmationDraft = new PaymentRecord();
+        confirmationDraft.setPaymentId(902L);
+        confirmationDraft.setTransactionId("WX-20260410-0002");
+        confirmationDraft.setReceiptUrl("https://example.com/proof/902");
+
+        service.checkAndInsertIdempotency("payment-confirm-key", confirmationDraft, "confirm");
+
+        ArgumentCaptor<SysRequestHistory> captor = ArgumentCaptor.forClass(SysRequestHistory.class);
+        verify(requestHistoryMapper).insert(captor.capture());
+        SysRequestHistory history = captor.getValue();
+        assertEquals("/api/payments/me/902/confirm", history.getRequestUrl());
+        assertEquals("PAYMENT_CONFIRM", history.getBusinessType());
+        assertEquals(902L, history.getBusinessId());
+        assertTrue(history.getRequestParams().contains("paymentId=902"));
+        assertTrue(history.getRequestParams().contains("transactionId=WX-20260410-0002"));
+    }
+
+    @Test
+    void checkAndInsertPaymentReviewIdempotencyShouldPopulateReviewHistoryMetadata() {
+        PaymentRecordMapper paymentRecordMapper = Mockito.mock(PaymentRecordMapper.class);
+        SysRequestHistoryMapper requestHistoryMapper = Mockito.mock(SysRequestHistoryMapper.class);
+        PaymentRecordSearchRepository searchRepository = Mockito.mock(PaymentRecordSearchRepository.class);
+        FineRecordService fineRecordService = Mockito.mock(FineRecordService.class);
+        SysUserService sysUserService = Mockito.mock(SysUserService.class);
+        @SuppressWarnings("unchecked")
+        KafkaTemplate<String, String> kafkaTemplate = Mockito.mock(KafkaTemplate.class);
+        PlatformTransactionManager transactionManager = Mockito.mock(PlatformTransactionManager.class);
+        StateMachineService stateMachineService = Mockito.mock(StateMachineService.class);
+
+        PaymentRecordService service = new PaymentRecordService(
+                paymentRecordMapper,
+                requestHistoryMapper,
+                searchRepository,
+                fineRecordService,
+                sysUserService,
+                kafkaTemplate,
+                new ObjectMapper(),
+                transactionManager,
+                stateMachineService);
+
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken("finance", "n/a", Collections.emptyList()));
+        SysUser user = new SysUser();
+        user.setUserId(77L);
+        when(sysUserService.findByUsername("finance")).thenReturn(user);
+
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.addHeader("X-Forwarded-For", "203.0.113.10");
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
+
+        PaymentRecord reviewDraft = new PaymentRecord();
+        reviewDraft.setPaymentId(902L);
+        reviewDraft.setRemarks("reviewResult=NEED_PROOF,reviewOpinion=Upload receipt");
+
+        service.checkAndInsertIdempotency("payment-review-key", reviewDraft, "review");
+
+        ArgumentCaptor<SysRequestHistory> captor = ArgumentCaptor.forClass(SysRequestHistory.class);
+        verify(requestHistoryMapper).insert(captor.capture());
+        SysRequestHistory history = captor.getValue();
+        assertEquals("/api/payments/902/finance-review", history.getRequestUrl());
+        assertEquals("PAYMENT_REVIEW", history.getBusinessType());
+        assertEquals(902L, history.getBusinessId());
+        assertEquals(77L, history.getUserId());
+        assertEquals("203.0.113.10", history.getRequestIp());
+        assertTrue(history.getRequestParams().contains("paymentId=902"));
+        assertTrue(history.getRequestParams().contains("remarks=reviewResult=NEED_PROOF"));
+    }
+
+    @Test
+    void checkAndInsertPaymentProofIdempotencyShouldPopulateProofHistoryMetadata() {
+        PaymentRecordMapper paymentRecordMapper = Mockito.mock(PaymentRecordMapper.class);
+        SysRequestHistoryMapper requestHistoryMapper = Mockito.mock(SysRequestHistoryMapper.class);
+        PaymentRecordSearchRepository searchRepository = Mockito.mock(PaymentRecordSearchRepository.class);
+        FineRecordService fineRecordService = Mockito.mock(FineRecordService.class);
+        SysUserService sysUserService = Mockito.mock(SysUserService.class);
+        @SuppressWarnings("unchecked")
+        KafkaTemplate<String, String> kafkaTemplate = Mockito.mock(KafkaTemplate.class);
+        PlatformTransactionManager transactionManager = Mockito.mock(PlatformTransactionManager.class);
+        StateMachineService stateMachineService = Mockito.mock(StateMachineService.class);
+
+        PaymentRecordService service = new PaymentRecordService(
+                paymentRecordMapper,
+                requestHistoryMapper,
+                searchRepository,
+                fineRecordService,
+                sysUserService,
+                kafkaTemplate,
+                new ObjectMapper(),
+                transactionManager,
+                stateMachineService);
+
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken("driver", "n/a", Collections.emptyList()));
+        SysUser user = new SysUser();
+        user.setUserId(55L);
+        when(sysUserService.findByUsername("driver")).thenReturn(user);
+
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.addHeader("X-Forwarded-For", "203.0.113.11");
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
+
+        PaymentRecord proofDraft = new PaymentRecord();
+        proofDraft.setPaymentId(902L);
+        proofDraft.setReceiptUrl("https://example.com/proof/updated-902");
+
+        service.checkAndInsertIdempotency("payment-proof-key", proofDraft, "proof");
+
+        ArgumentCaptor<SysRequestHistory> captor = ArgumentCaptor.forClass(SysRequestHistory.class);
+        verify(requestHistoryMapper).insert(captor.capture());
+        SysRequestHistory history = captor.getValue();
+        assertEquals("/api/payments/me/902/proof", history.getRequestUrl());
+        assertEquals("PAYMENT_PROOF_UPDATE", history.getBusinessType());
+        assertEquals(902L, history.getBusinessId());
+        assertEquals(55L, history.getUserId());
+        assertTrue(history.getRequestParams().contains("paymentId=902"));
+        assertTrue(history.getRequestParams().contains("receiptUrl=https://example.com/proof/updated-902"));
+    }
+
+    @Test
+    void listFinanceReviewTasksShouldReturnOnlyPendingFinanceItems() {
+        PaymentRecordMapper paymentRecordMapper = Mockito.mock(PaymentRecordMapper.class);
+        SysRequestHistoryMapper requestHistoryMapper = Mockito.mock(SysRequestHistoryMapper.class);
+        PaymentRecordSearchRepository searchRepository = Mockito.mock(PaymentRecordSearchRepository.class);
+        FineRecordService fineRecordService = Mockito.mock(FineRecordService.class);
+        SysUserService sysUserService = Mockito.mock(SysUserService.class);
+        @SuppressWarnings("unchecked")
+        KafkaTemplate<String, String> kafkaTemplate = Mockito.mock(KafkaTemplate.class);
+        PlatformTransactionManager transactionManager = Mockito.mock(PlatformTransactionManager.class);
+        StateMachineService stateMachineService = Mockito.mock(StateMachineService.class);
+
+        PaymentRecordService service = new PaymentRecordService(
+                paymentRecordMapper,
+                requestHistoryMapper,
+                searchRepository,
+                fineRecordService,
+                sysUserService,
+                kafkaTemplate,
+                new ObjectMapper(),
+                transactionManager,
+                stateMachineService);
+
+        PaymentRecord pendingInitialReview = new PaymentRecord();
+        pendingInitialReview.setPaymentId(901L);
+        pendingInitialReview.setPaymentChannel("APP");
+        pendingInitialReview.setPaymentStatus(PaymentState.PAID.getCode());
+        pendingInitialReview.setReceiptUrl("https://example.com/proof/901");
+
+        PaymentRecord needProofReview = new PaymentRecord();
+        needProofReview.setPaymentId(902L);
+        needProofReview.setPaymentChannel("USER_SELF_SERVICE");
+        needProofReview.setPaymentStatus(PaymentState.PARTIAL.getCode());
+        needProofReview.setRemarks("[FINANCE_REVIEW]|NEED_PROOF|finance|2026-04-10T12:00:00|Upload receipt");
+
+        PaymentRecord approvedReview = new PaymentRecord();
+        approvedReview.setPaymentId(903L);
+        approvedReview.setPaymentChannel("APP");
+        approvedReview.setPaymentStatus(PaymentState.PAID.getCode());
+        approvedReview.setRemarks("[FINANCE_REVIEW]|APPROVED|finance|2026-04-10T12:05:00|Verified");
+
+        PaymentRecord nonSelfService = new PaymentRecord();
+        nonSelfService.setPaymentId(904L);
+        nonSelfService.setPaymentChannel("COUNTER");
+        nonSelfService.setPaymentStatus(PaymentState.PAID.getCode());
+
+        Page<PaymentRecord> resultPage = new Page<>(1, 50);
+        resultPage.setRecords(List.of(
+                pendingInitialReview,
+                needProofReview,
+                approvedReview,
+                nonSelfService));
+        when(paymentRecordMapper.selectPage(any(Page.class), any(QueryWrapper.class))).thenReturn(resultPage);
+
+        List<PaymentRecord> tasks = service.listFinanceReviewTasks(1, 20);
+
+        assertEquals(2, tasks.size());
+        assertTrue(tasks.stream().anyMatch(task -> Objects.equals(task.getPaymentId(), 901L)));
+        assertTrue(tasks.stream().anyMatch(task -> Objects.equals(task.getPaymentId(), 902L)));
+        assertFalse(tasks.stream().anyMatch(task -> Objects.equals(task.getPaymentId(), 903L)));
+        assertFalse(tasks.stream().anyMatch(task -> Objects.equals(task.getPaymentId(), 904L)));
     }
 
     @Test
@@ -3002,6 +3217,60 @@ class BusinessFlowConsistencyTest {
     }
 
     @Test
+    void createCurrentUserAppealShouldRejectIncompleteCurrentUserProfile() {
+        SysUserService sysUserService = Mockito.mock(SysUserService.class);
+        DriverInformationService driverInformationService = Mockito.mock(DriverInformationService.class);
+        OffenseRecordService offenseRecordService = Mockito.mock(OffenseRecordService.class);
+        FineRecordService fineRecordService = Mockito.mock(FineRecordService.class);
+        DeductionRecordService deductionRecordService = Mockito.mock(DeductionRecordService.class);
+        VehicleInformationService vehicleInformationService = Mockito.mock(VehicleInformationService.class);
+        AppealRecordService appealRecordService = Mockito.mock(AppealRecordService.class);
+        PaymentRecordService paymentRecordService = Mockito.mock(PaymentRecordService.class);
+        StateMachineService stateMachineService = Mockito.mock(StateMachineService.class);
+
+        CurrentUserTrafficSupportService service = new CurrentUserTrafficSupportService(
+                sysUserService,
+                driverInformationService,
+                offenseRecordService,
+                fineRecordService,
+                deductionRecordService,
+                vehicleInformationService,
+                appealRecordService,
+                paymentRecordService,
+                stateMachineService);
+
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken("carol", "n/a", Collections.emptyList()));
+
+        SysUser user = new SysUser();
+        user.setUserId(200L);
+        user.setUsername("carol");
+        user.setRealName("Carol Driver");
+        user.setIdCardNumber("110101199001010033");
+        when(sysUserService.findByUsername("carol")).thenReturn(user);
+
+        DriverInformation driver = new DriverInformation();
+        driver.setDriverId(200L);
+        driver.setName("Carol Driver");
+        driver.setIdCardNumber("110101199001010033");
+        when(driverInformationService.findLinkedDriverForUser(any())).thenReturn(driver);
+
+        OffenseRecord offense = new OffenseRecord();
+        offense.setOffenseId(500L);
+        offense.setDriverId(200L);
+        when(offenseRecordService.findById(500L)).thenReturn(offense);
+
+        AppealRecord draft = new AppealRecord();
+        draft.setOffenseId(500L);
+
+        IllegalStateException ex = assertThrows(IllegalStateException.class,
+                () -> service.createAppealForCurrentUser(draft));
+
+        assertEquals("Complete your personal profile before submitting an appeal", ex.getMessage());
+        verify(appealRecordService, never()).createAppeal(any());
+    }
+
+    @Test
     void currentUserShouldResubmitOwnRejectedAppeal() {
         SysUserService sysUserService = Mockito.mock(SysUserService.class);
         DriverInformationService driverInformationService = Mockito.mock(DriverInformationService.class);
@@ -3429,6 +3698,94 @@ class BusinessFlowConsistencyTest {
 
         assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
         verify(appealRecordService).markHistoryFailure("appeal-key", "Offense does not belong to current user");
+    }
+
+    @Test
+    void confirmCurrentUserPaymentShouldMarkHistoryFailureForRejectedCurrentUserRequest() {
+        PaymentRecordService paymentRecordService = Mockito.mock(PaymentRecordService.class);
+        CurrentUserTrafficSupportService currentUserTrafficSupportService =
+                Mockito.mock(CurrentUserTrafficSupportService.class);
+
+        PaymentRecordController controller = new PaymentRecordController(
+                paymentRecordService,
+                currentUserTrafficSupportService);
+
+        PaymentRecordController.CurrentUserPaymentConfirmationRequest request =
+                new PaymentRecordController.CurrentUserPaymentConfirmationRequest();
+        request.setTransactionId("WX-20260410-0003");
+
+        when(paymentRecordService.shouldSkipProcessing("payment-confirm-key")).thenReturn(false);
+        Mockito.doNothing().when(paymentRecordService)
+                .checkAndInsertIdempotency(any(), any(PaymentRecord.class), eq("confirm"));
+        when(currentUserTrafficSupportService.confirmCurrentUserPayment(eq(902L), any(PaymentRecord.class)))
+                .thenThrow(new IllegalStateException("Pending self-service payment order has expired"));
+
+        ResponseEntity<PaymentRecord> response =
+                controller.confirmCurrentUserPayment(902L, request, "payment-confirm-key");
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+        verify(paymentRecordService).markHistoryFailure(
+                "payment-confirm-key",
+                "Pending self-service payment order has expired");
+    }
+
+    @Test
+    void reviewPaymentShouldMarkHistoryFailureForRejectedFinanceReviewRequest() {
+        PaymentRecordService paymentRecordService = Mockito.mock(PaymentRecordService.class);
+        CurrentUserTrafficSupportService currentUserTrafficSupportService =
+                Mockito.mock(CurrentUserTrafficSupportService.class);
+
+        PaymentRecordController controller = new PaymentRecordController(
+                paymentRecordService,
+                currentUserTrafficSupportService);
+
+        PaymentRecordController.PaymentFinanceReviewRequest request =
+                new PaymentRecordController.PaymentFinanceReviewRequest();
+        request.setReviewResult("NEED_PROOF");
+        request.setReviewOpinion("Please upload receipt");
+
+        when(paymentRecordService.shouldSkipProcessing("payment-review-key")).thenReturn(false);
+        Mockito.doNothing().when(paymentRecordService)
+                .checkAndInsertIdempotency(any(), any(PaymentRecord.class), eq("review"));
+        when(paymentRecordService.recordFinanceReview(902L, "NEED_PROOF", "Please upload receipt"))
+                .thenThrow(new IllegalStateException("Only confirmed self-service payment records can be reviewed"));
+
+        ResponseEntity<PaymentRecord> response =
+                controller.reviewPayment(902L, request, "payment-review-key");
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+        verify(paymentRecordService).markHistoryFailure(
+                "payment-review-key",
+                "Only confirmed self-service payment records can be reviewed");
+    }
+
+    @Test
+    void updateCurrentUserPaymentProofShouldMarkHistoryFailureForRejectedProofUpdate() {
+        PaymentRecordService paymentRecordService = Mockito.mock(PaymentRecordService.class);
+        CurrentUserTrafficSupportService currentUserTrafficSupportService =
+                Mockito.mock(CurrentUserTrafficSupportService.class);
+
+        PaymentRecordController controller = new PaymentRecordController(
+                paymentRecordService,
+                currentUserTrafficSupportService);
+
+        PaymentRecordController.CurrentUserPaymentProofRequest request =
+                new PaymentRecordController.CurrentUserPaymentProofRequest();
+        request.setReceiptUrl("https://example.com/proof/new-902");
+
+        when(paymentRecordService.shouldSkipProcessing("payment-proof-key")).thenReturn(false);
+        Mockito.doNothing().when(paymentRecordService)
+                .checkAndInsertIdempotency(any(), any(PaymentRecord.class), eq("proof"));
+        when(currentUserTrafficSupportService.updateCurrentUserPaymentProof(eq(902L), any(PaymentRecord.class)))
+                .thenThrow(new IllegalStateException("Only confirmed self-service payment records can update proof"));
+
+        ResponseEntity<PaymentRecord> response =
+                controller.updateCurrentUserPaymentProof(902L, request, "payment-proof-key");
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+        verify(paymentRecordService).markHistoryFailure(
+                "payment-proof-key",
+                "Only confirmed self-service payment records can update proof");
     }
 
     @Test
@@ -4900,6 +5257,579 @@ class BusinessFlowConsistencyTest {
     }
 
     @Test
+    void createPaymentRecordShouldKeepSelfServiceAppPaymentUnpaidUntilConfirmed() {
+        PaymentRecordMapper paymentRecordMapper = Mockito.mock(PaymentRecordMapper.class);
+        SysRequestHistoryMapper requestHistoryMapper = Mockito.mock(SysRequestHistoryMapper.class);
+        PaymentRecordSearchRepository searchRepository = Mockito.mock(PaymentRecordSearchRepository.class);
+        FineRecordService fineRecordService = Mockito.mock(FineRecordService.class);
+        SysUserService sysUserService = Mockito.mock(SysUserService.class);
+        @SuppressWarnings("unchecked")
+        KafkaTemplate<String, String> kafkaTemplate = Mockito.mock(KafkaTemplate.class);
+        PlatformTransactionManager transactionManager = Mockito.mock(PlatformTransactionManager.class);
+        StateMachineService stateMachineService = Mockito.mock(StateMachineService.class);
+
+        PaymentRecordService service = new PaymentRecordService(
+                paymentRecordMapper,
+                requestHistoryMapper,
+                searchRepository,
+                fineRecordService,
+                sysUserService,
+                kafkaTemplate,
+                new ObjectMapper(),
+                transactionManager,
+                stateMachineService);
+
+        FineRecord fineRecord = new FineRecord();
+        fineRecord.setFineId(901L);
+        fineRecord.setTotalAmount(BigDecimal.valueOf(100));
+        fineRecord.setPaidAmount(BigDecimal.ZERO);
+        fineRecord.setUnpaidAmount(BigDecimal.valueOf(100));
+        fineRecord.setPaymentStatus(PaymentState.UNPAID.getCode());
+        when(fineRecordService.findById(901L)).thenReturn(fineRecord);
+        when(paymentRecordMapper.insert(any(PaymentRecord.class))).thenReturn(1);
+        when(paymentRecordMapper.selectList(any())).thenAnswer(invocation -> {
+            PaymentRecord stored = new PaymentRecord();
+            stored.setPaymentId(902L);
+            stored.setFineId(901L);
+            stored.setPaymentAmount(BigDecimal.valueOf(30));
+            stored.setPaymentStatus(PaymentState.UNPAID.getCode());
+            stored.setPaymentChannel("APP");
+            stored.setRefundAmount(BigDecimal.ZERO);
+            return List.of(stored);
+        });
+        when(fineRecordService.updateFineRecordSystemManaged(any(FineRecord.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        PaymentRecord draft = new PaymentRecord();
+        draft.setFineId(901L);
+        draft.setPaymentAmount(BigDecimal.valueOf(30));
+        draft.setPayerName("Carol Driver");
+        draft.setPayerIdCard("110101199001010033");
+        draft.setPaymentChannel("APP");
+        draft.setRemarks("Current user self-service payment");
+
+        PaymentRecord created = service.createPaymentRecord(draft);
+
+        assertEquals(PaymentState.UNPAID.getCode(), created.getPaymentStatus());
+        assertNull(created.getTransactionId());
+        assertNull(created.getReceiptNumber());
+        ArgumentCaptor<FineRecord> fineCaptor = ArgumentCaptor.forClass(FineRecord.class);
+        verify(fineRecordService).updateFineRecordSystemManaged(fineCaptor.capture());
+        assertEquals(PaymentState.UNPAID.getCode(), fineCaptor.getValue().getPaymentStatus());
+        assertEquals(BigDecimal.ZERO, fineCaptor.getValue().getPaidAmount());
+        assertEquals(BigDecimal.valueOf(100), fineCaptor.getValue().getUnpaidAmount());
+    }
+
+    @Test
+    void updateSelfServicePaymentConfirmationDetailsShouldRequireTransactionId() {
+        PaymentRecordMapper paymentRecordMapper = Mockito.mock(PaymentRecordMapper.class);
+        SysRequestHistoryMapper requestHistoryMapper = Mockito.mock(SysRequestHistoryMapper.class);
+        PaymentRecordSearchRepository searchRepository = Mockito.mock(PaymentRecordSearchRepository.class);
+        FineRecordService fineRecordService = Mockito.mock(FineRecordService.class);
+        SysUserService sysUserService = Mockito.mock(SysUserService.class);
+        @SuppressWarnings("unchecked")
+        KafkaTemplate<String, String> kafkaTemplate = Mockito.mock(KafkaTemplate.class);
+        PlatformTransactionManager transactionManager = Mockito.mock(PlatformTransactionManager.class);
+        StateMachineService stateMachineService = Mockito.mock(StateMachineService.class);
+
+        PaymentRecordService service = new PaymentRecordService(
+                paymentRecordMapper,
+                requestHistoryMapper,
+                searchRepository,
+                fineRecordService,
+                sysUserService,
+                kafkaTemplate,
+                new ObjectMapper(),
+                transactionManager,
+                stateMachineService);
+
+        assertThrows(IllegalArgumentException.class,
+                () -> service.updateSelfServicePaymentConfirmationDetails(902L, "   ", null));
+        verify(paymentRecordMapper, never()).selectById(any());
+    }
+
+    @Test
+    void updateSelfServicePaymentConfirmationDetailsShouldPersistTransactionIdAndReceiptUrl() {
+        PaymentRecordMapper paymentRecordMapper = Mockito.mock(PaymentRecordMapper.class);
+        SysRequestHistoryMapper requestHistoryMapper = Mockito.mock(SysRequestHistoryMapper.class);
+        PaymentRecordSearchRepository searchRepository = Mockito.mock(PaymentRecordSearchRepository.class);
+        FineRecordService fineRecordService = Mockito.mock(FineRecordService.class);
+        SysUserService sysUserService = Mockito.mock(SysUserService.class);
+        @SuppressWarnings("unchecked")
+        KafkaTemplate<String, String> kafkaTemplate = Mockito.mock(KafkaTemplate.class);
+        PlatformTransactionManager transactionManager = Mockito.mock(PlatformTransactionManager.class);
+        StateMachineService stateMachineService = Mockito.mock(StateMachineService.class);
+
+        PaymentRecordService service = new PaymentRecordService(
+                paymentRecordMapper,
+                requestHistoryMapper,
+                searchRepository,
+                fineRecordService,
+                sysUserService,
+                kafkaTemplate,
+                new ObjectMapper(),
+                transactionManager,
+                stateMachineService);
+
+        PaymentRecord existing = new PaymentRecord();
+        existing.setPaymentId(902L);
+        existing.setFineId(901L);
+        existing.setPaymentChannel("APP");
+        existing.setPaymentStatus(PaymentState.UNPAID.getCode());
+        when(paymentRecordMapper.selectById(902L)).thenReturn(existing);
+        when(paymentRecordMapper.updateById(any(PaymentRecord.class))).thenReturn(1);
+
+        PaymentRecord updated = service.updateSelfServicePaymentConfirmationDetails(
+                902L,
+                "WX-20260410-0001",
+                "https://example.com/proof/902");
+
+        assertEquals("WX-20260410-0001", updated.getTransactionId());
+        assertEquals("https://example.com/proof/902", updated.getReceiptUrl());
+        assertNotNull(updated.getReceiptNumber());
+        verify(paymentRecordMapper).updateById(existing);
+    }
+
+    @Test
+    void recordFinanceReviewShouldAppendStructuredAuditRemark() {
+        PaymentRecordMapper paymentRecordMapper = Mockito.mock(PaymentRecordMapper.class);
+        SysRequestHistoryMapper requestHistoryMapper = Mockito.mock(SysRequestHistoryMapper.class);
+        PaymentRecordSearchRepository searchRepository = Mockito.mock(PaymentRecordSearchRepository.class);
+        FineRecordService fineRecordService = Mockito.mock(FineRecordService.class);
+        SysUserService sysUserService = Mockito.mock(SysUserService.class);
+        @SuppressWarnings("unchecked")
+        KafkaTemplate<String, String> kafkaTemplate = Mockito.mock(KafkaTemplate.class);
+        PlatformTransactionManager transactionManager = Mockito.mock(PlatformTransactionManager.class);
+        StateMachineService stateMachineService = Mockito.mock(StateMachineService.class);
+
+        PaymentRecordService service = new PaymentRecordService(
+                paymentRecordMapper,
+                requestHistoryMapper,
+                searchRepository,
+                fineRecordService,
+                sysUserService,
+                kafkaTemplate,
+                new ObjectMapper(),
+                transactionManager,
+                stateMachineService);
+
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken("finance", "n/a", Collections.emptyList()));
+
+        PaymentRecord paymentRecord = new PaymentRecord();
+        paymentRecord.setPaymentId(902L);
+        paymentRecord.setFineId(901L);
+        paymentRecord.setPaymentChannel("APP");
+        paymentRecord.setPaymentStatus(PaymentState.PAID.getCode());
+        paymentRecord.setRemarks("Current user self-service payment");
+        when(paymentRecordMapper.selectById(902L)).thenReturn(paymentRecord);
+
+        PaymentRecord reviewed = service.recordFinanceReview(902L, "need_proof", "Please upload receipt\nsoon");
+
+        assertEquals(902L, reviewed.getPaymentId());
+        assertTrue(reviewed.getRemarks().contains("[FINANCE_REVIEW]|NEED_PROOF|finance|"));
+        assertTrue(reviewed.getRemarks().contains("Please upload receipt soon"));
+        assertEquals("finance", reviewed.getUpdatedBy());
+        verify(paymentRecordMapper).updateById(paymentRecord);
+    }
+
+    @Test
+    void updateSelfServicePaymentReceiptProofShouldPersistUpdatedReceiptUrl() {
+        PaymentRecordMapper paymentRecordMapper = Mockito.mock(PaymentRecordMapper.class);
+        SysRequestHistoryMapper requestHistoryMapper = Mockito.mock(SysRequestHistoryMapper.class);
+        PaymentRecordSearchRepository searchRepository = Mockito.mock(PaymentRecordSearchRepository.class);
+        FineRecordService fineRecordService = Mockito.mock(FineRecordService.class);
+        SysUserService sysUserService = Mockito.mock(SysUserService.class);
+        @SuppressWarnings("unchecked")
+        KafkaTemplate<String, String> kafkaTemplate = Mockito.mock(KafkaTemplate.class);
+        PlatformTransactionManager transactionManager = Mockito.mock(PlatformTransactionManager.class);
+        StateMachineService stateMachineService = Mockito.mock(StateMachineService.class);
+
+        PaymentRecordService service = new PaymentRecordService(
+                paymentRecordMapper,
+                requestHistoryMapper,
+                searchRepository,
+                fineRecordService,
+                sysUserService,
+                kafkaTemplate,
+                new ObjectMapper(),
+                transactionManager,
+                stateMachineService);
+
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken("driver", "n/a", Collections.emptyList()));
+
+        PaymentRecord paymentRecord = new PaymentRecord();
+        paymentRecord.setPaymentId(902L);
+        paymentRecord.setFineId(901L);
+        paymentRecord.setPaymentChannel("APP");
+        paymentRecord.setPaymentStatus(PaymentState.PAID.getCode());
+        paymentRecord.setReceiptUrl("https://example.com/proof/old-902");
+        when(paymentRecordMapper.selectById(902L)).thenReturn(paymentRecord);
+
+        PaymentRecord updated = service.updateSelfServicePaymentReceiptProof(
+                902L,
+                "https://example.com/proof/new-902");
+
+        assertEquals("https://example.com/proof/new-902", updated.getReceiptUrl());
+        assertTrue(updated.getRemarks().contains("[USER_PROOF_UPLOAD]|"));
+        assertEquals("driver", updated.getUpdatedBy());
+        verify(paymentRecordMapper).updateById(paymentRecord);
+    }
+
+    @Test
+    void updateSelfServicePaymentConfirmationDetailsShouldRejectDuplicateTransactionId() {
+        PaymentRecordMapper paymentRecordMapper = Mockito.mock(PaymentRecordMapper.class);
+        SysRequestHistoryMapper requestHistoryMapper = Mockito.mock(SysRequestHistoryMapper.class);
+        PaymentRecordSearchRepository searchRepository = Mockito.mock(PaymentRecordSearchRepository.class);
+        FineRecordService fineRecordService = Mockito.mock(FineRecordService.class);
+        SysUserService sysUserService = Mockito.mock(SysUserService.class);
+        @SuppressWarnings("unchecked")
+        KafkaTemplate<String, String> kafkaTemplate = Mockito.mock(KafkaTemplate.class);
+        PlatformTransactionManager transactionManager = Mockito.mock(PlatformTransactionManager.class);
+        StateMachineService stateMachineService = Mockito.mock(StateMachineService.class);
+
+        PaymentRecordService service = new PaymentRecordService(
+                paymentRecordMapper,
+                requestHistoryMapper,
+                searchRepository,
+                fineRecordService,
+                sysUserService,
+                kafkaTemplate,
+                new ObjectMapper(),
+                transactionManager,
+                stateMachineService);
+
+        PaymentRecord existing = new PaymentRecord();
+        existing.setPaymentId(902L);
+        existing.setFineId(901L);
+        existing.setPaymentChannel("APP");
+        existing.setPaymentStatus(PaymentState.UNPAID.getCode());
+        when(paymentRecordMapper.selectById(902L)).thenReturn(existing);
+        when(paymentRecordMapper.selectCount(any())).thenReturn(1L);
+
+        IllegalStateException ex = assertThrows(IllegalStateException.class,
+                () -> service.updateSelfServicePaymentConfirmationDetails(
+                        902L,
+                        "WX-20260410-0001",
+                        "https://example.com/proof/902"));
+
+        assertEquals("Transaction ID is already used by another payment record", ex.getMessage());
+        verify(paymentRecordMapper, never()).updateById(any(PaymentRecord.class));
+    }
+
+    @Test
+    void createPaymentForCurrentUserShouldRejectWhenPendingSelfServicePaymentExists() {
+        SysUserService sysUserService = Mockito.mock(SysUserService.class);
+        DriverInformationService driverInformationService = Mockito.mock(DriverInformationService.class);
+        OffenseRecordService offenseRecordService = Mockito.mock(OffenseRecordService.class);
+        FineRecordService fineRecordService = Mockito.mock(FineRecordService.class);
+        DeductionRecordService deductionRecordService = Mockito.mock(DeductionRecordService.class);
+        VehicleInformationService vehicleInformationService = Mockito.mock(VehicleInformationService.class);
+        AppealRecordService appealRecordService = Mockito.mock(AppealRecordService.class);
+        PaymentRecordService paymentRecordService = Mockito.mock(PaymentRecordService.class);
+        StateMachineService stateMachineService = Mockito.mock(StateMachineService.class);
+
+        CurrentUserTrafficSupportService service = new CurrentUserTrafficSupportService(
+                sysUserService,
+                driverInformationService,
+                offenseRecordService,
+                fineRecordService,
+                deductionRecordService,
+                vehicleInformationService,
+                appealRecordService,
+                paymentRecordService,
+                stateMachineService);
+
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken("driver", "n/a", Collections.emptyList()));
+
+        SysUser currentUser = new SysUser();
+        currentUser.setUserId(42L);
+        currentUser.setUsername("driver");
+        currentUser.setRealName("Carol Driver");
+        currentUser.setIdCardNumber("110101199001010033");
+        currentUser.setContactNumber("13800000000");
+        when(sysUserService.findByUsername("driver")).thenReturn(currentUser);
+
+        DriverInformation driver = new DriverInformation();
+        driver.setDriverId(101L);
+        driver.setName("Carol Driver");
+        driver.setIdCardNumber("110101199001010033");
+        driver.setContactNumber("13800000000");
+        when(driverInformationService.findLinkedDriverForUser(currentUser)).thenReturn(driver);
+
+        FineRecord fineRecord = new FineRecord();
+        fineRecord.setFineId(901L);
+        fineRecord.setOffenseId(701L);
+        fineRecord.setTotalAmount(BigDecimal.valueOf(100));
+        fineRecord.setPaidAmount(BigDecimal.ZERO);
+        fineRecord.setUnpaidAmount(BigDecimal.valueOf(100));
+        fineRecord.setPaymentStatus(PaymentState.UNPAID.getCode());
+        when(fineRecordService.findById(901L)).thenReturn(fineRecord);
+
+        OffenseRecord offenseRecord = new OffenseRecord();
+        offenseRecord.setOffenseId(701L);
+        offenseRecord.setDriverId(101L);
+        when(offenseRecordService.findById(701L)).thenReturn(offenseRecord);
+
+        PaymentRecord pendingRecord = new PaymentRecord();
+        pendingRecord.setPaymentId(902L);
+        pendingRecord.setFineId(901L);
+        pendingRecord.setPayerIdCard("110101199001010033");
+        pendingRecord.setPaymentChannel("APP");
+        pendingRecord.setPaymentStatus(PaymentState.UNPAID.getCode());
+        when(paymentRecordService.findByFineId(901L, 1, 200)).thenReturn(List.of(pendingRecord));
+
+        PaymentRecord draft = new PaymentRecord();
+        draft.setFineId(901L);
+        draft.setPaymentAmount(BigDecimal.valueOf(100));
+
+        assertThrows(IllegalStateException.class, () -> service.createPaymentForCurrentUser(draft));
+        verify(paymentRecordService, never()).createPaymentRecord(any(PaymentRecord.class));
+    }
+
+    @Test
+    void createPaymentForCurrentUserShouldIgnoreExpiredPendingSelfServicePayment() {
+        SysUserService sysUserService = Mockito.mock(SysUserService.class);
+        DriverInformationService driverInformationService = Mockito.mock(DriverInformationService.class);
+        OffenseRecordService offenseRecordService = Mockito.mock(OffenseRecordService.class);
+        FineRecordService fineRecordService = Mockito.mock(FineRecordService.class);
+        DeductionRecordService deductionRecordService = Mockito.mock(DeductionRecordService.class);
+        VehicleInformationService vehicleInformationService = Mockito.mock(VehicleInformationService.class);
+        AppealRecordService appealRecordService = Mockito.mock(AppealRecordService.class);
+        PaymentRecordService paymentRecordService = Mockito.mock(PaymentRecordService.class);
+        StateMachineService stateMachineService = Mockito.mock(StateMachineService.class);
+
+        CurrentUserTrafficSupportService service = new CurrentUserTrafficSupportService(
+                sysUserService,
+                driverInformationService,
+                offenseRecordService,
+                fineRecordService,
+                deductionRecordService,
+                vehicleInformationService,
+                appealRecordService,
+                paymentRecordService,
+                stateMachineService);
+
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken("driver", "n/a", Collections.emptyList()));
+
+        SysUser currentUser = new SysUser();
+        currentUser.setUserId(42L);
+        currentUser.setUsername("driver");
+        currentUser.setRealName("Carol Driver");
+        currentUser.setIdCardNumber("110101199001010033");
+        currentUser.setContactNumber("13800000000");
+        when(sysUserService.findByUsername("driver")).thenReturn(currentUser);
+
+        DriverInformation driver = new DriverInformation();
+        driver.setDriverId(101L);
+        driver.setName("Carol Driver");
+        driver.setIdCardNumber("110101199001010033");
+        driver.setContactNumber("13800000000");
+        when(driverInformationService.findLinkedDriverForUser(currentUser)).thenReturn(driver);
+
+        FineRecord fineRecord = new FineRecord();
+        fineRecord.setFineId(901L);
+        fineRecord.setOffenseId(701L);
+        fineRecord.setTotalAmount(BigDecimal.valueOf(100));
+        fineRecord.setPaidAmount(BigDecimal.ZERO);
+        fineRecord.setUnpaidAmount(BigDecimal.valueOf(100));
+        fineRecord.setPaymentStatus(PaymentState.UNPAID.getCode());
+        when(fineRecordService.findById(901L)).thenReturn(fineRecord);
+
+        OffenseRecord offenseRecord = new OffenseRecord();
+        offenseRecord.setOffenseId(701L);
+        offenseRecord.setDriverId(101L);
+        when(offenseRecordService.findById(701L)).thenReturn(offenseRecord);
+
+        PaymentRecord expiredPendingRecord = new PaymentRecord();
+        expiredPendingRecord.setPaymentId(902L);
+        expiredPendingRecord.setFineId(901L);
+        expiredPendingRecord.setPayerIdCard("110101199001010033");
+        expiredPendingRecord.setPaymentChannel("APP");
+        expiredPendingRecord.setPaymentStatus(PaymentState.UNPAID.getCode());
+        expiredPendingRecord.setCreatedAt(LocalDateTime.now().minusMinutes(20));
+        when(paymentRecordService.findByFineId(901L, 1, 200)).thenReturn(List.of(expiredPendingRecord));
+
+        PaymentRecord draft = new PaymentRecord();
+        draft.setFineId(901L);
+        draft.setPaymentAmount(BigDecimal.valueOf(100));
+
+        PaymentRecord created = new PaymentRecord();
+        created.setPaymentId(903L);
+        when(paymentRecordService.createPaymentRecord(any(PaymentRecord.class))).thenReturn(created);
+
+        PaymentRecord saved = service.createPaymentForCurrentUser(draft);
+
+        assertEquals(903L, saved.getPaymentId());
+        verify(paymentRecordService).createPaymentRecord(any(PaymentRecord.class));
+    }
+
+    @Test
+    void confirmCurrentUserPaymentShouldTransitionPendingSelfServicePaymentToPaidWhenAmountClearsRemaining() {
+        SysUserService sysUserService = Mockito.mock(SysUserService.class);
+        DriverInformationService driverInformationService = Mockito.mock(DriverInformationService.class);
+        OffenseRecordService offenseRecordService = Mockito.mock(OffenseRecordService.class);
+        FineRecordService fineRecordService = Mockito.mock(FineRecordService.class);
+        DeductionRecordService deductionRecordService = Mockito.mock(DeductionRecordService.class);
+        VehicleInformationService vehicleInformationService = Mockito.mock(VehicleInformationService.class);
+        AppealRecordService appealRecordService = Mockito.mock(AppealRecordService.class);
+        PaymentRecordService paymentRecordService = Mockito.mock(PaymentRecordService.class);
+        StateMachineService stateMachineService = Mockito.mock(StateMachineService.class);
+
+        CurrentUserTrafficSupportService service = new CurrentUserTrafficSupportService(
+                sysUserService,
+                driverInformationService,
+                offenseRecordService,
+                fineRecordService,
+                deductionRecordService,
+                vehicleInformationService,
+                appealRecordService,
+                paymentRecordService,
+                stateMachineService);
+
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken("driver", "n/a", Collections.emptyList()));
+
+        SysUser currentUser = new SysUser();
+        currentUser.setUserId(42L);
+        currentUser.setUsername("driver");
+        currentUser.setRealName("Carol Driver");
+        currentUser.setIdCardNumber("110101199001010033");
+        when(sysUserService.findByUsername("driver")).thenReturn(currentUser);
+
+        DriverInformation driver = new DriverInformation();
+        driver.setDriverId(101L);
+        driver.setIdCardNumber("110101199001010033");
+        when(driverInformationService.findLinkedDriverForUser(currentUser)).thenReturn(driver);
+
+        FineRecord fineRecord = new FineRecord();
+        fineRecord.setFineId(901L);
+        fineRecord.setOffenseId(701L);
+        fineRecord.setTotalAmount(BigDecimal.valueOf(100));
+        fineRecord.setPaidAmount(BigDecimal.ZERO);
+        fineRecord.setUnpaidAmount(BigDecimal.valueOf(100));
+        fineRecord.setPaymentStatus(PaymentState.UNPAID.getCode());
+        when(fineRecordService.findById(901L)).thenReturn(fineRecord);
+
+        OffenseRecord offenseRecord = new OffenseRecord();
+        offenseRecord.setOffenseId(701L);
+        offenseRecord.setDriverId(101L);
+        when(offenseRecordService.findById(701L)).thenReturn(offenseRecord);
+
+        PaymentRecord pendingRecord = new PaymentRecord();
+        pendingRecord.setPaymentId(902L);
+        pendingRecord.setFineId(901L);
+        pendingRecord.setPaymentAmount(BigDecimal.valueOf(100));
+        pendingRecord.setPayerIdCard("110101199001010033");
+        pendingRecord.setPaymentChannel("APP");
+        pendingRecord.setPaymentStatus(PaymentState.UNPAID.getCode());
+        when(paymentRecordService.findById(902L)).thenReturn(pendingRecord);
+
+        PaymentRecord enrichedRecord = new PaymentRecord();
+        enrichedRecord.setPaymentId(902L);
+        enrichedRecord.setFineId(901L);
+        enrichedRecord.setPaymentAmount(BigDecimal.valueOf(100));
+        enrichedRecord.setPayerIdCard("110101199001010033");
+        enrichedRecord.setPaymentChannel("APP");
+        enrichedRecord.setPaymentStatus(PaymentState.UNPAID.getCode());
+        when(paymentRecordService.updateSelfServicePaymentConfirmationDetails(
+                902L,
+                "WX-20260410-0001",
+                "https://example.com/proof/902")).thenReturn(enrichedRecord);
+
+        PaymentRecord confirmedRecord = new PaymentRecord();
+        confirmedRecord.setPaymentId(902L);
+        confirmedRecord.setPaymentStatus(PaymentState.PAID.getCode());
+        when(paymentRecordService.transitionPaymentStatus(902L, PaymentState.PAID)).thenReturn(confirmedRecord);
+
+        PaymentRecord confirmationDraft = new PaymentRecord();
+        confirmationDraft.setTransactionId("WX-20260410-0001");
+        confirmationDraft.setReceiptUrl("https://example.com/proof/902");
+
+        PaymentRecord confirmed = service.confirmCurrentUserPayment(902L, confirmationDraft);
+
+        assertEquals(PaymentState.PAID.getCode(), confirmed.getPaymentStatus());
+        verify(paymentRecordService).updateSelfServicePaymentConfirmationDetails(
+                902L,
+                "WX-20260410-0001",
+                "https://example.com/proof/902");
+        verify(paymentRecordService).transitionPaymentStatus(902L, PaymentState.PAID);
+    }
+
+    @Test
+    void confirmCurrentUserPaymentShouldRejectExpiredPendingSelfServicePayment() {
+        SysUserService sysUserService = Mockito.mock(SysUserService.class);
+        DriverInformationService driverInformationService = Mockito.mock(DriverInformationService.class);
+        OffenseRecordService offenseRecordService = Mockito.mock(OffenseRecordService.class);
+        FineRecordService fineRecordService = Mockito.mock(FineRecordService.class);
+        DeductionRecordService deductionRecordService = Mockito.mock(DeductionRecordService.class);
+        VehicleInformationService vehicleInformationService = Mockito.mock(VehicleInformationService.class);
+        AppealRecordService appealRecordService = Mockito.mock(AppealRecordService.class);
+        PaymentRecordService paymentRecordService = Mockito.mock(PaymentRecordService.class);
+        StateMachineService stateMachineService = Mockito.mock(StateMachineService.class);
+
+        CurrentUserTrafficSupportService service = new CurrentUserTrafficSupportService(
+                sysUserService,
+                driverInformationService,
+                offenseRecordService,
+                fineRecordService,
+                deductionRecordService,
+                vehicleInformationService,
+                appealRecordService,
+                paymentRecordService,
+                stateMachineService);
+
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken("driver", "n/a", Collections.emptyList()));
+
+        SysUser currentUser = new SysUser();
+        currentUser.setUserId(42L);
+        currentUser.setUsername("driver");
+        currentUser.setRealName("Carol Driver");
+        currentUser.setIdCardNumber("110101199001010033");
+        when(sysUserService.findByUsername("driver")).thenReturn(currentUser);
+
+        DriverInformation driver = new DriverInformation();
+        driver.setDriverId(101L);
+        driver.setIdCardNumber("110101199001010033");
+        when(driverInformationService.findLinkedDriverForUser(currentUser)).thenReturn(driver);
+
+        FineRecord fineRecord = new FineRecord();
+        fineRecord.setFineId(901L);
+        fineRecord.setOffenseId(701L);
+        fineRecord.setTotalAmount(BigDecimal.valueOf(100));
+        fineRecord.setPaidAmount(BigDecimal.ZERO);
+        fineRecord.setUnpaidAmount(BigDecimal.valueOf(100));
+        fineRecord.setPaymentStatus(PaymentState.UNPAID.getCode());
+        when(fineRecordService.findById(901L)).thenReturn(fineRecord);
+
+        OffenseRecord offenseRecord = new OffenseRecord();
+        offenseRecord.setOffenseId(701L);
+        offenseRecord.setDriverId(101L);
+        when(offenseRecordService.findById(701L)).thenReturn(offenseRecord);
+
+        PaymentRecord expiredPendingRecord = new PaymentRecord();
+        expiredPendingRecord.setPaymentId(902L);
+        expiredPendingRecord.setFineId(901L);
+        expiredPendingRecord.setPaymentAmount(BigDecimal.valueOf(100));
+        expiredPendingRecord.setPayerIdCard("110101199001010033");
+        expiredPendingRecord.setPaymentChannel("APP");
+        expiredPendingRecord.setPaymentStatus(PaymentState.UNPAID.getCode());
+        expiredPendingRecord.setCreatedAt(LocalDateTime.now().minusMinutes(20));
+        when(paymentRecordService.findById(902L)).thenReturn(expiredPendingRecord);
+
+        IllegalStateException ex = assertThrows(IllegalStateException.class,
+                () -> service.confirmCurrentUserPayment(902L, new PaymentRecord()));
+
+        assertEquals("Pending self-service payment order has expired", ex.getMessage());
+        verify(paymentRecordService, never()).updateSelfServicePaymentConfirmationDetails(any(), any(), any());
+        verify(paymentRecordService, never()).transitionPaymentStatus(any(), any());
+    }
+
+    @Test
     void listCurrentUserProgressShouldAggregateAcrossMultiplePages() {
         SysRequestHistoryService sysRequestHistoryService = Mockito.mock(SysRequestHistoryService.class);
         CurrentUserTrafficSupportService currentUserTrafficSupportService = Mockito.mock(CurrentUserTrafficSupportService.class);
@@ -5014,6 +5944,20 @@ class BusinessFlowConsistencyTest {
                 PaymentRecordController.class.getMethod("listCurrentUserPayments", int.class, int.class, Long.class),
                 "USER");
         assertRolesExactly(
+                PaymentRecordController.class.getMethod(
+                        "confirmCurrentUserPayment",
+                        Long.class,
+                        PaymentRecordController.CurrentUserPaymentConfirmationRequest.class,
+                        String.class),
+                "USER");
+        assertRolesExactly(
+                PaymentRecordController.class.getMethod(
+                        "updateCurrentUserPaymentProof",
+                        Long.class,
+                        PaymentRecordController.CurrentUserPaymentProofRequest.class,
+                        String.class),
+                "USER");
+        assertRolesExactly(
                 AppealManagementController.class.getMethod("listCurrentUserAppeals", int.class, int.class),
                 "USER");
         assertRolesExactly(
@@ -5035,6 +5979,13 @@ class BusinessFlowConsistencyTest {
         assertRolesExactly(
                 ProgressItemController.class.getMethod("listCurrentUserProgress", int.class, int.class, Long.class),
                 "USER");
+    }
+
+    @Test
+    void paymentFinanceReviewEndpointShouldRemainFinanceVisible() throws Exception {
+        assertRolesContain(PaymentRecordController.class, "FINANCE");
+        assertRolesContain(PaymentRecordController.class, "ADMIN");
+        assertRolesContain(PaymentRecordController.class, "SUPER_ADMIN");
     }
 
     @Test

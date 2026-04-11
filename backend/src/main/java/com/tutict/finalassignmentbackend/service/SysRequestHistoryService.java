@@ -32,6 +32,12 @@ public class SysRequestHistoryService {
 
     private static final Logger log = Logger.getLogger(SysRequestHistoryService.class.getName());
     private static final String CACHE_NAME = "sysRequestHistoryCache";
+    private static final List<String> REFUND_BUSINESS_TYPES = List.of(
+            "PARTIAL_REFUND",
+            "WAIVE_AND_REFUND",
+            "PARTIAL_REFUND_FAILED",
+            "WAIVE_AND_REFUND_FAILED"
+    );
 
     private final SysRequestHistoryMapper sysRequestHistoryMapper;
     private final SysRequestHistorySearchRepository sysRequestHistorySearchRepository;
@@ -60,58 +66,31 @@ public class SysRequestHistoryService {
             throw new RuntimeException("Duplicate sys request history request detected");
         }
 
-        SysRequestHistory history = new SysRequestHistory();
-        history.setIdempotencyKey(idempotencyKey);
-        history.setBusinessStatus("PROCESSING");
-        history.setCreatedAt(LocalDateTime.now());
-        history.setUpdatedAt(LocalDateTime.now());
+        SysRequestHistory history = buildHistory(idempotencyKey, historyPayload, action);
         sysRequestHistoryMapper.insert(history);
 
         sendKafkaMessage("sys_request_history_" + action, idempotencyKey, historyPayload);
-
-        history.setBusinessStatus("SUCCESS");
-        history.setBusinessId(historyPayload.getId());
-        history.setRequestParams("PENDING");
-        history.setUpdatedAt(LocalDateTime.now());
-        sysRequestHistoryMapper.updateById(history);
     }
 
     @Transactional
     @CacheEvict(cacheNames = CACHE_NAME, allEntries = true)
     public SysRequestHistory createSysRequestHistory(SysRequestHistory history) {
-        validateHistory(history);
-        sysRequestHistoryMapper.insert(history);
-        syncToIndexAfterCommit(history);
-        return history;
+        throw new IllegalStateException(
+                "Request history records are system-managed audit data and cannot be created manually");
     }
 
     @Transactional
     @CacheEvict(cacheNames = CACHE_NAME, allEntries = true)
     public SysRequestHistory updateSysRequestHistory(SysRequestHistory history) {
-        validateHistory(history);
-        requirePositive(history.getId());
-        int rows = sysRequestHistoryMapper.updateById(history);
-        if (rows == 0) {
-            throw new IllegalStateException("SysRequestHistory not found for id=" + history.getId());
-        }
-        syncToIndexAfterCommit(history);
-        return history;
+        throw new IllegalStateException(
+                "Request history records are read-only audit data and cannot be edited manually");
     }
 
     @Transactional
     @CacheEvict(cacheNames = CACHE_NAME, allEntries = true)
     public void deleteSysRequestHistory(Long id) {
-        requirePositive(id);
-        int rows = sysRequestHistoryMapper.deleteById(id);
-        if (rows == 0) {
-            throw new IllegalStateException("SysRequestHistory not found for id=" + id);
-        }
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                sysRequestHistorySearchRepository.deleteById(id);
-            }
-        });
+        throw new IllegalStateException(
+                "Request history records are audit evidence and cannot be deleted manually");
     }
 
     @Transactional(readOnly = true)
@@ -143,6 +122,30 @@ public class SysRequestHistoryService {
         return fromDb;
     }
 
+    @Transactional(readOnly = true)
+    @Cacheable(cacheNames = CACHE_NAME, key = "'countAll'")
+    public long countAll() {
+        long indexCount = sysRequestHistorySearchRepository.count();
+        if (indexCount > 0) {
+            return indexCount;
+        }
+        return sysRequestHistoryMapper.selectCount(null);
+    }
+
+    @Transactional(readOnly = true)
+    @Cacheable(
+            cacheNames = CACHE_NAME,
+            key = "'all:' + #page + ':' + #size",
+            unless = "#result == null || #result.isEmpty()")
+    public List<SysRequestHistory> findAll(int page, int size) {
+        validatePagination(page, size);
+        QueryWrapper<SysRequestHistory> wrapper = new QueryWrapper<>();
+        wrapper.orderByDesc("updated_at")
+                .orderByDesc("created_at")
+                .orderByDesc("id");
+        return fetchFromDatabase(wrapper, page, size);
+    }
+
     @Cacheable(cacheNames = CACHE_NAME, key = "'status:' + #status + ':' + #page + ':' + #size", unless = "#result == null || #result.isEmpty()")
     public List<SysRequestHistory> findByBusinessStatus(String status, int page, int size) {
         if (isBlank(status)) {
@@ -170,7 +173,7 @@ public class SysRequestHistoryService {
             return index;
         }
         QueryWrapper<SysRequestHistory> wrapper = new QueryWrapper<>();
-        wrapper.likeRight("idempotency_key", key)
+        wrapper.eq("idempotency_key", key)
                 .orderByDesc("updated_at");
         return fetchFromDatabase(wrapper, page, size);
     }
@@ -255,6 +258,19 @@ public class SysRequestHistoryService {
         return fetchFromDatabase(wrapper, page, size);
     }
 
+    @Transactional(readOnly = true)
+    public List<SysRequestHistory> findByBusinessIds(Iterable<Long> businessIds, int page, int size) {
+        List<Long> normalizedIds = normalizePositiveIds(businessIds);
+        validatePagination(page, size);
+        if (normalizedIds.isEmpty()) {
+            return List.of();
+        }
+        QueryWrapper<SysRequestHistory> wrapper = new QueryWrapper<>();
+        wrapper.in("business_id", normalizedIds)
+                .orderByDesc("updated_at");
+        return fetchFromDatabase(wrapper, page, size);
+    }
+
     @Cacheable(cacheNames = CACHE_NAME, key = "'requestIp:' + #requestIp + ':' + #page + ':' + #size", unless = "#result == null || #result.isEmpty()")
     public List<SysRequestHistory> searchByRequestIp(String requestIp, int page, int size) {
         if (isBlank(requestIp)) {
@@ -266,7 +282,7 @@ public class SysRequestHistoryService {
             return index;
         }
         QueryWrapper<SysRequestHistory> wrapper = new QueryWrapper<>();
-        wrapper.likeRight("request_ip", requestIp)
+        wrapper.eq("request_ip", requestIp)
                 .orderByDesc("updated_at");
         return fetchFromDatabase(wrapper, page, size);
     }
@@ -289,6 +305,51 @@ public class SysRequestHistoryService {
         return fetchFromDatabase(wrapper, page, size);
     }
 
+    @Cacheable(cacheNames = CACHE_NAME, key = "'refundAudits:' + #page + ':' + #size", unless = "#result == null || #result.isEmpty()")
+    public List<SysRequestHistory> findRefundAudits(int page, int size) {
+        validatePagination(page, size);
+        QueryWrapper<SysRequestHistory> wrapper = new QueryWrapper<>();
+        wrapper.in("business_type", REFUND_BUSINESS_TYPES)
+                .orderByDesc("updated_at");
+        return fetchFromDatabase(wrapper, page, size);
+    }
+
+    @Cacheable(cacheNames = CACHE_NAME, key = "'refundAuditsStatus:' + #status + ':' + #page + ':' + #size", unless = "#result == null || #result.isEmpty()")
+    public List<SysRequestHistory> findRefundAuditsByStatus(String status, int page, int size) {
+        validatePagination(page, size);
+        QueryWrapper<SysRequestHistory> wrapper = new QueryWrapper<>();
+        wrapper.in("business_type", REFUND_BUSINESS_TYPES)
+                .orderByDesc("updated_at");
+        if (!isBlank(status)) {
+            wrapper.eq("business_status", status);
+        }
+        return fetchFromDatabase(wrapper, page, size);
+    }
+
+    @Cacheable(
+            cacheNames = CACHE_NAME,
+            key = "'refundAuditsFilter:' + #status + ':' + #fineId + ':' + #paymentId + ':' + #page + ':' + #size",
+            unless = "#result == null || #result.isEmpty()")
+    public List<SysRequestHistory> findRefundAudits(String status, Long fineId, Long paymentId, int page, int size) {
+        validatePagination(page, size);
+        validateOptionalPositive(fineId, "Fine ID");
+        validateOptionalPositive(paymentId, "Payment ID");
+
+        QueryWrapper<SysRequestHistory> wrapper = new QueryWrapper<>();
+        wrapper.in("business_type", REFUND_BUSINESS_TYPES)
+                .orderByDesc("updated_at");
+        if (!isBlank(status)) {
+            wrapper.eq("business_status", status);
+        }
+        if (fineId != null) {
+            wrapper.likeRight("request_params", "fineId=" + fineId + ",");
+        }
+        if (paymentId != null) {
+            wrapper.eq("business_id", paymentId);
+        }
+        return fetchFromDatabase(wrapper, page, size);
+    }
+
     public Optional<SysRequestHistory> findByIdempotencyKey(String key) {
         if (isBlank(key)) {
             return Optional.empty();
@@ -300,7 +361,8 @@ public class SysRequestHistoryService {
         SysRequestHistory history = sysRequestHistoryMapper.selectByIdempotencyKey(idempotencyKey);
         return history != null
                 && "SUCCESS".equalsIgnoreCase(history.getBusinessStatus())
-                && "DONE".equalsIgnoreCase(history.getRequestParams());
+                && history.getBusinessId() != null
+                && history.getBusinessId() > 0;
     }
 
     public void markHistorySuccess(String idempotencyKey, Long historyId) {
@@ -311,7 +373,6 @@ public class SysRequestHistoryService {
         }
         history.setBusinessStatus("SUCCESS");
         history.setBusinessId(historyId);
-        history.setRequestParams("DONE");
         history.setUpdatedAt(LocalDateTime.now());
         sysRequestHistoryMapper.updateById(history);
     }
@@ -323,9 +384,65 @@ public class SysRequestHistoryService {
             return;
         }
         history.setBusinessStatus("FAILED");
-        history.setRequestParams(truncate(reason));
+        history.setRequestParams(appendFailureReason(history.getRequestParams(), reason));
         history.setUpdatedAt(LocalDateTime.now());
         sysRequestHistoryMapper.updateById(history);
+    }
+
+    private SysRequestHistory buildHistory(String idempotencyKey, SysRequestHistory historyPayload, String action) {
+        SysRequestHistory history = new SysRequestHistory();
+        history.setIdempotencyKey(idempotencyKey);
+        history.setRequestMethod("POST");
+        history.setRequestUrl("/api/sys/request-history");
+        history.setRequestParams(buildRequestParams(historyPayload));
+        history.setBusinessType(resolveBusinessType(action));
+        history.setBusinessStatus("PROCESSING");
+        history.setCreatedAt(LocalDateTime.now());
+        history.setUpdatedAt(LocalDateTime.now());
+        return history;
+    }
+
+    private String buildRequestParams(SysRequestHistory historyPayload) {
+        if (historyPayload == null) {
+            return null;
+        }
+        StringBuilder builder = new StringBuilder();
+        appendParam(builder, "requestMethod", historyPayload.getRequestMethod());
+        appendParam(builder, "requestUrl", historyPayload.getRequestUrl());
+        appendParam(builder, "businessType", historyPayload.getBusinessType());
+        appendParam(builder, "businessStatus", historyPayload.getBusinessStatus());
+        appendParam(builder, "businessId", historyPayload.getBusinessId());
+        return truncate(builder.toString());
+    }
+
+    private String resolveBusinessType(String action) {
+        String normalized = isBlank(action) ? "CREATE" : action.trim().toUpperCase();
+        return "SYS_REQUEST_HISTORY_" + normalized;
+    }
+
+    private void appendParam(StringBuilder builder, String key, Object value) {
+        if (builder == null || value == null) {
+            return;
+        }
+        String normalized = value.toString().trim();
+        if (normalized.isEmpty()) {
+            return;
+        }
+        if (!builder.isEmpty()) {
+            builder.append(',');
+        }
+        builder.append(key).append('=').append(normalized);
+    }
+
+    private String appendFailureReason(String existing, String reason) {
+        String normalizedReason = truncate(reason);
+        if (isBlank(normalizedReason)) {
+            return existing;
+        }
+        if (isBlank(existing)) {
+            return "failure=" + normalizedReason;
+        }
+        return truncate(existing + ",failure=" + normalizedReason);
     }
 
     private void sendKafkaMessage(String topic, String idempotencyKey, SysRequestHistory history) {
@@ -342,13 +459,10 @@ public class SysRequestHistoryService {
         if (history == null) {
             return;
         }
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                SysRequestHistoryDocument doc = SysRequestHistoryDocument.fromEntity(history);
-                if (doc != null) {
-                    sysRequestHistorySearchRepository.save(doc);
-                }
+        runAfterCommitOrNow(() -> {
+            SysRequestHistoryDocument doc = SysRequestHistoryDocument.fromEntity(history);
+            if (doc != null) {
+                sysRequestHistorySearchRepository.save(doc);
             }
         });
     }
@@ -357,19 +471,32 @@ public class SysRequestHistoryService {
         if (records == null || records.isEmpty()) {
             return;
         }
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                List<SysRequestHistoryDocument> documents = records.stream()
-                        .filter(Objects::nonNull)
-                        .map(SysRequestHistoryDocument::fromEntity)
-                        .filter(Objects::nonNull)
-                        .collect(Collectors.toList());
-                if (!documents.isEmpty()) {
-                    sysRequestHistorySearchRepository.saveAll(documents);
-                }
+        runAfterCommitOrNow(() -> {
+            List<SysRequestHistoryDocument> documents = records.stream()
+                    .filter(Objects::nonNull)
+                    .map(SysRequestHistoryDocument::fromEntity)
+                    .filter(Objects::nonNull)
+                    .collect(Collectors.toList());
+            if (!documents.isEmpty()) {
+                sysRequestHistorySearchRepository.saveAll(documents);
             }
         });
+    }
+
+    private void runAfterCommitOrNow(Runnable task) {
+        if (task == null) {
+            return;
+        }
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    task.run();
+                }
+            });
+            return;
+        }
+        task.run();
     }
 
     private List<SysRequestHistory> fetchFromDatabase(QueryWrapper<SysRequestHistory> wrapper, int page, int size) {
@@ -436,8 +563,28 @@ public class SysRequestHistoryService {
         }
     }
 
+    private void validateOptionalPositive(Number number, String fieldName) {
+        if (number == null) {
+            return;
+        }
+        if (number.longValue() <= 0) {
+            throw new IllegalArgumentException(fieldName + " must be greater than zero");
+        }
+    }
+
     private boolean isBlank(String value) {
         return value == null || value.trim().isEmpty();
+    }
+
+    private List<Long> normalizePositiveIds(Iterable<Long> ids) {
+        if (ids == null) {
+            return List.of();
+        }
+        return StreamSupport.stream(ids.spliterator(), false)
+                .filter(Objects::nonNull)
+                .filter(id -> id > 0)
+                .distinct()
+                .collect(Collectors.toList());
     }
 
     private String truncate(String value) {

@@ -66,25 +66,21 @@ public class AuditLoginLogService {
             throw new RuntimeException("Duplicate audit login log request detected");
         }
 
-        SysRequestHistory history = new SysRequestHistory();
-        history.setIdempotencyKey(idempotencyKey);
-        history.setBusinessStatus("PROCESSING");
-        history.setCreatedAt(LocalDateTime.now());
-        history.setUpdatedAt(LocalDateTime.now());
+        SysRequestHistory history = buildHistory(idempotencyKey, loginLog, action);
         sysRequestHistoryMapper.insert(history);
 
         sendKafkaMessage("audit_login_log_" + action, idempotencyKey, loginLog);
-
-        history.setBusinessStatus("SUCCESS");
-        history.setBusinessId(loginLog.getLogId());
-        history.setRequestParams("PENDING");
-        history.setUpdatedAt(LocalDateTime.now());
-        sysRequestHistoryMapper.updateById(history);
     }
 
     @Transactional
     @CacheEvict(cacheNames = CACHE_NAME, allEntries = true)
     public AuditLoginLog createAuditLoginLog(AuditLoginLog loginLog) {
+        throw new IllegalStateException("Audit login logs are security evidence and cannot be manually created");
+    }
+
+    @Transactional
+    @CacheEvict(cacheNames = CACHE_NAME, allEntries = true)
+    public AuditLoginLog createAuditLoginLogSystemManaged(AuditLoginLog loginLog) {
         validateLoginLog(loginLog);
         auditLoginLogMapper.insert(loginLog);
         syncToIndexAfterCommit(loginLog);
@@ -94,6 +90,12 @@ public class AuditLoginLogService {
     @Transactional
     @CacheEvict(cacheNames = CACHE_NAME, allEntries = true)
     public AuditLoginLog updateAuditLoginLog(AuditLoginLog loginLog) {
+        throw new IllegalStateException("Audit login logs are security evidence and cannot be manually updated");
+    }
+
+    @Transactional
+    @CacheEvict(cacheNames = CACHE_NAME, allEntries = true)
+    public AuditLoginLog updateAuditLoginLogSystemManaged(AuditLoginLog loginLog) {
         validateLoginLog(loginLog);
         requirePositive(loginLog.getLogId());
         int rows = auditLoginLogMapper.updateById(loginLog);
@@ -107,17 +109,7 @@ public class AuditLoginLogService {
     @Transactional
     @CacheEvict(cacheNames = CACHE_NAME, allEntries = true)
     public void deleteAuditLoginLog(Long logId) {
-        requirePositive(logId);
-        int rows = auditLoginLogMapper.deleteById(logId);
-        if (rows == 0) {
-            throw new IllegalStateException("Audit login log not found for id=" + logId);
-        }
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                auditLoginLogSearchRepository.deleteById(logId);
-            }
-        });
+        throw new IllegalStateException("Audit login logs are security evidence and cannot be manually deleted");
     }
 
     @Transactional(readOnly = true)
@@ -147,6 +139,27 @@ public class AuditLoginLogService {
         List<AuditLoginLog> fromDb = auditLoginLogMapper.selectList(null);
         syncBatchToIndexAfterCommit(fromDb);
         return fromDb;
+    }
+
+    @Transactional(readOnly = true)
+    @Cacheable(cacheNames = CACHE_NAME, key = "'countAll'")
+    public long countAll() {
+        long indexCount = auditLoginLogSearchRepository.count();
+        if (indexCount > 0) {
+            return indexCount;
+        }
+        return auditLoginLogMapper.selectCount(null);
+    }
+
+    @Transactional(readOnly = true)
+    @Cacheable(cacheNames = CACHE_NAME, key = "'list:' + #page + ':' + #size",
+            unless = "#result == null || #result.isEmpty()")
+    public List<AuditLoginLog> listLogs(int page, int size) {
+        validatePagination(page, size);
+        QueryWrapper<AuditLoginLog> wrapper = new QueryWrapper<>();
+        wrapper.orderByDesc("login_time")
+                .orderByDesc("log_id");
+        return fetchFromDatabase(wrapper, page, size);
     }
 
     @Cacheable(cacheNames = CACHE_NAME, key = "'username:' + #username + ':' + #page + ':' + #size", unless = "#result == null || #result.isEmpty()")
@@ -210,7 +223,7 @@ public class AuditLoginLogService {
             return index;
         }
         QueryWrapper<AuditLoginLog> wrapper = new QueryWrapper<>();
-        wrapper.like("login_ip", loginIp)
+        wrapper.eq("login_ip", loginIp)
                 .orderByDesc("login_time");
         return fetchFromDatabase(wrapper, page, size);
     }
@@ -285,7 +298,8 @@ public class AuditLoginLogService {
         SysRequestHistory history = sysRequestHistoryMapper.selectByIdempotencyKey(idempotencyKey);
         return history != null
                 && "SUCCESS".equalsIgnoreCase(history.getBusinessStatus())
-                && "DONE".equalsIgnoreCase(history.getRequestParams());
+                && history.getBusinessId() != null
+                && history.getBusinessId() > 0;
     }
 
     public void markHistorySuccess(String idempotencyKey, Long logId) {
@@ -296,7 +310,6 @@ public class AuditLoginLogService {
         }
         history.setBusinessStatus("SUCCESS");
         history.setBusinessId(logId);
-        history.setRequestParams("DONE");
         history.setUpdatedAt(LocalDateTime.now());
         sysRequestHistoryMapper.updateById(history);
     }
@@ -308,9 +321,65 @@ public class AuditLoginLogService {
             return;
         }
         history.setBusinessStatus("FAILED");
-        history.setRequestParams(truncate(reason));
+        history.setRequestParams(appendFailureReason(history.getRequestParams(), reason));
         history.setUpdatedAt(LocalDateTime.now());
         sysRequestHistoryMapper.updateById(history);
+    }
+
+    private SysRequestHistory buildHistory(String idempotencyKey, AuditLoginLog loginLog, String action) {
+        SysRequestHistory history = new SysRequestHistory();
+        history.setIdempotencyKey(idempotencyKey);
+        history.setRequestMethod("POST");
+        history.setRequestUrl("/api/audit/login-logs");
+        history.setRequestParams(buildRequestParams(loginLog));
+        history.setBusinessType(resolveBusinessType(action));
+        history.setBusinessStatus("PROCESSING");
+        history.setCreatedAt(LocalDateTime.now());
+        history.setUpdatedAt(LocalDateTime.now());
+        return history;
+    }
+
+    private String buildRequestParams(AuditLoginLog loginLog) {
+        if (loginLog == null) {
+            return null;
+        }
+        StringBuilder builder = new StringBuilder();
+        appendParam(builder, "username", loginLog.getUsername());
+        appendParam(builder, "loginIp", loginLog.getLoginIp());
+        appendParam(builder, "loginResult", loginLog.getLoginResult());
+        appendParam(builder, "deviceType", loginLog.getDeviceType());
+        appendParam(builder, "browserType", loginLog.getBrowserType());
+        return truncate(builder.toString());
+    }
+
+    private String resolveBusinessType(String action) {
+        String normalized = isBlank(action) ? "CREATE" : action.trim().toUpperCase();
+        return "AUDIT_LOGIN_LOG_" + normalized;
+    }
+
+    private void appendParam(StringBuilder builder, String key, Object value) {
+        if (builder == null || value == null) {
+            return;
+        }
+        String normalized = value.toString().trim();
+        if (normalized.isEmpty()) {
+            return;
+        }
+        if (!builder.isEmpty()) {
+            builder.append(',');
+        }
+        builder.append(key).append('=').append(normalized);
+    }
+
+    private String appendFailureReason(String existing, String reason) {
+        String normalizedReason = truncate(reason);
+        if (isBlank(normalizedReason)) {
+            return existing;
+        }
+        if (isBlank(existing)) {
+            return "failure=" + normalizedReason;
+        }
+        return truncate(existing + ",failure=" + normalizedReason);
     }
 
     private void sendKafkaMessage(String topic, String idempotencyKey, AuditLoginLog loginLog) {
@@ -324,13 +393,10 @@ public class AuditLoginLogService {
     }
 
     private void syncToIndexAfterCommit(AuditLoginLog loginLog) {
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                AuditLoginLogDocument doc = AuditLoginLogDocument.fromEntity(loginLog);
-                if (doc != null) {
-                    auditLoginLogSearchRepository.save(doc);
-                }
+        runAfterCommitOrNow(() -> {
+            AuditLoginLogDocument doc = AuditLoginLogDocument.fromEntity(loginLog);
+            if (doc != null) {
+                auditLoginLogSearchRepository.save(doc);
             }
         });
     }
@@ -339,19 +405,32 @@ public class AuditLoginLogService {
         if (records == null || records.isEmpty()) {
             return;
         }
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                List<AuditLoginLogDocument> documents = records.stream()
-                        .filter(Objects::nonNull)
-                        .map(AuditLoginLogDocument::fromEntity)
-                        .filter(Objects::nonNull)
-                        .collect(Collectors.toList());
-                if (!documents.isEmpty()) {
-                    auditLoginLogSearchRepository.saveAll(documents);
-                }
+        runAfterCommitOrNow(() -> {
+            List<AuditLoginLogDocument> documents = records.stream()
+                    .filter(Objects::nonNull)
+                    .map(AuditLoginLogDocument::fromEntity)
+                    .filter(Objects::nonNull)
+                    .collect(Collectors.toList());
+            if (!documents.isEmpty()) {
+                auditLoginLogSearchRepository.saveAll(documents);
             }
         });
+    }
+
+    private void runAfterCommitOrNow(Runnable task) {
+        if (task == null) {
+            return;
+        }
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    task.run();
+                }
+            });
+            return;
+        }
+        task.run();
     }
 
     private List<AuditLoginLog> fetchFromDatabase(QueryWrapper<AuditLoginLog> wrapper, int page, int size) {

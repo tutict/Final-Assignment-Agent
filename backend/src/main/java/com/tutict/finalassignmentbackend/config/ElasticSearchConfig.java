@@ -85,6 +85,8 @@ import com.tutict.finalassignmentbackend.repository.SysUserRoleSearchRepository;
 import com.tutict.finalassignmentbackend.repository.SysUserSearchRepository;
 import com.tutict.finalassignmentbackend.repository.VehicleInformationSearchRepository;
 import jakarta.annotation.PostConstruct;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.data.elasticsearch.repository.ElasticsearchRepository;
@@ -96,10 +98,12 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 @Configuration
+@ConditionalOnProperty(name = "spring.data.elasticsearch.repositories.enabled", havingValue = "true")
 @EnableElasticsearchRepositories(basePackages = "com.tutict.finalassignmentbackend.repository")
 public class ElasticSearchConfig {
 
     private static final Logger LOG = Logger.getLogger(ElasticSearchConfig.class.getName());
+    private final boolean syncOnStartup;
     private final VehicleInformationMapper vehicleInformationMapper;
     private final DriverInformationMapper driverInformationMapper;
     private final DriverVehicleMapper driverVehicleMapper;
@@ -145,6 +149,7 @@ public class ElasticSearchConfig {
     private final @Lazy AuditOperationLogSearchRepository auditOperationLogSearchRepository;
 
     public ElasticSearchConfig(
+            @Value("${app.elasticsearch.sync-on-startup:false}") boolean syncOnStartup,
             VehicleInformationMapper vehicleInformationMapper,
             DriverInformationMapper driverInformationMapper,
             DriverVehicleMapper driverVehicleMapper,
@@ -187,6 +192,7 @@ public class ElasticSearchConfig {
             @Lazy SysRolePermissionSearchRepository sysRolePermissionSearchRepository,
             @Lazy AuditLoginLogSearchRepository auditLoginLogSearchRepository,
             @Lazy AuditOperationLogSearchRepository auditOperationLogSearchRepository) {
+        this.syncOnStartup = syncOnStartup;
         this.vehicleInformationMapper = vehicleInformationMapper;
         this.driverInformationMapper = driverInformationMapper;
         this.driverVehicleMapper = driverVehicleMapper;
@@ -233,6 +239,10 @@ public class ElasticSearchConfig {
 
     @PostConstruct
     public void syncDatabaseToElasticsearch() {
+        if (!syncOnStartup) {
+            LOG.log(Level.INFO, "Skipping startup database to Elasticsearch sync because app.elasticsearch.sync-on-startup=false");
+            return;
+        }
         LOG.log(Level.INFO, "开始执行数据库 -> Elasticsearch 全量同步任务");
 
         syncEntities("vehicle_information",

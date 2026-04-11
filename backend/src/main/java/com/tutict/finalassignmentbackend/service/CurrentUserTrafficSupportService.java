@@ -4,6 +4,7 @@ import com.tutict.finalassignmentbackend.config.statemachine.events.AppealAccept
 import com.tutict.finalassignmentbackend.config.statemachine.events.AppealProcessEvent;
 import com.tutict.finalassignmentbackend.config.statemachine.states.AppealAcceptanceState;
 import com.tutict.finalassignmentbackend.config.statemachine.states.AppealProcessState;
+import com.tutict.finalassignmentbackend.config.statemachine.states.PaymentState;
 import com.tutict.finalassignmentbackend.entity.AppealRecord;
 import com.tutict.finalassignmentbackend.entity.DeductionRecord;
 import com.tutict.finalassignmentbackend.entity.DriverInformation;
@@ -19,6 +20,8 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -30,12 +33,15 @@ import java.util.regex.Pattern;
 @Service
 public class CurrentUserTrafficSupportService {
 
+    private static final int PAYMENT_SCAN_SIZE = 200;
+    private static final Duration SELF_SERVICE_PAYMENT_CONFIRM_WINDOW = Duration.ofMinutes(15);
     private static final Pattern EMAIL_PATTERN =
             Pattern.compile("^[\\w.%+-]+@[\\w.-]+\\.[A-Za-z]{2,}$");
     private static final Pattern CONTACT_PATTERN = Pattern.compile("^1\\d{10}$");
     private static final Pattern ID_CARD_PATTERN =
             Pattern.compile("^(\\d{15}|\\d{17}[\\dXx])$");
     private static final Pattern DRIVER_LICENSE_PATTERN = Pattern.compile("^\\d{12}$");
+    private static final Set<String> SELF_SERVICE_PAYMENT_CHANNELS = Set.of("APP", "USER_SELF_SERVICE");
 
     private final SysUserService sysUserService;
     private final DriverInformationService driverInformationService;
@@ -234,6 +240,7 @@ public class CurrentUserTrafficSupportService {
                 user.getRealName(),
                 user.getUsername()));
         draft.setPayerIdCard(requireCurrentUserIdCardNumber(user, driver));
+        ensureNoPendingSelfServicePayment(fineId, draft.getPayerIdCard());
         draft.setPayerContact(firstNonBlank(
                 driver == null ? null : driver.getContactNumber(),
                 user.getContactNumber()));
@@ -244,6 +251,47 @@ public class CurrentUserTrafficSupportService {
         draft.setRefundAmount(null);
         draft.setRefundTime(null);
         return paymentRecordService.createPaymentRecord(draft);
+    }
+
+    @Transactional
+    public PaymentRecord confirmCurrentUserPayment(Long paymentId, PaymentRecord confirmationDraft) {
+        Objects.requireNonNull(confirmationDraft, "Payment confirmation cannot be null");
+        PaymentRecord paymentRecord = requireCurrentUserPayment(paymentId);
+        ensureCurrentUserCanConfirmPayment(paymentRecord);
+
+        FineRecord fineRecord = requireCurrentUserFine(paymentRecord.getFineId());
+        BigDecimal remainingPayableAmount = resolveRemainingPayableAmount(fineRecord);
+        if (remainingPayableAmount.signum() <= 0) {
+            throw new IllegalStateException("Fine is already fully paid");
+        }
+
+        BigDecimal paymentAmount = normalizeAmount(paymentRecord.getPaymentAmount());
+        if (paymentAmount.signum() <= 0) {
+            throw new IllegalStateException("Pending payment order has no payable amount");
+        }
+        if (paymentAmount.compareTo(remainingPayableAmount) > 0) {
+            throw new IllegalStateException("Payment amount exceeds current remaining payable amount");
+        }
+
+        paymentRecord = paymentRecordService.updateSelfServicePaymentConfirmationDetails(
+                paymentId,
+                confirmationDraft.getTransactionId(),
+                confirmationDraft.getReceiptUrl());
+        PaymentState targetState = paymentAmount.compareTo(remainingPayableAmount) == 0
+                ? PaymentState.PAID
+                : PaymentState.PARTIAL;
+        return paymentRecordService.transitionPaymentStatus(paymentId, targetState);
+    }
+
+    @Transactional
+    public PaymentRecord updateCurrentUserPaymentProof(Long paymentId, PaymentRecord proofDraft) {
+        Objects.requireNonNull(proofDraft, "Payment proof update cannot be null");
+        PaymentRecord paymentRecord = requireCurrentUserPayment(paymentId);
+        FineRecord fineRecord = requireCurrentUserFine(paymentRecord.getFineId());
+        if (Objects.equals(trimToNull(fineRecord.getPaymentStatus()), PaymentState.WAIVED.getCode())) {
+            throw new IllegalStateException("Waived fines do not require payment proof updates");
+        }
+        return paymentRecordService.updateSelfServicePaymentReceiptProof(paymentId, proofDraft.getReceiptUrl());
     }
 
     public List<VehicleInformation> listCurrentUserVehicles() {
@@ -314,16 +362,22 @@ public class CurrentUserTrafficSupportService {
         }
 
         DriverInformation driver = resolveCurrentDriver();
-        appealRecord.setAppellantName(firstNonBlank(
+        String appellantName = firstNonBlank(
                 driver == null ? null : driver.getName(),
                 user.getRealName(),
-                user.getUsername()));
-        appealRecord.setAppellantIdCard(firstNonBlank(
+                user.getUsername());
+        String appellantIdCard = firstNonBlank(
                 driver == null ? null : driver.getIdCardNumber(),
-                user.getIdCardNumber()));
-        appealRecord.setAppellantContact(firstNonBlank(
+                user.getIdCardNumber());
+        String appellantContact = firstNonBlank(
                 driver == null ? null : driver.getContactNumber(),
-                user.getContactNumber()));
+                user.getContactNumber());
+
+        ensureCurrentUserAppealProfileComplete(appellantName, appellantIdCard, appellantContact);
+
+        appealRecord.setAppellantName(appellantName);
+        appealRecord.setAppellantIdCard(appellantIdCard);
+        appealRecord.setAppellantContact(appellantContact);
         appealRecord.setAppellantEmail(firstNonBlank(
                 driver == null ? null : driver.getEmail(),
                 user.getEmail()));
@@ -407,6 +461,17 @@ public class CurrentUserTrafficSupportService {
         }
     }
 
+    private void ensureCurrentUserAppealProfileComplete(String appellantName,
+                                                        String appellantIdCard,
+                                                        String appellantContact) {
+        if (trimToNull(appellantName) == null
+                || trimToNull(appellantIdCard) == null
+                || trimToNull(appellantContact) == null) {
+            throw new IllegalStateException(
+                    "Complete your personal profile before submitting an appeal");
+        }
+    }
+
     private void ensureCurrentUserEventMatchesAppealState(AppealRecord appeal, AppealAcceptanceEvent event) {
         AppealAcceptanceState currentState = resolveAppealAcceptanceState(appeal.getAcceptanceStatus());
         if (currentState == AppealAcceptanceState.NEED_SUPPLEMENT
@@ -468,6 +533,96 @@ public class CurrentUserTrafficSupportService {
             throw new IllegalStateException("Fine does not belong to current user");
         }
         return fineRecord;
+    }
+
+    private PaymentRecord requireCurrentUserPayment(Long paymentId) {
+        if (paymentId == null || paymentId <= 0) {
+            throw new IllegalArgumentException("Payment ID must be greater than zero");
+        }
+        PaymentRecord paymentRecord = paymentRecordService.findById(paymentId);
+        if (paymentRecord == null) {
+            throw new IllegalStateException("Payment record not found");
+        }
+        if (!Objects.equals(trimToNull(paymentRecord.getPayerIdCard()), trimToNull(requireCurrentUserIdCardNumber()))) {
+            throw new IllegalStateException("Payment record does not belong to current user");
+        }
+        if (paymentRecord.getFineId() == null) {
+            throw new IllegalStateException("Payment record is missing the linked fine");
+        }
+        requireCurrentUserFine(paymentRecord.getFineId());
+        return paymentRecord;
+    }
+
+    private void ensureNoPendingSelfServicePayment(Long fineId, String payerIdCard) {
+        List<PaymentRecord> paymentRecords = paymentRecordService.findByFineId(fineId, 1, PAYMENT_SCAN_SIZE);
+        for (PaymentRecord paymentRecord : paymentRecords) {
+            if (isActivePendingSelfServicePayment(paymentRecord, payerIdCard)) {
+                throw new IllegalStateException(
+                        "Current fine already has a pending self-service payment waiting for confirmation");
+            }
+        }
+    }
+
+    private void ensureCurrentUserCanConfirmPayment(PaymentRecord paymentRecord) {
+        if (!isSelfServicePaymentChannel(paymentRecord == null ? null : paymentRecord.getPaymentChannel())) {
+            throw new IllegalStateException("Only self-service payment orders can be confirmed by the current user");
+        }
+        String paymentStatus = trimToNull(paymentRecord == null ? null : paymentRecord.getPaymentStatus());
+        if (!Objects.equals(paymentStatus, PaymentState.UNPAID.getCode())) {
+            throw new IllegalStateException("Only pending self-service payment orders can be confirmed");
+        }
+        if (isExpiredPendingSelfServicePayment(paymentRecord)) {
+            throw new IllegalStateException("Pending self-service payment order has expired");
+        }
+    }
+
+    private boolean isActivePendingSelfServicePayment(PaymentRecord paymentRecord, String payerIdCard) {
+        if (paymentRecord == null) {
+            return false;
+        }
+        if (!Objects.equals(trimToNull(paymentRecord.getPayerIdCard()), trimToNull(payerIdCard))) {
+            return false;
+        }
+        if (!isSelfServicePaymentChannel(paymentRecord.getPaymentChannel())) {
+            return false;
+        }
+        return Objects.equals(trimToNull(paymentRecord.getPaymentStatus()), PaymentState.UNPAID.getCode())
+                && !isExpiredPendingSelfServicePayment(paymentRecord);
+    }
+
+    private boolean isExpiredPendingSelfServicePayment(PaymentRecord paymentRecord) {
+        LocalDateTime pendingSince = resolvePendingSince(paymentRecord);
+        if (pendingSince == null) {
+            return false;
+        }
+        return pendingSince.plus(SELF_SERVICE_PAYMENT_CONFIRM_WINDOW).isBefore(LocalDateTime.now());
+    }
+
+    private LocalDateTime resolvePendingSince(PaymentRecord paymentRecord) {
+        if (paymentRecord == null) {
+            return null;
+        }
+        return firstNonNull(paymentRecord.getCreatedAt(), paymentRecord.getPaymentTime(), paymentRecord.getUpdatedAt());
+    }
+
+    private boolean isSelfServicePaymentChannel(String paymentChannel) {
+        String normalizedChannel = trimToNull(paymentChannel);
+        return normalizedChannel != null && SELF_SERVICE_PAYMENT_CHANNELS.contains(normalizedChannel.toUpperCase());
+    }
+
+    private BigDecimal resolveRemainingPayableAmount(FineRecord fineRecord) {
+        if (fineRecord == null) {
+            return BigDecimal.ZERO;
+        }
+        BigDecimal totalAmount = fineRecord.getTotalAmount() != null
+                ? fineRecord.getTotalAmount()
+                : normalizeAmount(fineRecord.getFineAmount()).add(normalizeAmount(fineRecord.getLateFee()));
+        BigDecimal remaining = totalAmount.subtract(normalizeAmount(fineRecord.getPaidAmount()));
+        return remaining.signum() < 0 ? BigDecimal.ZERO : remaining;
+    }
+
+    private BigDecimal normalizeAmount(BigDecimal amount) {
+        return amount == null ? BigDecimal.ZERO : amount;
     }
 
     private Set<Long> resolveCandidateDriverIds() {

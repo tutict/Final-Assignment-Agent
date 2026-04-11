@@ -32,7 +32,7 @@ import java.util.logging.Logger;
 
 @RestController
 @RequestMapping("/api/workflow")
-@Tag(name = "Workflow Engine", description = "基于状态机的业务流程控制接口")
+@Tag(name = "Workflow Engine", description = "Workflow Engine endpoints")
 @SecurityRequirement(name = "bearerAuth")
 public class WorkflowController {
 
@@ -54,7 +54,7 @@ public class WorkflowController {
     }
 
     @PostMapping("/offenses/{offenseId}/events/{event}")
-    @Operation(summary = "触发违法记录状态事件")
+    @Operation(summary = "Trigger Offense Event")
     @RolesAllowed({"SUPER_ADMIN", "ADMIN", "TRAFFIC_POLICE"})
     public ResponseEntity<OffenseRecord> triggerOffenseEvent(@PathVariable Long offenseId,
                                                              @PathVariable OffenseProcessEvent event) {
@@ -82,7 +82,7 @@ public class WorkflowController {
     }
 
     @PostMapping("/payments/{paymentId}/events/{event}")
-    @Operation(summary = "触发支付状态事件")
+    @Operation(summary = "Trigger Payment Event")
     @RolesAllowed({"SUPER_ADMIN", "ADMIN", "FINANCE"})
     public ResponseEntity<PaymentRecord> triggerPaymentEvent(@PathVariable Long paymentId,
                                                              @PathVariable PaymentEvent event) {
@@ -107,7 +107,7 @@ public class WorkflowController {
     }
 
     @PostMapping("/appeals/{appealId}/events/{event}")
-    @Operation(summary = "触发申诉状态事件")
+    @Operation(summary = "Trigger Appeal Event")
     @RolesAllowed({"SUPER_ADMIN", "ADMIN", "APPEAL_REVIEWER"})
     public ResponseEntity<AppealRecord> triggerAppealEvent(@PathVariable Long appealId,
                                                            @PathVariable AppealProcessEvent event) {
@@ -137,7 +137,7 @@ public class WorkflowController {
     }
 
     @PostMapping("/appeals/{appealId}/acceptance-events/{event}")
-    @Operation(summary = "触发申诉受理状态事件")
+    @Operation(summary = "Trigger Appeal Acceptance Event")
     @RolesAllowed({"SUPER_ADMIN", "ADMIN", "APPEAL_REVIEWER"})
     public ResponseEntity<AppealRecord> triggerAppealAcceptanceEvent(@PathVariable Long appealId,
                                                                      @PathVariable AppealAcceptanceEvent event,

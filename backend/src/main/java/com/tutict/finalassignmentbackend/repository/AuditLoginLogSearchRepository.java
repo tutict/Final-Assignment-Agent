@@ -30,9 +30,9 @@ public interface AuditLoginLogSearchRepository extends ElasticsearchRepository<A
 
     @Query("""
             {
-              "match_phrase_prefix": {
-                "loginResult": {
-                  "query": "?0"
+              "term": {
+                "loginResult.keyword": {
+                  "value": "?0"
                 }
               }
             }
@@ -61,9 +61,9 @@ public interface AuditLoginLogSearchRepository extends ElasticsearchRepository<A
 
     @Query("""
             {
-              "match_phrase_prefix": {
-                "loginIp": {
-                  "query": "?0"
+              "term": {
+                "loginIp.keyword": {
+                  "value": "?0"
                 }
               }
             }

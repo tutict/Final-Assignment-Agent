@@ -62,20 +62,10 @@ public class SysUserRoleService {
             throw new RuntimeException("Duplicate sys user role request detected");
         }
 
-        SysRequestHistory history = new SysRequestHistory();
-        history.setIdempotencyKey(idempotencyKey);
-        history.setBusinessStatus("PROCESSING");
-        history.setCreatedAt(LocalDateTime.now());
-        history.setUpdatedAt(LocalDateTime.now());
+        SysRequestHistory history = buildHistory(idempotencyKey, relation, action);
         sysRequestHistoryMapper.insert(history);
 
         sendKafkaMessage("sys_user_role_" + action, idempotencyKey, relation);
-
-        history.setBusinessStatus("SUCCESS");
-        history.setBusinessId(relation.getId());
-        history.setRequestParams("PENDING");
-        history.setUpdatedAt(LocalDateTime.now());
-        sysRequestHistoryMapper.updateById(history);
     }
 
     @Transactional
@@ -90,8 +80,23 @@ public class SysUserRoleService {
     @Transactional
     @CacheEvict(cacheNames = CACHE_NAME, allEntries = true)
     public SysUserRole updateRelation(SysUserRole relation) {
+        throw new IllegalStateException("User-role bindings cannot be manually updated; recreate the binding instead");
+    }
+
+    @Transactional
+    @CacheEvict(cacheNames = CACHE_NAME, allEntries = true)
+    public SysUserRole updateRelationSystemManaged(SysUserRole relation) {
         validateRelation(relation);
         requirePositive(relation.getId(), "Relation ID");
+        SysUserRole existing = sysUserRoleMapper.selectById(relation.getId());
+        if (existing == null) {
+            throw new IllegalStateException("SysUserRole not found for id=" + relation.getId());
+        }
+        ensureRelationIdentityIsStable(relation, existing);
+        relation.setUserId(existing.getUserId());
+        relation.setRoleId(existing.getRoleId());
+        relation.setCreatedAt(existing.getCreatedAt());
+        relation.setCreatedBy(existing.getCreatedBy());
         int rows = sysUserRoleMapper.updateById(relation);
         if (rows == 0) {
             throw new IllegalStateException("SysUserRole not found for id=" + relation.getId());
@@ -108,12 +113,7 @@ public class SysUserRoleService {
         if (rows == 0) {
             throw new IllegalStateException("SysUserRole not found for id=" + relationId);
         }
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                sysUserRoleSearchRepository.deleteById(relationId);
-            }
-        });
+        runAfterCommitOrNow(() -> sysUserRoleSearchRepository.deleteById(relationId));
     }
 
     @Transactional(readOnly = true)
@@ -194,7 +194,8 @@ public class SysUserRoleService {
         SysRequestHistory history = sysRequestHistoryMapper.selectByIdempotencyKey(idempotencyKey);
         return history != null
                 && "SUCCESS".equalsIgnoreCase(history.getBusinessStatus())
-                && "DONE".equalsIgnoreCase(history.getRequestParams());
+                && history.getBusinessId() != null
+                && history.getBusinessId() > 0;
     }
 
     public void markHistorySuccess(String idempotencyKey, Long relationId) {
@@ -205,7 +206,6 @@ public class SysUserRoleService {
         }
         history.setBusinessStatus("SUCCESS");
         history.setBusinessId(relationId);
-        history.setRequestParams("DONE");
         history.setUpdatedAt(LocalDateTime.now());
         sysRequestHistoryMapper.updateById(history);
     }
@@ -217,9 +217,63 @@ public class SysUserRoleService {
             return;
         }
         history.setBusinessStatus("FAILED");
-        history.setRequestParams(truncate(reason));
+        history.setRequestParams(appendFailureReason(history.getRequestParams(), reason));
         history.setUpdatedAt(LocalDateTime.now());
         sysRequestHistoryMapper.updateById(history);
+    }
+
+    private SysRequestHistory buildHistory(String idempotencyKey, SysUserRole relation, String action) {
+        SysRequestHistory history = new SysRequestHistory();
+        history.setIdempotencyKey(idempotencyKey);
+        history.setRequestMethod("POST");
+        history.setRequestUrl("/api/sys/user-roles");
+        history.setRequestParams(buildRequestParams(relation));
+        history.setBusinessType(resolveBusinessType(action));
+        history.setBusinessStatus("PROCESSING");
+        history.setCreatedAt(LocalDateTime.now());
+        history.setUpdatedAt(LocalDateTime.now());
+        return history;
+    }
+
+    private String buildRequestParams(SysUserRole relation) {
+        if (relation == null) {
+            return null;
+        }
+        StringBuilder builder = new StringBuilder();
+        appendParam(builder, "userId", relation.getUserId());
+        appendParam(builder, "roleId", relation.getRoleId());
+        appendParam(builder, "createdBy", relation.getCreatedBy());
+        return truncate(builder.toString());
+    }
+
+    private String resolveBusinessType(String action) {
+        String normalized = isBlank(action) ? "CREATE" : action.trim().toUpperCase();
+        return "SYS_USER_ROLE_" + normalized;
+    }
+
+    private void appendParam(StringBuilder builder, String key, Object value) {
+        if (builder == null || value == null) {
+            return;
+        }
+        String normalized = value.toString().trim();
+        if (normalized.isEmpty()) {
+            return;
+        }
+        if (!builder.isEmpty()) {
+            builder.append(',');
+        }
+        builder.append(key).append('=').append(normalized);
+    }
+
+    private String appendFailureReason(String existing, String reason) {
+        String normalizedReason = truncate(reason);
+        if (isBlank(normalizedReason)) {
+            return existing;
+        }
+        if (isBlank(existing)) {
+            return "failure=" + normalizedReason;
+        }
+        return truncate(existing + ",failure=" + normalizedReason);
     }
 
     private void sendKafkaMessage(String topic, String idempotencyKey, SysUserRole relation) {
@@ -236,13 +290,10 @@ public class SysUserRoleService {
         if (relation == null) {
             return;
         }
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                SysUserRoleDocument doc = SysUserRoleDocument.fromEntity(relation);
-                if (doc != null) {
-                    sysUserRoleSearchRepository.save(doc);
-                }
+        runAfterCommitOrNow(() -> {
+            SysUserRoleDocument doc = SysUserRoleDocument.fromEntity(relation);
+            if (doc != null) {
+                sysUserRoleSearchRepository.save(doc);
             }
         });
     }
@@ -251,17 +302,14 @@ public class SysUserRoleService {
         if (records == null || records.isEmpty()) {
             return;
         }
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                List<SysUserRoleDocument> documents = records.stream()
-                        .filter(Objects::nonNull)
-                        .map(SysUserRoleDocument::fromEntity)
-                        .filter(Objects::nonNull)
-                        .collect(Collectors.toList());
-                if (!documents.isEmpty()) {
-                    sysUserRoleSearchRepository.saveAll(documents);
-                }
+        runAfterCommitOrNow(() -> {
+            List<SysUserRoleDocument> documents = records.stream()
+                    .filter(Objects::nonNull)
+                    .map(SysUserRoleDocument::fromEntity)
+                    .filter(Objects::nonNull)
+                    .collect(Collectors.toList());
+            if (!documents.isEmpty()) {
+                sysUserRoleSearchRepository.saveAll(documents);
             }
         });
     }
@@ -299,6 +347,18 @@ public class SysUserRoleService {
         }
     }
 
+    private void ensureRelationIdentityIsStable(SysUserRole relation, SysUserRole existing) {
+        if (relation == null || existing == null) {
+            return;
+        }
+        if (relation.getUserId() != null && !relation.getUserId().equals(existing.getUserId())) {
+            throw new IllegalStateException("User ID cannot be changed for an existing user-role binding");
+        }
+        if (relation.getRoleId() != null && !relation.getRoleId().equals(existing.getRoleId())) {
+            throw new IllegalStateException("Role ID cannot be changed for an existing user-role binding");
+        }
+    }
+
     private void validatePagination(int page, int size) {
         if (page < 1 || size < 1) {
             throw new IllegalArgumentException("Page must be >= 1 and size must be >= 1");
@@ -311,10 +371,30 @@ public class SysUserRoleService {
         }
     }
 
+    private boolean isBlank(String value) {
+        return value == null || value.trim().isEmpty();
+    }
+
     private String truncate(String value) {
         if (value == null) {
             return null;
         }
         return value.length() <= 500 ? value : value.substring(0, 500);
+    }
+
+    private void runAfterCommitOrNow(Runnable task) {
+        if (task == null) {
+            return;
+        }
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    task.run();
+                }
+            });
+            return;
+        }
+        task.run();
     }
 }

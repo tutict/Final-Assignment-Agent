@@ -30,9 +30,9 @@ public interface PaymentRecordSearchRepository extends ElasticsearchRepository<P
 
     @Query("""
     {
-      "match_phrase_prefix": {
-        "payerIdCard": {
-          "query": "?0"
+      "term": {
+        "payerIdCard.keyword": {
+          "value": "?0"
         }
       }
     }
@@ -60,10 +60,9 @@ public interface PaymentRecordSearchRepository extends ElasticsearchRepository<P
 
     @Query("""
     {
-      "match": {
-        "transactionId": {
-          "query": "?0",
-          "fuzziness": "AUTO"
+      "term": {
+        "transactionId.keyword": {
+          "value": "?0"
         }
       }
     }
@@ -76,9 +75,9 @@ public interface PaymentRecordSearchRepository extends ElasticsearchRepository<P
 
     @Query("""
     {
-      "match_phrase_prefix": {
-        "paymentNumber": {
-          "query": "?0"
+      "term": {
+        "paymentNumber.keyword": {
+          "value": "?0"
         }
       }
     }

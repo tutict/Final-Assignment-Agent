@@ -66,25 +66,21 @@ public class AuditOperationLogService {
             throw new RuntimeException("Duplicate audit operation log request detected");
         }
 
-        SysRequestHistory history = new SysRequestHistory();
-        history.setIdempotencyKey(idempotencyKey);
-        history.setBusinessStatus("PROCESSING");
-        history.setCreatedAt(LocalDateTime.now());
-        history.setUpdatedAt(LocalDateTime.now());
+        SysRequestHistory history = buildHistory(idempotencyKey, auditOperationLog, action);
         sysRequestHistoryMapper.insert(history);
 
         sendKafkaMessage("audit_operation_log_" + action, idempotencyKey, auditOperationLog);
-
-        history.setBusinessStatus("SUCCESS");
-        history.setBusinessId(auditOperationLog.getLogId());
-        history.setRequestParams("PENDING");
-        history.setUpdatedAt(LocalDateTime.now());
-        sysRequestHistoryMapper.updateById(history);
     }
 
     @Transactional
     @CacheEvict(cacheNames = CACHE_NAME, allEntries = true)
     public AuditOperationLog createAuditOperationLog(AuditOperationLog auditOperationLog) {
+        throw new IllegalStateException("Audit operation logs are compliance evidence and cannot be manually created");
+    }
+
+    @Transactional
+    @CacheEvict(cacheNames = CACHE_NAME, allEntries = true)
+    public AuditOperationLog createAuditOperationLogSystemManaged(AuditOperationLog auditOperationLog) {
         validateAuditOperationLog(auditOperationLog);
         auditOperationLogMapper.insert(auditOperationLog);
         syncToIndexAfterCommit(auditOperationLog);
@@ -94,6 +90,12 @@ public class AuditOperationLogService {
     @Transactional
     @CacheEvict(cacheNames = CACHE_NAME, allEntries = true)
     public AuditOperationLog updateAuditOperationLog(AuditOperationLog auditOperationLog) {
+        throw new IllegalStateException("Audit operation logs are compliance evidence and cannot be manually updated");
+    }
+
+    @Transactional
+    @CacheEvict(cacheNames = CACHE_NAME, allEntries = true)
+    public AuditOperationLog updateAuditOperationLogSystemManaged(AuditOperationLog auditOperationLog) {
         validateAuditOperationLog(auditOperationLog);
         requirePositive(auditOperationLog.getLogId(), "Log ID");
         int rows = auditOperationLogMapper.updateById(auditOperationLog);
@@ -107,17 +109,7 @@ public class AuditOperationLogService {
     @Transactional
     @CacheEvict(cacheNames = CACHE_NAME, allEntries = true)
     public void deleteAuditOperationLog(Long logId) {
-        requirePositive(logId, "Log ID");
-        int rows = auditOperationLogMapper.deleteById(logId);
-        if (rows == 0) {
-            throw new IllegalStateException("Audit operation log not found for id=" + logId);
-        }
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                auditOperationLogSearchRepository.deleteById(logId);
-            }
-        });
+        throw new IllegalStateException("Audit operation logs are compliance evidence and cannot be manually deleted");
     }
 
     @Transactional(readOnly = true)
@@ -147,6 +139,27 @@ public class AuditOperationLogService {
         List<AuditOperationLog> fromDb = auditOperationLogMapper.selectList(null);
         syncBatchToIndexAfterCommit(fromDb);
         return fromDb;
+    }
+
+    @Transactional(readOnly = true)
+    @Cacheable(cacheNames = CACHE_NAME, key = "'countAll'")
+    public long countAll() {
+        long indexCount = auditOperationLogSearchRepository.count();
+        if (indexCount > 0) {
+            return indexCount;
+        }
+        return auditOperationLogMapper.selectCount(null);
+    }
+
+    @Transactional(readOnly = true)
+    @Cacheable(cacheNames = CACHE_NAME, key = "'list:' + #page + ':' + #size",
+            unless = "#result == null || #result.isEmpty()")
+    public List<AuditOperationLog> listLogs(int page, int size) {
+        validatePagination(page, size);
+        QueryWrapper<AuditOperationLog> wrapper = new QueryWrapper<>();
+        wrapper.orderByDesc("operation_time")
+                .orderByDesc("log_id");
+        return fetchFromDatabase(wrapper, page, size);
     }
 
     @Cacheable(cacheNames = CACHE_NAME, key = "'module:' + #module + ':' + #page + ':' + #size", unless = "#result == null || #result.isEmpty()")
@@ -281,7 +294,8 @@ public class AuditOperationLogService {
         SysRequestHistory history = sysRequestHistoryMapper.selectByIdempotencyKey(idempotencyKey);
         return history != null
                 && "SUCCESS".equalsIgnoreCase(history.getBusinessStatus())
-                && "DONE".equalsIgnoreCase(history.getRequestParams());
+                && history.getBusinessId() != null
+                && history.getBusinessId() > 0;
     }
 
     public void markHistorySuccess(String idempotencyKey, Long logId) {
@@ -292,7 +306,6 @@ public class AuditOperationLogService {
         }
         history.setBusinessStatus("SUCCESS");
         history.setBusinessId(logId);
-        history.setRequestParams("DONE");
         history.setUpdatedAt(LocalDateTime.now());
         sysRequestHistoryMapper.updateById(history);
     }
@@ -304,9 +317,66 @@ public class AuditOperationLogService {
             return;
         }
         history.setBusinessStatus("FAILED");
-        history.setRequestParams(truncate(reason));
+        history.setRequestParams(appendFailureReason(history.getRequestParams(), reason));
         history.setUpdatedAt(LocalDateTime.now());
         sysRequestHistoryMapper.updateById(history);
+    }
+
+    private SysRequestHistory buildHistory(String idempotencyKey, AuditOperationLog auditOperationLog, String action) {
+        SysRequestHistory history = new SysRequestHistory();
+        history.setIdempotencyKey(idempotencyKey);
+        history.setRequestMethod("POST");
+        history.setRequestUrl("/api/audit/operation-logs");
+        history.setRequestParams(buildRequestParams(auditOperationLog));
+        history.setBusinessType(resolveBusinessType(action));
+        history.setBusinessStatus("PROCESSING");
+        history.setCreatedAt(LocalDateTime.now());
+        history.setUpdatedAt(LocalDateTime.now());
+        return history;
+    }
+
+    private String buildRequestParams(AuditOperationLog auditOperationLog) {
+        if (auditOperationLog == null) {
+            return null;
+        }
+        StringBuilder builder = new StringBuilder();
+        appendParam(builder, "operationModule", auditOperationLog.getOperationModule());
+        appendParam(builder, "operationType", auditOperationLog.getOperationType());
+        appendParam(builder, "userId", auditOperationLog.getUserId());
+        appendParam(builder, "username", auditOperationLog.getUsername());
+        appendParam(builder, "requestMethod", auditOperationLog.getRequestMethod());
+        appendParam(builder, "requestUrl", auditOperationLog.getRequestUrl());
+        return truncate(builder.toString());
+    }
+
+    private String resolveBusinessType(String action) {
+        String normalized = isBlank(action) ? "CREATE" : action.trim().toUpperCase();
+        return "AUDIT_OPERATION_LOG_" + normalized;
+    }
+
+    private void appendParam(StringBuilder builder, String key, Object value) {
+        if (builder == null || value == null) {
+            return;
+        }
+        String normalized = value.toString().trim();
+        if (normalized.isEmpty()) {
+            return;
+        }
+        if (!builder.isEmpty()) {
+            builder.append(',');
+        }
+        builder.append(key).append('=').append(normalized);
+    }
+
+    private String appendFailureReason(String existing, String reason) {
+        String normalizedReason = truncate(reason);
+        if (isBlank(normalizedReason)) {
+            return existing;
+        }
+        if (isBlank(existing)) {
+            return "failure=" + normalizedReason;
+        }
+        return truncate(existing + ",failure=" + normalizedReason);
     }
 
     private void sendKafkaMessage(String topic, String idempotencyKey, AuditOperationLog auditOperationLog) {
@@ -323,13 +393,10 @@ public class AuditOperationLogService {
         if (auditOperationLog == null) {
             return;
         }
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                AuditOperationLogDocument doc = AuditOperationLogDocument.fromEntity(auditOperationLog);
-                if (doc != null) {
-                    auditOperationLogSearchRepository.save(doc);
-                }
+        runAfterCommitOrNow(() -> {
+            AuditOperationLogDocument doc = AuditOperationLogDocument.fromEntity(auditOperationLog);
+            if (doc != null) {
+                auditOperationLogSearchRepository.save(doc);
             }
         });
     }
@@ -338,19 +405,32 @@ public class AuditOperationLogService {
         if (records == null || records.isEmpty()) {
             return;
         }
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                List<AuditOperationLogDocument> documents = records.stream()
-                        .filter(Objects::nonNull)
-                        .map(AuditOperationLogDocument::fromEntity)
-                        .filter(Objects::nonNull)
-                        .collect(Collectors.toList());
-                if (!documents.isEmpty()) {
-                    auditOperationLogSearchRepository.saveAll(documents);
-                }
+        runAfterCommitOrNow(() -> {
+            List<AuditOperationLogDocument> documents = records.stream()
+                    .filter(Objects::nonNull)
+                    .map(AuditOperationLogDocument::fromEntity)
+                    .filter(Objects::nonNull)
+                    .collect(Collectors.toList());
+            if (!documents.isEmpty()) {
+                auditOperationLogSearchRepository.saveAll(documents);
             }
         });
+    }
+
+    private void runAfterCommitOrNow(Runnable task) {
+        if (task == null) {
+            return;
+        }
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    task.run();
+                }
+            });
+            return;
+        }
+        task.run();
     }
 
     private List<AuditOperationLog> fetchFromDatabase(QueryWrapper<AuditOperationLog> wrapper, int page, int size) {

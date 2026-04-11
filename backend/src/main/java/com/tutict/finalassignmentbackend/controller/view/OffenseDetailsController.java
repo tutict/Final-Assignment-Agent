@@ -31,9 +31,9 @@ import java.util.logging.Logger;
 
 @RestController
 @RequestMapping("/api/view/offenses")
-@Tag(name = "Offense Details View", description = "面向前端的违法详情聚合视图接口")
+@Tag(name = "Offense Details View", description = "Offense Details View endpoints")
 @SecurityRequirement(name = "bearerAuth")
-@RolesAllowed({"SUPER_ADMIN", "ADMIN", "TRAFFIC_POLICE", "APPEAL_REVIEWER", "FINANCE"})
+@RolesAllowed({"SUPER_ADMIN", "ADMIN", "TRAFFIC_POLICE", "FINANCE", "APPEAL_REVIEWER"})
 public class OffenseDetailsController {
 
     private static final Logger LOG = Logger.getLogger(OffenseDetailsController.class.getName());
@@ -58,7 +58,7 @@ public class OffenseDetailsController {
     }
 
     @GetMapping("/{offenseId}")
-    @Operation(summary = "获取面向看板的违法详情")
+    @Operation(summary = "Get Details")
     public ResponseEntity<Map<String, Object>> getDetails(@PathVariable Long offenseId) {
         try {
             OffenseRecord offense = offenseRecordService.findById(offenseId);
@@ -75,7 +75,7 @@ public class OffenseDetailsController {
             List<PaymentRecord> payments = new ArrayList<>();
             for (FineRecord fine : fines) {
                 if (fine.getFineId() != null) {
-                    payments.addAll(paymentRecordService.findByFineId(fine.getFineId(), 1, 10));
+                    payments.addAll(sanitizePayments(paymentRecordService.findByFineId(fine.getFineId(), 1, 10)));
                 }
             }
             payload.put("payments", payments);
@@ -100,15 +100,16 @@ public class OffenseDetailsController {
                                                     List<PaymentRecord> payments,
                                                     List<AppealRecord> appeals) {
         List<Map<String, Object>> timeline = new ArrayList<>();
+
         Map<String, Object> offenseNode = new HashMap<>();
-        offenseNode.put("event", "违法记录");
+        offenseNode.put("event", "Offense recorded");
         offenseNode.put("timestamp", offense.getOffenseTime() != null ? offense.getOffenseTime().format(FORMATTER) : null);
         offenseNode.put("status", offense.getProcessStatus());
         timeline.add(offenseNode);
 
         for (FineRecord fine : fines) {
             Map<String, Object> fineNode = new HashMap<>();
-            fineNode.put("event", "罚款处理");
+            fineNode.put("event", "Fine issued");
             fineNode.put("timestamp", fine.getFineDate() != null ? fine.getFineDate().toString() : null);
             fineNode.put("status", fine.getPaymentStatus());
             timeline.add(fineNode);
@@ -116,7 +117,7 @@ public class OffenseDetailsController {
 
         for (PaymentRecord payment : payments) {
             Map<String, Object> paymentNode = new HashMap<>();
-            paymentNode.put("event", "缴费");
+            paymentNode.put("event", "Payment completed");
             paymentNode.put("timestamp", payment.getPaymentTime() != null ? payment.getPaymentTime().format(FORMATTER) : null);
             paymentNode.put("status", payment.getPaymentStatus());
             timeline.add(paymentNode);
@@ -124,12 +125,73 @@ public class OffenseDetailsController {
 
         for (AppealRecord appeal : appeals) {
             Map<String, Object> appealNode = new HashMap<>();
-            appealNode.put("event", "申诉");
+            appealNode.put("event", "Appeal submitted");
             appealNode.put("timestamp", appeal.getCreatedAt() != null ? appeal.getCreatedAt().format(FORMATTER) : null);
             appealNode.put("status", appeal.getProcessStatus());
             timeline.add(appealNode);
         }
 
         return timeline;
+    }
+
+    private List<PaymentRecord> sanitizePayments(List<PaymentRecord> payments) {
+        if (payments == null || payments.isEmpty()) {
+            return List.of();
+        }
+        List<PaymentRecord> sanitized = new ArrayList<>(payments.size());
+        for (PaymentRecord payment : payments) {
+            if (payment == null) {
+                continue;
+            }
+            sanitized.add(sanitizePayment(payment));
+        }
+        return sanitized;
+    }
+
+    private PaymentRecord sanitizePayment(PaymentRecord payment) {
+        PaymentRecord sanitized = new PaymentRecord();
+        sanitized.setPaymentId(payment.getPaymentId());
+        sanitized.setFineId(payment.getFineId());
+        sanitized.setPaymentNumber(payment.getPaymentNumber());
+        sanitized.setPaymentAmount(payment.getPaymentAmount());
+        sanitized.setPaymentMethod(payment.getPaymentMethod());
+        sanitized.setPaymentTime(payment.getPaymentTime());
+        sanitized.setPaymentChannel(payment.getPaymentChannel());
+        sanitized.setPayerName(payment.getPayerName());
+        sanitized.setPayerIdCard(maskSensitiveValue(payment.getPayerIdCard(), 3, 4));
+        sanitized.setPayerContact(maskSensitiveValue(payment.getPayerContact(), 3, 4));
+        sanitized.setBankName(payment.getBankName());
+        sanitized.setBankAccount(maskSensitiveValue(payment.getBankAccount(), 4, 4));
+        sanitized.setTransactionId(payment.getTransactionId());
+        sanitized.setReceiptNumber(payment.getReceiptNumber());
+        sanitized.setReceiptUrl(null);
+        sanitized.setPaymentStatus(payment.getPaymentStatus());
+        sanitized.setRefundAmount(payment.getRefundAmount());
+        sanitized.setRefundTime(payment.getRefundTime());
+        sanitized.setCreatedAt(payment.getCreatedAt());
+        sanitized.setUpdatedAt(payment.getUpdatedAt());
+        sanitized.setCreatedBy(payment.getCreatedBy());
+        sanitized.setUpdatedBy(payment.getUpdatedBy());
+        sanitized.setDeletedAt(payment.getDeletedAt());
+        sanitized.setRemarks(payment.getRemarks());
+        return sanitized;
+    }
+
+    private String maskSensitiveValue(String value, int prefixLength, int suffixLength) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim();
+        if (trimmed.isEmpty()) {
+            return trimmed;
+        }
+        int effectivePrefix = Math.max(prefixLength, 0);
+        int effectiveSuffix = Math.max(suffixLength, 0);
+        if (trimmed.length() <= effectivePrefix + effectiveSuffix) {
+            return "*".repeat(Math.max(trimmed.length(), 3));
+        }
+        return trimmed.substring(0, effectivePrefix)
+                + "*".repeat(Math.max(trimmed.length() - effectivePrefix - effectiveSuffix, 3))
+                + trimmed.substring(trimmed.length() - effectiveSuffix);
     }
 }

@@ -22,7 +22,6 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.stream.Collectors;
@@ -64,20 +63,10 @@ public class SysSettingsService {
             throw new RuntimeException("Duplicate sys settings request detected");
         }
 
-        SysRequestHistory history = new SysRequestHistory();
-        history.setIdempotencyKey(idempotencyKey);
-        history.setBusinessStatus("PROCESSING");
-        history.setCreatedAt(LocalDateTime.now());
-        history.setUpdatedAt(LocalDateTime.now());
+        SysRequestHistory history = buildHistory(idempotencyKey, settings, action);
         sysRequestHistoryMapper.insert(history);
 
         sendKafkaMessage("sys_settings_" + action, idempotencyKey, settings);
-
-        history.setBusinessStatus("SUCCESS");
-        history.setBusinessId(Optional.ofNullable(settings.getSettingId()).map(Integer::longValue).orElse(null));
-        history.setRequestParams("PENDING");
-        history.setUpdatedAt(LocalDateTime.now());
-        sysRequestHistoryMapper.updateById(history);
     }
 
     @Transactional
@@ -110,12 +99,7 @@ public class SysSettingsService {
         if (rows == 0) {
             throw new IllegalStateException("SysSettings not found for id=" + settingId);
         }
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                sysSettingsSearchRepository.deleteById(settingId);
-            }
-        });
+        runAfterCommitOrNow(() -> sysSettingsSearchRepository.deleteById(settingId));
     }
 
     @Transactional(readOnly = true)
@@ -253,11 +237,25 @@ public class SysSettingsService {
         return fromDb;
     }
 
+    @Transactional(readOnly = true)
+    @Cacheable(
+            cacheNames = CACHE_NAME,
+            key = "'all:' + #page + ':' + #size",
+            unless = "#result == null || #result.isEmpty()")
+    public List<SysSettings> findAll(int page, int size) {
+        validatePagination(page, size);
+        QueryWrapper<SysSettings> wrapper = new QueryWrapper<>();
+        wrapper.orderByAsc("sort_order")
+                .orderByAsc("setting_id");
+        return fetchFromDatabase(wrapper, page, size);
+    }
+
     public boolean shouldSkipProcessing(String idempotencyKey) {
         SysRequestHistory history = sysRequestHistoryMapper.selectByIdempotencyKey(idempotencyKey);
         return history != null
                 && "SUCCESS".equalsIgnoreCase(history.getBusinessStatus())
-                && "DONE".equalsIgnoreCase(history.getRequestParams());
+                && history.getBusinessId() != null
+                && history.getBusinessId() > 0;
     }
 
     public void markHistorySuccess(String idempotencyKey, Integer settingId) {
@@ -268,7 +266,6 @@ public class SysSettingsService {
         }
         history.setBusinessStatus("SUCCESS");
         history.setBusinessId(settingId != null ? settingId.longValue() : null);
-        history.setRequestParams("DONE");
         history.setUpdatedAt(LocalDateTime.now());
         sysRequestHistoryMapper.updateById(history);
     }
@@ -280,9 +277,65 @@ public class SysSettingsService {
             return;
         }
         history.setBusinessStatus("FAILED");
-        history.setRequestParams(truncate(reason));
+        history.setRequestParams(appendFailureReason(history.getRequestParams(), reason));
         history.setUpdatedAt(LocalDateTime.now());
         sysRequestHistoryMapper.updateById(history);
+    }
+
+    private SysRequestHistory buildHistory(String idempotencyKey, SysSettings settings, String action) {
+        SysRequestHistory history = new SysRequestHistory();
+        history.setIdempotencyKey(idempotencyKey);
+        history.setRequestMethod("POST");
+        history.setRequestUrl("/api/sys/settings");
+        history.setRequestParams(buildRequestParams(settings));
+        history.setBusinessType(resolveBusinessType(action));
+        history.setBusinessStatus("PROCESSING");
+        history.setCreatedAt(LocalDateTime.now());
+        history.setUpdatedAt(LocalDateTime.now());
+        return history;
+    }
+
+    private String buildRequestParams(SysSettings settings) {
+        if (settings == null) {
+            return null;
+        }
+        StringBuilder builder = new StringBuilder();
+        appendParam(builder, "settingKey", settings.getSettingKey());
+        appendParam(builder, "settingType", settings.getSettingType());
+        appendParam(builder, "category", settings.getCategory());
+        appendParam(builder, "isEditable", settings.getIsEditable());
+        appendParam(builder, "updatedBy", settings.getUpdatedBy());
+        return truncate(builder.toString());
+    }
+
+    private String resolveBusinessType(String action) {
+        String normalized = isBlank(action) ? "CREATE" : action.trim().toUpperCase();
+        return "SYS_SETTINGS_" + normalized;
+    }
+
+    private void appendParam(StringBuilder builder, String key, Object value) {
+        if (builder == null || value == null) {
+            return;
+        }
+        String normalized = value.toString().trim();
+        if (normalized.isEmpty()) {
+            return;
+        }
+        if (!builder.isEmpty()) {
+            builder.append(',');
+        }
+        builder.append(key).append('=').append(normalized);
+    }
+
+    private String appendFailureReason(String existing, String reason) {
+        String normalizedReason = truncate(reason);
+        if (isBlank(normalizedReason)) {
+            return existing;
+        }
+        if (isBlank(existing)) {
+            return "failure=" + normalizedReason;
+        }
+        return truncate(existing + ",failure=" + normalizedReason);
     }
 
     private void sendKafkaMessage(String topic, String idempotencyKey, SysSettings settings) {
@@ -299,13 +352,10 @@ public class SysSettingsService {
         if (settings == null) {
             return;
         }
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                SysSettingsDocument doc = SysSettingsDocument.fromEntity(settings);
-                if (doc != null) {
-                    sysSettingsSearchRepository.save(doc);
-                }
+        runAfterCommitOrNow(() -> {
+            SysSettingsDocument doc = SysSettingsDocument.fromEntity(settings);
+            if (doc != null) {
+                sysSettingsSearchRepository.save(doc);
             }
         });
     }
@@ -314,17 +364,14 @@ public class SysSettingsService {
         if (records == null || records.isEmpty()) {
             return;
         }
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                List<SysSettingsDocument> documents = records.stream()
-                        .filter(Objects::nonNull)
-                        .map(SysSettingsDocument::fromEntity)
-                        .filter(Objects::nonNull)
-                        .collect(Collectors.toList());
-                if (!documents.isEmpty()) {
-                    sysSettingsSearchRepository.saveAll(documents);
-                }
+        runAfterCommitOrNow(() -> {
+            List<SysSettingsDocument> documents = records.stream()
+                    .filter(Objects::nonNull)
+                    .map(SysSettingsDocument::fromEntity)
+                    .filter(Objects::nonNull)
+                    .collect(Collectors.toList());
+            if (!documents.isEmpty()) {
+                sysSettingsSearchRepository.saveAll(documents);
             }
         });
     }
@@ -390,5 +437,21 @@ public class SysSettingsService {
             return null;
         }
         return value.length() <= 500 ? value : value.substring(0, 500);
+    }
+
+    private void runAfterCommitOrNow(Runnable task) {
+        if (task == null) {
+            return;
+        }
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    task.run();
+                }
+            });
+            return;
+        }
+        task.run();
     }
 }

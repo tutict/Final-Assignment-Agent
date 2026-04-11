@@ -64,20 +64,10 @@ public class SysBackupRestoreService {
             throw new RuntimeException("Duplicate sys backup/restore request detected");
         }
 
-        SysRequestHistory history = new SysRequestHistory();
-        history.setIdempotencyKey(idempotencyKey);
-        history.setBusinessStatus("PROCESSING");
-        history.setCreatedAt(LocalDateTime.now());
-        history.setUpdatedAt(LocalDateTime.now());
+        SysRequestHistory history = buildHistory(idempotencyKey, backupRestore, action);
         sysRequestHistoryMapper.insert(history);
 
         sendKafkaMessage("sys_backup_restore_" + action, idempotencyKey, backupRestore);
-
-        history.setBusinessStatus("SUCCESS");
-        history.setBusinessId(backupRestore.getBackupId());
-        history.setRequestParams("PENDING");
-        history.setUpdatedAt(LocalDateTime.now());
-        sysRequestHistoryMapper.updateById(history);
     }
 
     @Transactional
@@ -110,12 +100,7 @@ public class SysBackupRestoreService {
         if (rows == 0) {
             throw new IllegalStateException("SysBackupRestore not found for id=" + backupId);
         }
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                sysBackupRestoreSearchRepository.deleteById(backupId);
-            }
-        });
+        runAfterCommitOrNow(() -> sysBackupRestoreSearchRepository.deleteById(backupId));
     }
 
     @Transactional(readOnly = true)
@@ -145,6 +130,17 @@ public class SysBackupRestoreService {
         List<SysBackupRestore> fromDb = sysBackupRestoreMapper.selectList(null);
         syncBatchToIndexAfterCommit(fromDb);
         return fromDb;
+    }
+
+    @Transactional(readOnly = true)
+    @Cacheable(cacheNames = CACHE_NAME, key = "'list:' + #page + ':' + #size",
+            unless = "#result == null || #result.isEmpty()")
+    public List<SysBackupRestore> listBackups(int page, int size) {
+        validatePagination(page, size);
+        QueryWrapper<SysBackupRestore> wrapper = new QueryWrapper<>();
+        wrapper.orderByDesc("backup_time")
+                .orderByDesc("backup_id");
+        return fetchFromDatabase(wrapper, page, size);
     }
 
     @Cacheable(cacheNames = CACHE_NAME, key = "'backupType:' + #backupType + ':' + #page + ':' + #size",
@@ -274,7 +270,8 @@ public class SysBackupRestoreService {
         SysRequestHistory history = sysRequestHistoryMapper.selectByIdempotencyKey(idempotencyKey);
         return history != null
                 && "SUCCESS".equalsIgnoreCase(history.getBusinessStatus())
-                && "DONE".equalsIgnoreCase(history.getRequestParams());
+                && history.getBusinessId() != null
+                && history.getBusinessId() > 0;
     }
 
     public void markHistorySuccess(String idempotencyKey, Long backupId) {
@@ -285,7 +282,6 @@ public class SysBackupRestoreService {
         }
         history.setBusinessStatus("SUCCESS");
         history.setBusinessId(backupId);
-        history.setRequestParams("DONE");
         history.setUpdatedAt(LocalDateTime.now());
         sysRequestHistoryMapper.updateById(history);
     }
@@ -297,9 +293,65 @@ public class SysBackupRestoreService {
             return;
         }
         history.setBusinessStatus("FAILED");
-        history.setRequestParams(truncate(reason));
+        history.setRequestParams(appendFailureReason(history.getRequestParams(), reason));
         history.setUpdatedAt(LocalDateTime.now());
         sysRequestHistoryMapper.updateById(history);
+    }
+
+    private SysRequestHistory buildHistory(String idempotencyKey, SysBackupRestore backupRestore, String action) {
+        SysRequestHistory history = new SysRequestHistory();
+        history.setIdempotencyKey(idempotencyKey);
+        history.setRequestMethod("POST");
+        history.setRequestUrl("/api/sys/backups");
+        history.setRequestParams(buildRequestParams(backupRestore));
+        history.setBusinessType(resolveBusinessType(action));
+        history.setBusinessStatus("PROCESSING");
+        history.setCreatedAt(LocalDateTime.now());
+        history.setUpdatedAt(LocalDateTime.now());
+        return history;
+    }
+
+    private String buildRequestParams(SysBackupRestore backupRestore) {
+        if (backupRestore == null) {
+            return null;
+        }
+        StringBuilder builder = new StringBuilder();
+        appendParam(builder, "backupType", backupRestore.getBackupType());
+        appendParam(builder, "backupFileName", backupRestore.getBackupFileName());
+        appendParam(builder, "backupHandler", backupRestore.getBackupHandler());
+        appendParam(builder, "restoreStatus", backupRestore.getRestoreStatus());
+        appendParam(builder, "status", backupRestore.getStatus());
+        return truncate(builder.toString());
+    }
+
+    private String resolveBusinessType(String action) {
+        String normalized = isBlank(action) ? "CREATE" : action.trim().toUpperCase();
+        return "SYS_BACKUP_RESTORE_" + normalized;
+    }
+
+    private void appendParam(StringBuilder builder, String key, Object value) {
+        if (builder == null || value == null) {
+            return;
+        }
+        String normalized = value.toString().trim();
+        if (normalized.isEmpty()) {
+            return;
+        }
+        if (!builder.isEmpty()) {
+            builder.append(',');
+        }
+        builder.append(key).append('=').append(normalized);
+    }
+
+    private String appendFailureReason(String existing, String reason) {
+        String normalizedReason = truncate(reason);
+        if (isBlank(normalizedReason)) {
+            return existing;
+        }
+        if (isBlank(existing)) {
+            return "failure=" + normalizedReason;
+        }
+        return truncate(existing + ",failure=" + normalizedReason);
     }
 
     private void sendKafkaMessage(String topic, String idempotencyKey, SysBackupRestore backupRestore) {
@@ -316,13 +368,10 @@ public class SysBackupRestoreService {
         if (backupRestore == null) {
             return;
         }
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                SysBackupRestoreDocument doc = SysBackupRestoreDocument.fromEntity(backupRestore);
-                if (doc != null) {
-                    sysBackupRestoreSearchRepository.save(doc);
-                }
+        runAfterCommitOrNow(() -> {
+            SysBackupRestoreDocument doc = SysBackupRestoreDocument.fromEntity(backupRestore);
+            if (doc != null) {
+                sysBackupRestoreSearchRepository.save(doc);
             }
         });
     }
@@ -331,17 +380,14 @@ public class SysBackupRestoreService {
         if (records == null || records.isEmpty()) {
             return;
         }
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                List<SysBackupRestoreDocument> documents = records.stream()
-                        .filter(Objects::nonNull)
-                        .map(SysBackupRestoreDocument::fromEntity)
-                        .filter(Objects::nonNull)
-                        .collect(Collectors.toList());
-                if (!documents.isEmpty()) {
-                    sysBackupRestoreSearchRepository.saveAll(documents);
-                }
+        runAfterCommitOrNow(() -> {
+            List<SysBackupRestoreDocument> documents = records.stream()
+                    .filter(Objects::nonNull)
+                    .map(SysBackupRestoreDocument::fromEntity)
+                    .filter(Objects::nonNull)
+                    .collect(Collectors.toList());
+            if (!documents.isEmpty()) {
+                sysBackupRestoreSearchRepository.saveAll(documents);
             }
         });
     }
@@ -413,5 +459,21 @@ public class SysBackupRestoreService {
             return null;
         }
         return value.length() <= 500 ? value : value.substring(0, 500);
+    }
+
+    private void runAfterCommitOrNow(Runnable task) {
+        if (task == null) {
+            return;
+        }
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    task.run();
+                }
+            });
+            return;
+        }
+        task.run();
     }
 }

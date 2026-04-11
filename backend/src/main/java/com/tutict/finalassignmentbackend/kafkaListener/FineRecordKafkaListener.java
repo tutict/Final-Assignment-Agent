@@ -72,7 +72,7 @@ public class FineRecordKafkaListener {
                 payload.setFineId(null);
                 result = fineRecordService.createFineRecord(payload);
             } else if ("update".equalsIgnoreCase(action)) {
-                result = fineRecordService.updateFineRecord(payload);
+                result = fineRecordService.updateFineRecordSystemManaged(payload);
             } else {
                 log.log(Level.WARNING, "Unsupported FineRecord action: {0}", action);
                 return;

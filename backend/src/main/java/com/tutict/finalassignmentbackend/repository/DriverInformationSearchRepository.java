@@ -46,9 +46,9 @@ public interface DriverInformationSearchRepository extends ElasticsearchReposito
 
     @Query("""
             {
-              "match_phrase_prefix": {
-                "idCardNumber": {
-                  "query": "?0"
+              "term": {
+                "idCardNumber.keyword": {
+                  "value": "?0"
                 }
               }
             }
@@ -77,9 +77,9 @@ public interface DriverInformationSearchRepository extends ElasticsearchReposito
 
     @Query("""
             {
-              "match_phrase_prefix": {
-                "driverLicenseNumber": {
-                  "query": "?0"
+              "term": {
+                "driverLicenseNumber.keyword": {
+                  "value": "?0"
                 }
               }
             }

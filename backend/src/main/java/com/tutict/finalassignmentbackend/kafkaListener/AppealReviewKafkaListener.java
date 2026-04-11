@@ -70,7 +70,7 @@ public class AppealReviewKafkaListener {
                 payload.setReviewId(null);
                 result = appealReviewService.createReview(payload);
             } else if ("update".equalsIgnoreCase(action)) {
-                result = appealReviewService.updateReview(payload);
+                result = appealReviewService.updateReviewSystemManaged(payload);
             } else {
                 log.log(Level.WARNING, "Unsupported appeal review action: {0}", action);
                 return;

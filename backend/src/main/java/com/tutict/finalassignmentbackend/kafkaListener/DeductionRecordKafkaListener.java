@@ -71,7 +71,7 @@ public class DeductionRecordKafkaListener {
                 payload.setDeductionId(null);
                 result = deductionRecordService.createDeductionRecord(payload);
             } else if ("update".equalsIgnoreCase(action)) {
-                result = deductionRecordService.updateDeductionRecord(payload);
+                result = deductionRecordService.updateDeductionRecordSystemManaged(payload);
             } else {
                 log.log(Level.WARNING, "Unsupported DeductionRecord action: {0}", action);
                 return;

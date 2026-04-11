@@ -87,6 +87,110 @@ public class PaymentRecordController {
         }
     }
 
+    @PostMapping("/me/{paymentId}/confirm")
+    @RolesAllowed({"USER"})
+    @Operation(summary = "Confirm Current User Payment")
+    public ResponseEntity<PaymentRecord> confirmCurrentUserPayment(@PathVariable Long paymentId,
+                                                                   @RequestBody CurrentUserPaymentConfirmationRequest request,
+                                                                   @RequestHeader(value = "Idempotency-Key", required = false)
+                                                                   String idempotencyKey) {
+        boolean useKey = hasKey(idempotencyKey);
+        try {
+            PaymentRecord confirmationDraft = new PaymentRecord();
+            confirmationDraft.setPaymentId(paymentId);
+            confirmationDraft.setTransactionId(request == null ? null : request.getTransactionId());
+            confirmationDraft.setReceiptUrl(request == null ? null : request.getReceiptUrl());
+            if (useKey) {
+                if (paymentRecordService.shouldSkipProcessing(idempotencyKey)) {
+                    return ResponseEntity.status(HttpStatus.ALREADY_REPORTED).build();
+                }
+                paymentRecordService.checkAndInsertIdempotency(idempotencyKey, confirmationDraft, "confirm");
+            }
+            PaymentRecord confirmed =
+                    currentUserTrafficSupportService.confirmCurrentUserPayment(paymentId, confirmationDraft);
+            if (useKey && confirmed.getPaymentId() != null) {
+                paymentRecordService.markHistorySuccess(idempotencyKey, confirmed.getPaymentId());
+            }
+            return ResponseEntity.ok(confirmed);
+        } catch (Exception ex) {
+            if (useKey) {
+                paymentRecordService.markHistoryFailure(idempotencyKey, ex.getMessage());
+            }
+            LOG.log(Level.WARNING, "Confirm current user payment failed", ex);
+            return ResponseEntity.status(resolveStatus(ex)).build();
+        }
+    }
+
+    @PostMapping("/me/{paymentId}/proof")
+    @RolesAllowed({"USER"})
+    @Operation(summary = "Update Current User Payment Proof")
+    public ResponseEntity<PaymentRecord> updateCurrentUserPaymentProof(@PathVariable Long paymentId,
+                                                                       @RequestBody CurrentUserPaymentProofRequest request,
+                                                                       @RequestHeader(value = "Idempotency-Key", required = false)
+                                                                       String idempotencyKey) {
+        boolean useKey = hasKey(idempotencyKey);
+        try {
+            PaymentRecord proofDraft = new PaymentRecord();
+            proofDraft.setPaymentId(paymentId);
+            proofDraft.setReceiptUrl(request == null ? null : request.getReceiptUrl());
+            if (useKey) {
+                if (paymentRecordService.shouldSkipProcessing(idempotencyKey)) {
+                    return ResponseEntity.status(HttpStatus.ALREADY_REPORTED).build();
+                }
+                paymentRecordService.checkAndInsertIdempotency(idempotencyKey, proofDraft, "proof");
+            }
+            PaymentRecord updated =
+                    currentUserTrafficSupportService.updateCurrentUserPaymentProof(paymentId, proofDraft);
+            if (useKey && updated.getPaymentId() != null) {
+                paymentRecordService.markHistorySuccess(idempotencyKey, updated.getPaymentId());
+            }
+            return ResponseEntity.ok(updated);
+        } catch (Exception ex) {
+            if (useKey) {
+                paymentRecordService.markHistoryFailure(idempotencyKey, ex.getMessage());
+            }
+            LOG.log(Level.WARNING, "Update current user payment proof failed", ex);
+            return ResponseEntity.status(resolveStatus(ex)).build();
+        }
+    }
+
+    @PostMapping("/{paymentId}/finance-review")
+    @Operation(summary = "Review Self-Service Payment")
+    public ResponseEntity<PaymentRecord> reviewPayment(@PathVariable Long paymentId,
+                                                       @RequestBody PaymentFinanceReviewRequest request,
+                                                       @RequestHeader(value = "Idempotency-Key", required = false)
+                                                       String idempotencyKey) {
+        boolean useKey = hasKey(idempotencyKey);
+        try {
+            PaymentRecord reviewDraft = new PaymentRecord();
+            reviewDraft.setPaymentId(paymentId);
+            if (request != null) {
+                reviewDraft.setRemarks("reviewResult=" + request.getReviewResult()
+                        + ",reviewOpinion=" + request.getReviewOpinion());
+            }
+            if (useKey) {
+                if (paymentRecordService.shouldSkipProcessing(idempotencyKey)) {
+                    return ResponseEntity.status(HttpStatus.ALREADY_REPORTED).build();
+                }
+                paymentRecordService.checkAndInsertIdempotency(idempotencyKey, reviewDraft, "review");
+            }
+            PaymentRecord reviewed = paymentRecordService.recordFinanceReview(
+                    paymentId,
+                    request == null ? null : request.getReviewResult(),
+                    request == null ? null : request.getReviewOpinion());
+            if (useKey && reviewed.getPaymentId() != null) {
+                paymentRecordService.markHistorySuccess(idempotencyKey, reviewed.getPaymentId());
+            }
+            return ResponseEntity.ok(reviewed);
+        } catch (Exception ex) {
+            if (useKey) {
+                paymentRecordService.markHistoryFailure(idempotencyKey, ex.getMessage());
+            }
+            LOG.log(Level.WARNING, "Review payment failed", ex);
+            return ResponseEntity.status(resolveStatus(ex)).build();
+        }
+    }
+
     @PostMapping
     @Operation(summary = "Create Payment")
     public ResponseEntity<PaymentRecord> createPayment(@RequestBody PaymentRecord request,
@@ -207,6 +311,13 @@ public class PaymentRecordController {
         return ResponseEntity.ok(paymentRecordService.searchByPaymentChannel(paymentChannel, page, size));
     }
 
+    @GetMapping("/review-tasks")
+    @Operation(summary = "List Finance Review Tasks")
+    public ResponseEntity<List<PaymentRecord>> listFinanceReviewTasks(@RequestParam(defaultValue = "1") int page,
+                                                                      @RequestParam(defaultValue = "20") int size) {
+        return ResponseEntity.ok(paymentRecordService.listFinanceReviewTasks(page, size));
+    }
+
     @GetMapping("/search/time-range")
     @Operation(summary = "Search By Time Range")
     public ResponseEntity<List<PaymentRecord>> searchByTimeRange(@RequestParam String startTime,
@@ -237,5 +348,59 @@ public class PaymentRecordController {
         return (ex instanceof IllegalArgumentException || ex instanceof IllegalStateException)
                 ? HttpStatus.BAD_REQUEST
                 : HttpStatus.INTERNAL_SERVER_ERROR;
+    }
+
+    public static class CurrentUserPaymentConfirmationRequest {
+        private String transactionId;
+        private String receiptUrl;
+
+        public String getTransactionId() {
+            return transactionId;
+        }
+
+        public void setTransactionId(String transactionId) {
+            this.transactionId = transactionId;
+        }
+
+        public String getReceiptUrl() {
+            return receiptUrl;
+        }
+
+        public void setReceiptUrl(String receiptUrl) {
+            this.receiptUrl = receiptUrl;
+        }
+    }
+
+    public static class PaymentFinanceReviewRequest {
+        private String reviewResult;
+        private String reviewOpinion;
+
+        public String getReviewResult() {
+            return reviewResult;
+        }
+
+        public void setReviewResult(String reviewResult) {
+            this.reviewResult = reviewResult;
+        }
+
+        public String getReviewOpinion() {
+            return reviewOpinion;
+        }
+
+        public void setReviewOpinion(String reviewOpinion) {
+            this.reviewOpinion = reviewOpinion;
+        }
+    }
+
+    public static class CurrentUserPaymentProofRequest {
+        private String receiptUrl;
+
+        public String getReceiptUrl() {
+            return receiptUrl;
+        }
+
+        public void setReceiptUrl(String receiptUrl) {
+            this.receiptUrl = receiptUrl;
+        }
     }
 }

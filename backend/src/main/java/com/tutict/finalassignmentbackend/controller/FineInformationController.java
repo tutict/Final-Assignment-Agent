@@ -1,6 +1,7 @@
 package com.tutict.finalassignmentbackend.controller;
 
 import com.tutict.finalassignmentbackend.entity.FineRecord;
+import com.tutict.finalassignmentbackend.service.CurrentUserTrafficSupportService;
 import com.tutict.finalassignmentbackend.service.FineRecordService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
@@ -25,7 +26,7 @@ import java.util.logging.Logger;
 
 @RestController
 @RequestMapping("/api/fines")
-@Tag(name = "Fine Management", description = "罚款信息管理接口")
+@Tag(name = "", description = " endpoints")
 @SecurityRequirement(name = "bearerAuth")
 @RolesAllowed({"SUPER_ADMIN", "ADMIN", "TRAFFIC_POLICE", "FINANCE"})
 public class FineInformationController {
@@ -33,13 +34,31 @@ public class FineInformationController {
     private static final Logger LOG = Logger.getLogger(FineInformationController.class.getName());
 
     private final FineRecordService fineRecordService;
+    private final CurrentUserTrafficSupportService currentUserTrafficSupportService;
 
-    public FineInformationController(FineRecordService fineRecordService) {
+    public FineInformationController(FineRecordService fineRecordService,
+                                     CurrentUserTrafficSupportService currentUserTrafficSupportService) {
         this.fineRecordService = fineRecordService;
+        this.currentUserTrafficSupportService = currentUserTrafficSupportService;
+    }
+
+    @GetMapping("/me")
+    @RolesAllowed({"SUPER_ADMIN", "ADMIN", "TRAFFIC_POLICE", "FINANCE", "USER"})
+    @Operation(summary = "List Current User Fines")
+    public ResponseEntity<List<FineRecord>> listCurrentUserFines(@RequestParam(defaultValue = "1") int page,
+                                                                 @RequestParam(defaultValue = "20") int size) {
+        try {
+            return ResponseEntity.ok(currentUserTrafficSupportService.listCurrentUserFines(page, size));
+        } catch (IllegalStateException ex) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        } catch (Exception ex) {
+            LOG.log(Level.WARNING, "List current user fines failed", ex);
+            return ResponseEntity.status(resolveStatus(ex)).build();
+        }
     }
 
     @PostMapping
-    @Operation(summary = "创建罚款记录")
+    @Operation(summary = "Create")
     public ResponseEntity<FineRecord> create(@RequestBody FineRecord request,
                                              @RequestHeader(value = "Idempotency-Key", required = false)
                                              String idempotencyKey) {
@@ -66,45 +85,22 @@ public class FineInformationController {
     }
 
     @PutMapping("/{fineId}")
-    @Operation(summary = "更新罚款记录")
+    @Operation(summary = "Update")
     public ResponseEntity<FineRecord> update(@PathVariable Long fineId,
                                              @RequestBody FineRecord request,
                                              @RequestHeader(value = "Idempotency-Key", required = false)
                                              String idempotencyKey) {
-        boolean useKey = hasKey(idempotencyKey);
-        try {
-            request.setFineId(fineId);
-            if (useKey) {
-                fineRecordService.checkAndInsertIdempotency(idempotencyKey, request, "update");
-            }
-            FineRecord updated = fineRecordService.updateFineRecord(request);
-            if (useKey && updated.getFineId() != null) {
-                fineRecordService.markHistorySuccess(idempotencyKey, updated.getFineId());
-            }
-            return ResponseEntity.ok(updated);
-        } catch (Exception ex) {
-            if (useKey) {
-                fineRecordService.markHistoryFailure(idempotencyKey, ex.getMessage());
-            }
-            LOG.log(Level.SEVERE, "Update fine failed", ex);
-            return ResponseEntity.status(resolveStatus(ex)).build();
-        }
+        return ResponseEntity.status(HttpStatus.METHOD_NOT_ALLOWED).build();
     }
 
     @DeleteMapping("/{fineId}")
-    @Operation(summary = "删除罚款记录")
+    @Operation(summary = "Delete")
     public ResponseEntity<Void> delete(@PathVariable Long fineId) {
-        try {
-            fineRecordService.deleteFineRecord(fineId);
-            return ResponseEntity.noContent().build();
-        } catch (Exception ex) {
-            LOG.log(Level.WARNING, "Delete fine failed", ex);
-            return ResponseEntity.status(resolveStatus(ex)).build();
-        }
+        return ResponseEntity.status(HttpStatus.METHOD_NOT_ALLOWED).build();
     }
 
     @GetMapping("/{fineId}")
-    @Operation(summary = "查询罚款详情")
+    @Operation(summary = "Get")
     public ResponseEntity<FineRecord> get(@PathVariable Long fineId) {
         try {
             FineRecord record = fineRecordService.findById(fineId);
@@ -116,10 +112,11 @@ public class FineInformationController {
     }
 
     @GetMapping
-    @Operation(summary = "查询全部罚款记录")
-    public ResponseEntity<List<FineRecord>> list() {
+    @Operation(summary = "List")
+    public ResponseEntity<List<FineRecord>> list(@RequestParam(defaultValue = "1") int page,
+                                                 @RequestParam(defaultValue = "20") int size) {
         try {
-            return ResponseEntity.ok(fineRecordService.findAll());
+            return ResponseEntity.ok(fineRecordService.listFines(page, size));
         } catch (Exception ex) {
             LOG.log(Level.WARNING, "List fines failed", ex);
             return ResponseEntity.status(resolveStatus(ex)).build();
@@ -127,7 +124,7 @@ public class FineInformationController {
     }
 
     @GetMapping("/offense/{offenseId}")
-    @Operation(summary = "按违法记录分页查询罚款")
+    @Operation(summary = "By Offense")
     public ResponseEntity<List<FineRecord>> byOffense(@PathVariable Long offenseId,
                                                       @RequestParam(defaultValue = "1") int page,
                                                       @RequestParam(defaultValue = "20") int size) {
@@ -140,7 +137,7 @@ public class FineInformationController {
     }
 
     @GetMapping("/search/handler")
-    @Operation(summary = "按处理人搜索罚款记录")
+    @Operation(summary = "Search By Handler")
     public ResponseEntity<List<FineRecord>> searchByHandler(@RequestParam String handler,
                                                             @RequestParam(defaultValue = "prefix") String mode,
                                                             @RequestParam(defaultValue = "1") int page,
@@ -157,7 +154,7 @@ public class FineInformationController {
     }
 
     @GetMapping("/search/status")
-    @Operation(summary = "按支付状态搜索罚款")
+    @Operation(summary = "Search By Payment Status")
     public ResponseEntity<List<FineRecord>> searchByPaymentStatus(@RequestParam String status,
                                                                   @RequestParam(defaultValue = "1") int page,
                                                                   @RequestParam(defaultValue = "20") int size) {
@@ -170,7 +167,7 @@ public class FineInformationController {
     }
 
     @GetMapping("/search/date-range")
-    @Operation(summary = "按开具日期搜索罚款")
+    @Operation(summary = "Search By Date Range")
     public ResponseEntity<List<FineRecord>> searchByDateRange(@RequestParam String startDate,
                                                               @RequestParam String endDate,
                                                               @RequestParam(defaultValue = "1") int page,

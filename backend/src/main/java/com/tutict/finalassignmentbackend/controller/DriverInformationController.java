@@ -1,6 +1,7 @@
 package com.tutict.finalassignmentbackend.controller;
 
 import com.tutict.finalassignmentbackend.entity.DriverInformation;
+import com.tutict.finalassignmentbackend.service.CurrentUserTrafficSupportService;
 import com.tutict.finalassignmentbackend.service.DriverInformationService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
@@ -25,7 +26,7 @@ import java.util.logging.Logger;
 
 @RestController
 @RequestMapping("/api/drivers")
-@Tag(name = "Driver Information", description = "驾驶员档案管理接口")
+@Tag(name = "Driver Information", description = "Driver Information endpoints")
 @SecurityRequirement(name = "bearerAuth")
 @RolesAllowed({"SUPER_ADMIN", "ADMIN", "TRAFFIC_POLICE"})
 public class DriverInformationController {
@@ -33,13 +34,45 @@ public class DriverInformationController {
     private static final Logger LOG = Logger.getLogger(DriverInformationController.class.getName());
 
     private final DriverInformationService driverInformationService;
+    private final CurrentUserTrafficSupportService currentUserTrafficSupportService;
 
-    public DriverInformationController(DriverInformationService driverInformationService) {
+    public DriverInformationController(DriverInformationService driverInformationService,
+                                       CurrentUserTrafficSupportService currentUserTrafficSupportService) {
         this.driverInformationService = driverInformationService;
+        this.currentUserTrafficSupportService = currentUserTrafficSupportService;
+    }
+
+    @GetMapping("/me")
+    @RolesAllowed({"SUPER_ADMIN", "ADMIN", "TRAFFIC_POLICE", "FINANCE", "APPEAL_REVIEWER", "USER"})
+    @Operation(summary = "Get Current Driver")
+    public ResponseEntity<DriverInformation> getCurrentDriver() {
+        try {
+            DriverInformation driver = currentUserTrafficSupportService.getCurrentDriver();
+            return driver == null ? ResponseEntity.notFound().build() : ResponseEntity.ok(driver);
+        } catch (IllegalStateException ex) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        } catch (Exception ex) {
+            LOG.log(Level.WARNING, "Get current driver failed", ex);
+            return ResponseEntity.status(resolveStatus(ex)).build();
+        }
+    }
+
+    @PutMapping("/me")
+    @RolesAllowed({"SUPER_ADMIN", "ADMIN", "TRAFFIC_POLICE", "FINANCE", "APPEAL_REVIEWER", "USER"})
+    @Operation(summary = "Upsert Current Driver")
+    public ResponseEntity<DriverInformation> upsertCurrentDriver(@RequestBody DriverInformation request) {
+        try {
+            return ResponseEntity.ok(currentUserTrafficSupportService.saveCurrentDriver(request));
+        } catch (IllegalStateException ex) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        } catch (Exception ex) {
+            LOG.log(Level.WARNING, "Upsert current driver failed", ex);
+            return ResponseEntity.status(resolveStatus(ex)).build();
+        }
     }
 
     @PostMapping
-    @Operation(summary = "创建驾驶员档案")
+    @Operation(summary = "Create")
     public ResponseEntity<DriverInformation> create(@RequestBody DriverInformation request,
                                                     @RequestHeader(value = "Idempotency-Key", required = false)
                                                     String idempotencyKey) {
@@ -66,7 +99,7 @@ public class DriverInformationController {
     }
 
     @PutMapping("/{driverId}")
-    @Operation(summary = "更新驾驶员档案")
+    @Operation(summary = "Update")
     public ResponseEntity<DriverInformation> update(@PathVariable Long driverId,
                                                     @RequestBody DriverInformation request,
                                                     @RequestHeader(value = "Idempotency-Key", required = false)
@@ -75,6 +108,9 @@ public class DriverInformationController {
         try {
             request.setDriverId(driverId);
             if (useKey) {
+                if (driverInformationService.shouldSkipProcessing(idempotencyKey)) {
+                    return ResponseEntity.status(HttpStatus.ALREADY_REPORTED).build();
+                }
                 driverInformationService.checkAndInsertIdempotency(idempotencyKey, request, "update");
             }
             DriverInformation updated = driverInformationService.updateDriver(request);
@@ -92,7 +128,7 @@ public class DriverInformationController {
     }
 
     @DeleteMapping("/{driverId}")
-    @Operation(summary = "删除驾驶员档案")
+    @Operation(summary = "Delete")
     public ResponseEntity<Void> delete(@PathVariable Long driverId) {
         try {
             driverInformationService.deleteDriver(driverId);
@@ -104,7 +140,7 @@ public class DriverInformationController {
     }
 
     @GetMapping("/{driverId}")
-    @Operation(summary = "查询驾驶员详情")
+    @Operation(summary = "Get")
     public ResponseEntity<DriverInformation> get(@PathVariable Long driverId) {
         try {
             DriverInformation driver = driverInformationService.getDriverById(driverId);
@@ -116,18 +152,32 @@ public class DriverInformationController {
     }
 
     @GetMapping
-    @Operation(summary = "查询全部驾驶员")
-    public ResponseEntity<List<DriverInformation>> list() {
+    @Operation(summary = "List")
+    public ResponseEntity<List<DriverInformation>> list(@RequestParam(defaultValue = "1") int page,
+                                                        @RequestParam(defaultValue = "20") int size) {
         try {
-            return ResponseEntity.ok(driverInformationService.getAllDrivers());
+            return ResponseEntity.ok(driverInformationService.listDrivers(page, size));
         } catch (Exception ex) {
             LOG.log(Level.WARNING, "List drivers failed", ex);
             return ResponseEntity.status(resolveStatus(ex)).build();
         }
     }
 
+    @GetMapping("/search")
+    @Operation(summary = "Search")
+    public ResponseEntity<List<DriverInformation>> search(@RequestParam String keywords,
+                                                          @RequestParam(defaultValue = "1") int page,
+                                                          @RequestParam(defaultValue = "20") int size) {
+        try {
+            return ResponseEntity.ok(driverInformationService.searchDrivers(keywords, page, size));
+        } catch (Exception ex) {
+            LOG.log(Level.WARNING, "Search drivers failed", ex);
+            return ResponseEntity.status(resolveStatus(ex)).build();
+        }
+    }
+
     @GetMapping("/search/id-card")
-    @Operation(summary = "按身份证号搜索驾驶员")
+    @Operation(summary = "Search By Id Card")
     public ResponseEntity<List<DriverInformation>> searchByIdCard(@RequestParam String keywords,
                                                                   @RequestParam(defaultValue = "1") int page,
                                                                   @RequestParam(defaultValue = "20") int size) {
@@ -140,7 +190,7 @@ public class DriverInformationController {
     }
 
     @GetMapping("/search/license")
-    @Operation(summary = "按驾驶证号搜索驾驶员")
+    @Operation(summary = "Search By License")
     public ResponseEntity<List<DriverInformation>> searchByLicense(@RequestParam String keywords,
                                                                    @RequestParam(defaultValue = "1") int page,
                                                                    @RequestParam(defaultValue = "20") int size) {
@@ -153,7 +203,8 @@ public class DriverInformationController {
     }
 
     @GetMapping("/search/name")
-    @Operation(summary = "按姓名搜索驾驶员")
+    @Operation(summary = "Search By Name")
+    @RolesAllowed({"SUPER_ADMIN", "ADMIN", "TRAFFIC_POLICE", "FINANCE"})
     public ResponseEntity<List<DriverInformation>> searchByName(@RequestParam String keywords,
                                                                 @RequestParam(defaultValue = "1") int page,
                                                                 @RequestParam(defaultValue = "20") int size) {

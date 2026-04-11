@@ -19,8 +19,8 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
- * 扣分状态机配置
- * 对应 deduction_record.status
+ * State machine configuration for deduction records.
+ * Maps directly to the {@code deduction_record.status} field.
  */
 @Configuration
 @EnableStateMachineFactory(name = "deductionStateMachineFactory")
@@ -48,28 +48,28 @@ public class DeductionStateMachineConfig extends StateMachineConfigurerAdapter<D
     public void configure(StateMachineTransitionConfigurer<DeductionState, DeductionEvent> transitions)
             throws Exception {
         transitions
-                // 生效 -> 取消
+                // Effective -> Cancelled
                 .withExternal()
                 .source(DeductionState.EFFECTIVE)
                 .target(DeductionState.CANCELLED)
                 .event(DeductionEvent.CANCEL)
                 .and()
 
-                // 生效 -> 已恢复
+                // Effective -> Restored
                 .withExternal()
                 .source(DeductionState.EFFECTIVE)
                 .target(DeductionState.RESTORED)
                 .event(DeductionEvent.RESTORE)
                 .and()
 
-                // 取消 -> 生效（重新生�?
+                // Cancelled -> Effective (reactivate)
                 .withExternal()
                 .source(DeductionState.CANCELLED)
                 .target(DeductionState.EFFECTIVE)
                 .event(DeductionEvent.REACTIVATE)
                 .and()
 
-                // 已恢复 -> 生效（重新生�?
+                // Restored -> Effective (reactivate)
                 .withExternal()
                 .source(DeductionState.RESTORED)
                 .target(DeductionState.EFFECTIVE)
@@ -82,14 +82,14 @@ public class DeductionStateMachineConfig extends StateMachineConfigurerAdapter<D
             @Override
             public void stateChanged(State<DeductionState, DeductionEvent> from,
                                      State<DeductionState, DeductionEvent> to) {
-                LOG.log(Level.INFO, "扣分记录状态变更: {0} -> {1}",
+                LOG.log(Level.INFO, "Deduction record state changed: {0} -> {1}",
                         new Object[]{from != null ? from.getId() : "null", to != null ? to.getId() : "null"});
             }
 
             @Override
             public void transition(Transition<DeductionState, DeductionEvent> transition) {
                 if (transition.getSource() != null && transition.getTarget() != null && transition.getTrigger() != null) {
-                    LOG.log(Level.INFO, "扣分记录状态迁移: {0} -> {1} via {2}",
+                    LOG.log(Level.INFO, "Deduction record transition: {0} -> {1} via {2}",
                             new Object[]{transition.getSource().getId(), transition.getTarget().getId(),
                                     transition.getTrigger().getEvent()});
                 }

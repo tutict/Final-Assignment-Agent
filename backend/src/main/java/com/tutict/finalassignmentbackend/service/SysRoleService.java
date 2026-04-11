@@ -22,7 +22,6 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.stream.Collectors;
@@ -64,20 +63,10 @@ public class SysRoleService {
             throw new RuntimeException("Duplicate sys role request detected");
         }
 
-        SysRequestHistory history = new SysRequestHistory();
-        history.setIdempotencyKey(idempotencyKey);
-        history.setBusinessStatus("PROCESSING");
-        history.setCreatedAt(LocalDateTime.now());
-        history.setUpdatedAt(LocalDateTime.now());
+        SysRequestHistory history = buildHistory(idempotencyKey, sysRole, action);
         sysRequestHistoryMapper.insert(history);
 
         sendKafkaMessage("sys_role_" + action, idempotencyKey, sysRole);
-
-        history.setBusinessStatus("SUCCESS");
-        history.setBusinessId(Optional.ofNullable(sysRole.getRoleId()).map(Integer::longValue).orElse(null));
-        history.setRequestParams("PENDING");
-        history.setUpdatedAt(LocalDateTime.now());
-        sysRequestHistoryMapper.updateById(history);
     }
 
     @Transactional
@@ -110,12 +99,7 @@ public class SysRoleService {
         if (rows == 0) {
             throw new IllegalStateException("SysRole not found for id=" + roleId);
         }
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                sysRoleSearchRepository.deleteById(roleId);
-            }
-        });
+        runAfterCommitOrNow(() -> sysRoleSearchRepository.deleteById(roleId));
     }
 
     @Transactional(readOnly = true)
@@ -145,6 +129,19 @@ public class SysRoleService {
         List<SysRole> fromDb = sysRoleMapper.selectList(null);
         syncBatchToIndexAfterCommit(fromDb);
         return fromDb;
+    }
+
+    @Transactional(readOnly = true)
+    @Cacheable(
+            cacheNames = CACHE_NAME,
+            key = "'all:' + #page + ':' + #size",
+            unless = "#result == null || #result.isEmpty()")
+    public List<SysRole> findAll(int page, int size) {
+        validatePagination(page, size);
+        QueryWrapper<SysRole> wrapper = new QueryWrapper<>();
+        wrapper.orderByAsc("sort_order")
+                .orderByAsc("role_id");
+        return fetchFromDatabase(wrapper, page, size);
     }
 
     @Cacheable(cacheNames = CACHE_NAME, key = "'code:' + #roleCode", unless = "#result == null")
@@ -276,7 +273,8 @@ public class SysRoleService {
         SysRequestHistory history = sysRequestHistoryMapper.selectByIdempotencyKey(idempotencyKey);
         return history != null
                 && "SUCCESS".equalsIgnoreCase(history.getBusinessStatus())
-                && "DONE".equalsIgnoreCase(history.getRequestParams());
+                && history.getBusinessId() != null
+                && history.getBusinessId() > 0;
     }
 
     public void markHistorySuccess(String idempotencyKey, Integer roleId) {
@@ -287,7 +285,6 @@ public class SysRoleService {
         }
         history.setBusinessStatus("SUCCESS");
         history.setBusinessId(roleId != null ? roleId.longValue() : null);
-        history.setRequestParams("DONE");
         history.setUpdatedAt(LocalDateTime.now());
         sysRequestHistoryMapper.updateById(history);
     }
@@ -299,9 +296,65 @@ public class SysRoleService {
             return;
         }
         history.setBusinessStatus("FAILED");
-        history.setRequestParams(truncate(reason));
+        history.setRequestParams(appendFailureReason(history.getRequestParams(), reason));
         history.setUpdatedAt(LocalDateTime.now());
         sysRequestHistoryMapper.updateById(history);
+    }
+
+    private SysRequestHistory buildHistory(String idempotencyKey, SysRole sysRole, String action) {
+        SysRequestHistory history = new SysRequestHistory();
+        history.setIdempotencyKey(idempotencyKey);
+        history.setRequestMethod("POST");
+        history.setRequestUrl("/api/sys/roles");
+        history.setRequestParams(buildRequestParams(sysRole));
+        history.setBusinessType(resolveBusinessType(action));
+        history.setBusinessStatus("PROCESSING");
+        history.setCreatedAt(LocalDateTime.now());
+        history.setUpdatedAt(LocalDateTime.now());
+        return history;
+    }
+
+    private String buildRequestParams(SysRole sysRole) {
+        if (sysRole == null) {
+            return null;
+        }
+        StringBuilder builder = new StringBuilder();
+        appendParam(builder, "roleCode", sysRole.getRoleCode());
+        appendParam(builder, "roleName", sysRole.getRoleName());
+        appendParam(builder, "roleType", sysRole.getRoleType());
+        appendParam(builder, "dataScope", sysRole.getDataScope());
+        appendParam(builder, "status", sysRole.getStatus());
+        return truncate(builder.toString());
+    }
+
+    private String resolveBusinessType(String action) {
+        String normalized = isBlank(action) ? "CREATE" : action.trim().toUpperCase();
+        return "SYS_ROLE_" + normalized;
+    }
+
+    private void appendParam(StringBuilder builder, String key, Object value) {
+        if (builder == null || value == null) {
+            return;
+        }
+        String normalized = value.toString().trim();
+        if (normalized.isEmpty()) {
+            return;
+        }
+        if (!builder.isEmpty()) {
+            builder.append(',');
+        }
+        builder.append(key).append('=').append(normalized);
+    }
+
+    private String appendFailureReason(String existing, String reason) {
+        String normalizedReason = truncate(reason);
+        if (isBlank(normalizedReason)) {
+            return existing;
+        }
+        if (isBlank(existing)) {
+            return "failure=" + normalizedReason;
+        }
+        return truncate(existing + ",failure=" + normalizedReason);
     }
 
     private void sendKafkaMessage(String topic, String idempotencyKey, SysRole sysRole) {
@@ -318,13 +371,10 @@ public class SysRoleService {
         if (sysRole == null) {
             return;
         }
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                SysRoleDocument doc = SysRoleDocument.fromEntity(sysRole);
-                if (doc != null) {
-                    sysRoleSearchRepository.save(doc);
-                }
+        runAfterCommitOrNow(() -> {
+            SysRoleDocument doc = SysRoleDocument.fromEntity(sysRole);
+            if (doc != null) {
+                sysRoleSearchRepository.save(doc);
             }
         });
     }
@@ -333,17 +383,14 @@ public class SysRoleService {
         if (records == null || records.isEmpty()) {
             return;
         }
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                List<SysRoleDocument> documents = records.stream()
-                        .filter(Objects::nonNull)
-                        .map(SysRoleDocument::fromEntity)
-                        .filter(Objects::nonNull)
-                        .collect(Collectors.toList());
-                if (!documents.isEmpty()) {
-                    sysRoleSearchRepository.saveAll(documents);
-                }
+        runAfterCommitOrNow(() -> {
+            List<SysRoleDocument> documents = records.stream()
+                    .filter(Objects::nonNull)
+                    .map(SysRoleDocument::fromEntity)
+                    .filter(Objects::nonNull)
+                    .collect(Collectors.toList());
+            if (!documents.isEmpty()) {
+                sysRoleSearchRepository.saveAll(documents);
             }
         });
     }
@@ -412,5 +459,21 @@ public class SysRoleService {
             return null;
         }
         return value.length() <= 500 ? value : value.substring(0, 500);
+    }
+
+    private void runAfterCommitOrNow(Runnable task) {
+        if (task == null) {
+            return;
+        }
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    task.run();
+                }
+            });
+            return;
+        }
+        task.run();
     }
 }

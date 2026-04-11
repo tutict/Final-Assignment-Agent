@@ -5,22 +5,38 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tutict.finalassignmentbackend.config.statemachine.states.OffenseProcessState;
 import com.tutict.finalassignmentbackend.config.websocket.WsAction;
+import com.tutict.finalassignmentbackend.entity.AppealRecord;
+import com.tutict.finalassignmentbackend.entity.DeductionRecord;
+import com.tutict.finalassignmentbackend.entity.FineRecord;
 import com.tutict.finalassignmentbackend.entity.OffenseRecord;
 import com.tutict.finalassignmentbackend.entity.SysRequestHistory;
+import com.tutict.finalassignmentbackend.entity.SysUser;
 import com.tutict.finalassignmentbackend.entity.elastic.OffenseRecordDocument;
+import com.tutict.finalassignmentbackend.mapper.AppealRecordMapper;
+import com.tutict.finalassignmentbackend.mapper.DeductionRecordMapper;
+import com.tutict.finalassignmentbackend.mapper.FineRecordMapper;
 import com.tutict.finalassignmentbackend.mapper.OffenseRecordMapper;
 import com.tutict.finalassignmentbackend.mapper.SysRequestHistoryMapper;
 import com.tutict.finalassignmentbackend.repository.OffenseInformationSearchRepository;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.security.authentication.AnonymousAuthenticationToken;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.web.context.request.RequestAttributes;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.time.format.DateTimeParseException;
 import java.util.List;
 import java.util.Objects;
@@ -36,20 +52,32 @@ public class OffenseRecordService {
     private static final String CACHE_NAME = "offenseRecordCache";
 
     private final OffenseRecordMapper offenseRecordMapper;
+    private final FineRecordMapper fineRecordMapper;
+    private final AppealRecordMapper appealRecordMapper;
+    private final DeductionRecordMapper deductionRecordMapper;
     private final SysRequestHistoryMapper sysRequestHistoryMapper;
     private final OffenseInformationSearchRepository offenseInformationSearchRepository;
+    private final SysUserService sysUserService;
     private final KafkaTemplate<String, String> kafkaTemplate;
     private final ObjectMapper objectMapper;
 
     @Autowired
     public OffenseRecordService(OffenseRecordMapper offenseRecordMapper,
+                                FineRecordMapper fineRecordMapper,
+                                AppealRecordMapper appealRecordMapper,
+                                DeductionRecordMapper deductionRecordMapper,
                                 SysRequestHistoryMapper sysRequestHistoryMapper,
                                 OffenseInformationSearchRepository offenseInformationSearchRepository,
+                                SysUserService sysUserService,
                                 KafkaTemplate<String, String> kafkaTemplate,
                                 ObjectMapper objectMapper) {
         this.offenseRecordMapper = offenseRecordMapper;
+        this.fineRecordMapper = fineRecordMapper;
+        this.appealRecordMapper = appealRecordMapper;
+        this.deductionRecordMapper = deductionRecordMapper;
         this.sysRequestHistoryMapper = sysRequestHistoryMapper;
         this.offenseInformationSearchRepository = offenseInformationSearchRepository;
+        this.sysUserService = sysUserService;
         this.kafkaTemplate = kafkaTemplate;
         this.objectMapper = objectMapper;
     }
@@ -63,25 +91,16 @@ public class OffenseRecordService {
             throw new RuntimeException("Duplicate offense record request detected");
         }
 
-        SysRequestHistory history = new SysRequestHistory();
-        history.setIdempotencyKey(idempotencyKey);
-        history.setBusinessStatus("PROCESSING");
-        history.setCreatedAt(LocalDateTime.now());
-        history.setUpdatedAt(LocalDateTime.now());
+        SysRequestHistory history = buildHistory(idempotencyKey, offenseRecord, action);
         sysRequestHistoryMapper.insert(history);
 
         sendKafkaMessage("offense_record_" + action, idempotencyKey, offenseRecord);
-
-        history.setBusinessStatus("SUCCESS");
-        history.setBusinessId(offenseRecord.getOffenseId());
-        history.setRequestParams("PENDING");
-        history.setUpdatedAt(LocalDateTime.now());
-        sysRequestHistoryMapper.updateById(history);
     }
 
     @Transactional
     @CacheEvict(cacheNames = CACHE_NAME, allEntries = true)
     public OffenseRecord createOffenseRecord(OffenseRecord offenseRecord) {
+        offenseRecord.setProcessStatus(OffenseProcessState.UNPROCESSED.getCode());
         validateOffenseRecord(offenseRecord);
         // 同步写库，成功后再异步刷新 ES
         offenseRecordMapper.insert(offenseRecord);
@@ -92,8 +111,14 @@ public class OffenseRecordService {
     @Transactional
     @CacheEvict(cacheNames = CACHE_NAME, allEntries = true)
     public OffenseRecord updateOffenseRecord(OffenseRecord offenseRecord) {
-        validateOffenseRecord(offenseRecord);
         requirePositive(offenseRecord.getOffenseId(), "Offense ID");
+        OffenseRecord existing = offenseRecordMapper.selectById(offenseRecord.getOffenseId());
+        if (existing == null) {
+            throw new IllegalStateException("No OffenseRecord updated for id=" + offenseRecord.getOffenseId());
+        }
+        offenseRecord.setProcessStatus(existing.getProcessStatus());
+        preserveEvidenceFieldsWhenDownstreamRecordsExist(offenseRecord, existing);
+        validateOffenseRecord(offenseRecord);
         int rows = offenseRecordMapper.updateById(offenseRecord);
         if (rows == 0) {
             throw new IllegalStateException("No OffenseRecord updated for id=" + offenseRecord.getOffenseId());
@@ -118,18 +143,48 @@ public class OffenseRecordService {
 
     @Transactional
     @CacheEvict(cacheNames = CACHE_NAME, allEntries = true)
+    public OffenseRecord updatePenaltySummary(Long offenseId,
+                                              java.math.BigDecimal fineAmount,
+                                              Integer deductedPoints,
+                                              Integer detentionDays) {
+        requirePositive(offenseId, "Offense ID");
+        OffenseRecord existing = offenseRecordMapper.selectById(offenseId);
+        if (existing == null) {
+            throw new IllegalStateException("OffenseRecord not found for id=" + offenseId);
+        }
+        if (fineAmount != null) {
+            requireNonNegative(fineAmount, "Fine amount");
+            existing.setFineAmount(fineAmount);
+        }
+        if (deductedPoints != null) {
+            requireNonNegative(deductedPoints, "Deducted points");
+            existing.setDeductedPoints(deductedPoints);
+        }
+        if (detentionDays != null) {
+            requireNonNegative(detentionDays, "Detention days");
+            existing.setDetentionDays(detentionDays);
+        }
+        existing.setUpdatedAt(LocalDateTime.now());
+        int rows = offenseRecordMapper.updateById(existing);
+        if (rows == 0) {
+            throw new IllegalStateException("No OffenseRecord updated for id=" + offenseId);
+        }
+        syncToIndexAfterCommit(existing);
+        return existing;
+    }
+
+    @Transactional
+    @CacheEvict(cacheNames = CACHE_NAME, allEntries = true)
     public void deleteOffenseRecord(Long offenseId) {
         requirePositive(offenseId, "Offense ID");
+        ensureNoDependentFineRecords(offenseId);
+        ensureNoDependentDeductions(offenseId);
+        ensureNoDependentAppeals(offenseId);
         int rows = offenseRecordMapper.deleteById(offenseId);
         if (rows == 0) {
             throw new IllegalStateException("No OffenseRecord deleted for id=" + offenseId);
         }
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                offenseInformationSearchRepository.deleteById(offenseId);
-            }
-        });
+        runAfterCommitOrNow(() -> offenseInformationSearchRepository.deleteById(offenseId));
     }
 
     @Transactional(readOnly = true)
@@ -159,6 +214,17 @@ public class OffenseRecordService {
         List<OffenseRecord> fromDb = offenseRecordMapper.selectList(null);
         syncBatchToIndexAfterCommit(fromDb);
         return fromDb;
+    }
+
+    @Transactional(readOnly = true)
+    @Cacheable(cacheNames = CACHE_NAME, key = "'page:' + #page + ':' + #size", unless = "#result == null || #result.isEmpty()")
+    public List<OffenseRecord> listOffenses(int page, int size) {
+        validatePagination(page, size);
+        QueryWrapper<OffenseRecord> wrapper = new QueryWrapper<>();
+        wrapper.orderByDesc("updated_at")
+                .orderByDesc("offense_time")
+                .orderByDesc("offense_id");
+        return fetchFromDatabase(wrapper, page, size);
     }
 
     @Cacheable(cacheNames = CACHE_NAME, key = "'driver:' + #driverId + ':' + #page + ':' + #size", unless = "#result == null || #result.isEmpty()")
@@ -201,6 +267,22 @@ public class OffenseRecordService {
         }
         QueryWrapper<OffenseRecord> wrapper = new QueryWrapper<>();
         wrapper.like("offense_code", offenseCode)
+                .orderByDesc("offense_time");
+        return fetchFromDatabase(wrapper, page, size);
+    }
+
+    @Cacheable(cacheNames = CACHE_NAME, key = "'type:' + #offenseType + ':' + #page + ':' + #size", unless = "#result == null || #result.isEmpty()")
+    public List<OffenseRecord> searchByOffenseType(String offenseType, int page, int size) {
+        if (isBlank(offenseType)) {
+            return List.of();
+        }
+        validatePagination(page, size);
+        List<OffenseRecord> index = mapHits(offenseInformationSearchRepository.searchByOffenseType(offenseType, pageable(page, size)));
+        if (!index.isEmpty()) {
+            return index;
+        }
+        QueryWrapper<OffenseRecord> wrapper = new QueryWrapper<>();
+        wrapper.like("offense_type", offenseType)
                 .orderByDesc("offense_time");
         return fetchFromDatabase(wrapper, page, size);
     }
@@ -250,9 +332,40 @@ public class OffenseRecordService {
             return index;
         }
         QueryWrapper<OffenseRecord> wrapper = new QueryWrapper<>();
-        wrapper.like("offense_number", offenseNumber)
+        wrapper.eq("offense_number", offenseNumber)
                 .orderByDesc("offense_time");
         return fetchFromDatabase(wrapper, page, size);
+    }
+
+    @Transactional(readOnly = true)
+    public List<OffenseRecord> findByDriverIds(Iterable<Long> driverIds, int page, int size) {
+        List<Long> normalizedIds = normalizePositiveIds(driverIds);
+        validatePagination(page, size);
+        if (normalizedIds.isEmpty()) {
+            return List.of();
+        }
+        QueryWrapper<OffenseRecord> wrapper = new QueryWrapper<>();
+        wrapper.in("driver_id", normalizedIds)
+                .orderByDesc("offense_time");
+        return fetchFromDatabase(wrapper, page, size);
+    }
+
+    @Transactional(readOnly = true)
+    public List<Long> findIdsByDriverIds(Iterable<Long> driverIds) {
+        List<Long> normalizedIds = normalizePositiveIds(driverIds);
+        if (normalizedIds.isEmpty()) {
+            return List.of();
+        }
+        QueryWrapper<OffenseRecord> wrapper = new QueryWrapper<>();
+        wrapper.select("offense_id")
+                .in("driver_id", normalizedIds)
+                .orderByDesc("offense_time");
+        return offenseRecordMapper.selectObjs(wrapper).stream()
+                .filter(Objects::nonNull)
+                .map(this::toLong)
+                .filter(Objects::nonNull)
+                .distinct()
+                .collect(Collectors.toList());
     }
 
     @Cacheable(cacheNames = CACHE_NAME, key = "'location:' + #offenseLocation + ':' + #page + ':' + #size", unless = "#result == null || #result.isEmpty()")
@@ -355,7 +468,8 @@ public class OffenseRecordService {
         SysRequestHistory history = sysRequestHistoryMapper.selectByIdempotencyKey(idempotencyKey);
         return history != null
                 && "SUCCESS".equalsIgnoreCase(history.getBusinessStatus())
-                && "DONE".equalsIgnoreCase(history.getRequestParams());
+                && history.getBusinessId() != null
+                && history.getBusinessId() > 0;
     }
 
     public void markHistorySuccess(String idempotencyKey, Long offenseId) {
@@ -366,7 +480,6 @@ public class OffenseRecordService {
         }
         history.setBusinessStatus("SUCCESS");
         history.setBusinessId(offenseId);
-        history.setRequestParams("DONE");
         history.setUpdatedAt(LocalDateTime.now());
         sysRequestHistoryMapper.updateById(history);
     }
@@ -378,9 +491,68 @@ public class OffenseRecordService {
             return;
         }
         history.setBusinessStatus("FAILED");
-        history.setRequestParams(truncate(reason));
+        history.setRequestParams(appendFailureReason(history.getRequestParams(), reason));
         history.setUpdatedAt(LocalDateTime.now());
         sysRequestHistoryMapper.updateById(history);
+    }
+
+    private SysRequestHistory buildHistory(String idempotencyKey, OffenseRecord offenseRecord, String action) {
+        SysRequestHistory history = new SysRequestHistory();
+        history.setIdempotencyKey(idempotencyKey);
+        history.setRequestMethod(resolveRequestMethod("POST"));
+        history.setRequestUrl(resolveRequestUrl("/api/offenses"));
+        history.setRequestParams(buildRequestParams(offenseRecord));
+        history.setBusinessType(resolveBusinessType(action));
+        history.setBusinessStatus("PROCESSING");
+        history.setUserId(resolveCurrentUserId());
+        history.setRequestIp(resolveRequestIp());
+        history.setCreatedAt(LocalDateTime.now());
+        history.setUpdatedAt(LocalDateTime.now());
+        return history;
+    }
+
+    private String buildRequestParams(OffenseRecord offenseRecord) {
+        if (offenseRecord == null) {
+            return null;
+        }
+        StringBuilder builder = new StringBuilder();
+        appendParam(builder, "driverId", offenseRecord.getDriverId());
+        appendParam(builder, "vehicleId", offenseRecord.getVehicleId());
+        appendParam(builder, "offenseCode", offenseRecord.getOffenseCode());
+        appendParam(builder, "offenseNumber", offenseRecord.getOffenseNumber());
+        appendParam(builder, "offenseTime", offenseRecord.getOffenseTime());
+        appendParam(builder, "offenseLocation", offenseRecord.getOffenseLocation());
+        return truncate(builder.toString());
+    }
+
+    private String resolveBusinessType(String action) {
+        String normalized = isBlank(action) ? "CREATE" : action.trim().toUpperCase();
+        return "OFFENSE_" + normalized;
+    }
+
+    private void appendParam(StringBuilder builder, String key, Object value) {
+        if (builder == null || value == null) {
+            return;
+        }
+        String normalized = value.toString().trim();
+        if (normalized.isEmpty()) {
+            return;
+        }
+        if (!builder.isEmpty()) {
+            builder.append(',');
+        }
+        builder.append(key).append('=').append(normalized);
+    }
+
+    private String appendFailureReason(String existing, String reason) {
+        String normalizedReason = truncate(reason);
+        if (isBlank(normalizedReason)) {
+            return existing;
+        }
+        if (isBlank(existing)) {
+            return "failure=" + normalizedReason;
+        }
+        return truncate(existing + ",failure=" + normalizedReason);
     }
 
     private void sendKafkaMessage(String topic, String idempotencyKey, OffenseRecord offenseRecord) {
@@ -397,34 +569,26 @@ public class OffenseRecordService {
         if (offenseRecord == null) {
             return;
         }
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                OffenseRecordDocument doc = OffenseRecordDocument.fromEntity(offenseRecord);
-                if (doc != null) {
-                    offenseInformationSearchRepository.save(doc);
-                }
-            }
-        });
+        OffenseRecordDocument doc = OffenseRecordDocument.fromEntity(offenseRecord);
+        if (doc == null) {
+            return;
+        }
+        runAfterCommitOrNow(() -> offenseInformationSearchRepository.save(doc));
     }
 
     private void syncBatchToIndexAfterCommit(List<OffenseRecord> records) {
         if (records == null || records.isEmpty()) {
             return;
         }
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                List<OffenseRecordDocument> documents = records.stream()
-                        .filter(Objects::nonNull)
-                        .map(OffenseRecordDocument::fromEntity)
-                        .filter(Objects::nonNull)
-                        .collect(Collectors.toList());
-                if (!documents.isEmpty()) {
-                    offenseInformationSearchRepository.saveAll(documents);
-                }
-            }
-        });
+        List<OffenseRecordDocument> documents = records.stream()
+                .filter(Objects::nonNull)
+                .map(OffenseRecordDocument::fromEntity)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toList());
+        if (documents.isEmpty()) {
+            return;
+        }
+        runAfterCommitOrNow(() -> offenseInformationSearchRepository.saveAll(documents));
     }
 
     /**
@@ -454,6 +618,11 @@ public class OffenseRecordService {
 
     private void validateOffenseRecord(OffenseRecord offenseRecord) {
         Objects.requireNonNull(offenseRecord, "OffenseRecord must not be null");
+        requirePositive(offenseRecord.getDriverId(), "Driver ID");
+        requirePositive(offenseRecord.getVehicleId(), "Vehicle ID");
+        requireNonNegative(offenseRecord.getFineAmount(), "Fine amount");
+        requireNonNegative(offenseRecord.getDeductedPoints(), "Deducted points");
+        requireNonNegative(offenseRecord.getDetentionDays(), "Detention days");
         if (offenseRecord.getOffenseTime() == null) {
             offenseRecord.setOffenseTime(LocalDateTime.now());
         }
@@ -462,15 +631,95 @@ public class OffenseRecordService {
         }
     }
 
+    private void preserveEvidenceFieldsWhenDownstreamRecordsExist(OffenseRecord offenseRecord, OffenseRecord existing) {
+        if (offenseRecord == null || existing == null || !hasDependentBusinessRecords(existing.getOffenseId())) {
+            return;
+        }
+        offenseRecord.setOffenseCode(existing.getOffenseCode());
+        offenseRecord.setOffenseNumber(existing.getOffenseNumber());
+        offenseRecord.setOffenseTime(existing.getOffenseTime());
+        offenseRecord.setOffenseLocation(existing.getOffenseLocation());
+        offenseRecord.setOffenseProvince(existing.getOffenseProvince());
+        offenseRecord.setOffenseCity(existing.getOffenseCity());
+        offenseRecord.setDriverId(existing.getDriverId());
+        offenseRecord.setVehicleId(existing.getVehicleId());
+        offenseRecord.setOffenseDescription(existing.getOffenseDescription());
+        offenseRecord.setEvidenceType(existing.getEvidenceType());
+        offenseRecord.setEvidenceUrls(existing.getEvidenceUrls());
+        offenseRecord.setEnforcementAgency(existing.getEnforcementAgency());
+        offenseRecord.setEnforcementOfficer(existing.getEnforcementOfficer());
+        offenseRecord.setEnforcementDevice(existing.getEnforcementDevice());
+        offenseRecord.setFineAmount(existing.getFineAmount());
+        offenseRecord.setDeductedPoints(existing.getDeductedPoints());
+        offenseRecord.setDetentionDays(existing.getDetentionDays());
+    }
+
+    private boolean hasDependentBusinessRecords(Long offenseId) {
+        if (offenseId == null || offenseId <= 0) {
+            return false;
+        }
+        return hasDependentFineRecords(offenseId)
+                || hasDependentDeductions(offenseId)
+                || hasDependentAppeals(offenseId);
+    }
+
+    private boolean hasDependentFineRecords(Long offenseId) {
+        QueryWrapper<FineRecord> wrapper = new QueryWrapper<>();
+        wrapper.eq("offense_id", offenseId);
+        return fineRecordMapper.selectCount(wrapper) > 0;
+    }
+
+    private boolean hasDependentAppeals(Long offenseId) {
+        QueryWrapper<AppealRecord> wrapper = new QueryWrapper<>();
+        wrapper.eq("offense_id", offenseId);
+        return appealRecordMapper.selectCount(wrapper) > 0;
+    }
+
+    private boolean hasDependentDeductions(Long offenseId) {
+        QueryWrapper<DeductionRecord> wrapper = new QueryWrapper<>();
+        wrapper.eq("offense_id", offenseId);
+        return deductionRecordMapper.selectCount(wrapper) > 0;
+    }
+
     private void validatePagination(int page, int size) {
         if (page < 1 || size < 1) {
             throw new IllegalArgumentException("Page must be >= 1 and size must be >= 1");
         }
     }
 
+    private List<Long> normalizePositiveIds(Iterable<Long> ids) {
+        LinkedHashSet<Long> normalized = new LinkedHashSet<>();
+        if (ids != null) {
+            for (Long id : ids) {
+                if (id != null && id > 0) {
+                    normalized.add(id);
+                }
+            }
+        }
+        return new ArrayList<>(normalized);
+    }
+
+    private Long toLong(Object value) {
+        if (value instanceof Number number) {
+            return number.longValue();
+        }
+        try {
+            return value == null ? null : Long.parseLong(value.toString());
+        } catch (NumberFormatException ex) {
+            log.log(Level.WARNING, "Failed to convert offense id value: " + value, ex);
+            return null;
+        }
+    }
+
     private void requirePositive(Number number, String fieldName) {
         if (number == null || number.longValue() <= 0) {
             throw new IllegalArgumentException(fieldName + " must be greater than zero");
+        }
+    }
+
+    private void requireNonNegative(Number number, String fieldName) {
+        if (number != null && number.doubleValue() < 0) {
+            throw new IllegalArgumentException(fieldName + " must not be negative");
         }
     }
 
@@ -495,5 +744,93 @@ public class OffenseRecordService {
             return null;
         }
         return value.length() <= 500 ? value : value.substring(0, 500);
+    }
+
+    private String resolveRequestMethod(String fallback) {
+        RequestAttributes requestAttributes = RequestContextHolder.getRequestAttributes();
+        if (!(requestAttributes instanceof ServletRequestAttributes servletRequestAttributes)) {
+            return fallback;
+        }
+        HttpServletRequest request = servletRequestAttributes.getRequest();
+        if (request == null || isBlank(request.getMethod())) {
+            return fallback;
+        }
+        return request.getMethod().trim().toUpperCase();
+    }
+
+    private String resolveRequestUrl(String fallback) {
+        RequestAttributes requestAttributes = RequestContextHolder.getRequestAttributes();
+        if (!(requestAttributes instanceof ServletRequestAttributes servletRequestAttributes)) {
+            return fallback;
+        }
+        HttpServletRequest request = servletRequestAttributes.getRequest();
+        if (request == null || isBlank(request.getRequestURI())) {
+            return fallback;
+        }
+        return request.getRequestURI().trim();
+    }
+
+    private Long resolveCurrentUserId() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication == null
+                || !authentication.isAuthenticated()
+                || authentication instanceof AnonymousAuthenticationToken
+                || isBlank(authentication.getName())) {
+            return null;
+        }
+        SysUser user = sysUserService.findByUsername(authentication.getName());
+        return user == null ? null : user.getUserId();
+    }
+
+    private String resolveRequestIp() {
+        RequestAttributes requestAttributes = RequestContextHolder.getRequestAttributes();
+        if (!(requestAttributes instanceof ServletRequestAttributes servletRequestAttributes)) {
+            return null;
+        }
+        HttpServletRequest request = servletRequestAttributes.getRequest();
+        if (request == null) {
+            return null;
+        }
+        String forwardedFor = request.getHeader("X-Forwarded-For");
+        if (!isBlank(forwardedFor)) {
+            return forwardedFor.split(",")[0].trim();
+        }
+        String realIp = request.getHeader("X-Real-IP");
+        if (!isBlank(realIp)) {
+            return realIp.trim();
+        }
+        String remoteAddr = request.getRemoteAddr();
+        return isBlank(remoteAddr) ? null : remoteAddr.trim();
+    }
+
+    private void ensureNoDependentFineRecords(Long offenseId) {
+        if (hasDependentFineRecords(offenseId)) {
+            throw new IllegalStateException("Cannot delete offense while fine records still exist");
+        }
+    }
+
+    private void ensureNoDependentAppeals(Long offenseId) {
+        if (hasDependentAppeals(offenseId)) {
+            throw new IllegalStateException("Cannot delete offense while appeal records still exist");
+        }
+    }
+
+    private void ensureNoDependentDeductions(Long offenseId) {
+        if (hasDependentDeductions(offenseId)) {
+            throw new IllegalStateException("Cannot delete offense while deduction records still exist");
+        }
+    }
+
+    private void runAfterCommitOrNow(Runnable task) {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    task.run();
+                }
+            });
+            return;
+        }
+        task.run();
     }
 }

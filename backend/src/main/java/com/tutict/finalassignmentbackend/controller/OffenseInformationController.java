@@ -1,6 +1,7 @@
 package com.tutict.finalassignmentbackend.controller;
 
 import com.tutict.finalassignmentbackend.entity.OffenseRecord;
+import com.tutict.finalassignmentbackend.service.CurrentUserTrafficSupportService;
 import com.tutict.finalassignmentbackend.service.OffenseRecordService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
@@ -25,7 +26,7 @@ import java.util.logging.Logger;
 
 @RestController
 @RequestMapping("/api/offenses")
-@Tag(name = "Offense Management", description = "交通违法记录管理接口")
+@Tag(name = "Offense Management", description = "Offense Management endpoints")
 @SecurityRequirement(name = "bearerAuth")
 @RolesAllowed({"SUPER_ADMIN", "ADMIN", "TRAFFIC_POLICE", "APPEAL_REVIEWER"})
 public class OffenseInformationController {
@@ -33,13 +34,32 @@ public class OffenseInformationController {
     private static final Logger LOG = Logger.getLogger(OffenseInformationController.class.getName());
 
     private final OffenseRecordService offenseRecordService;
+    private final CurrentUserTrafficSupportService currentUserTrafficSupportService;
 
-    public OffenseInformationController(OffenseRecordService offenseRecordService) {
+    public OffenseInformationController(OffenseRecordService offenseRecordService,
+                                       CurrentUserTrafficSupportService currentUserTrafficSupportService) {
         this.offenseRecordService = offenseRecordService;
+        this.currentUserTrafficSupportService = currentUserTrafficSupportService;
+    }
+
+    @GetMapping("/me")
+    @RolesAllowed({"SUPER_ADMIN", "ADMIN", "TRAFFIC_POLICE", "APPEAL_REVIEWER", "USER"})
+    @Operation(summary = "List Current User Offenses")
+    public ResponseEntity<List<OffenseRecord>> listCurrentUserOffenses(@RequestParam(defaultValue = "1") int page,
+                                                                       @RequestParam(defaultValue = "20") int size) {
+        try {
+            return ResponseEntity.ok(currentUserTrafficSupportService.listCurrentUserOffenses(page, size));
+        } catch (IllegalStateException ex) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        } catch (Exception ex) {
+            LOG.log(Level.WARNING, "List current user offenses failed", ex);
+            return ResponseEntity.status(resolveStatus(ex)).build();
+        }
     }
 
     @PostMapping
-    @Operation(summary = "创建违法记录")
+    @Operation(summary = "Create")
+    @RolesAllowed({"SUPER_ADMIN", "ADMIN", "TRAFFIC_POLICE"})
     public ResponseEntity<OffenseRecord> create(@RequestBody OffenseRecord request,
                                                 @RequestHeader(value = "Idempotency-Key", required = false)
                                                 String idempotencyKey) {
@@ -66,7 +86,8 @@ public class OffenseInformationController {
     }
 
     @PutMapping("/{offenseId}")
-    @Operation(summary = "更新违法记录")
+    @Operation(summary = "Update")
+    @RolesAllowed({"SUPER_ADMIN", "ADMIN", "TRAFFIC_POLICE"})
     public ResponseEntity<OffenseRecord> update(@PathVariable Long offenseId,
                                                 @RequestBody OffenseRecord request,
                                                 @RequestHeader(value = "Idempotency-Key", required = false)
@@ -75,6 +96,9 @@ public class OffenseInformationController {
         try {
             request.setOffenseId(offenseId);
             if (useKey) {
+                if (offenseRecordService.shouldSkipProcessing(idempotencyKey)) {
+                    return ResponseEntity.status(HttpStatus.ALREADY_REPORTED).build();
+                }
                 offenseRecordService.checkAndInsertIdempotency(idempotencyKey, request, "update");
             }
             OffenseRecord updated = offenseRecordService.updateOffenseRecord(request);
@@ -92,7 +116,8 @@ public class OffenseInformationController {
     }
 
     @DeleteMapping("/{offenseId}")
-    @Operation(summary = "删除违法记录")
+    @Operation(summary = "Delete")
+    @RolesAllowed({"SUPER_ADMIN", "ADMIN", "TRAFFIC_POLICE"})
     public ResponseEntity<Void> delete(@PathVariable Long offenseId) {
         try {
             offenseRecordService.deleteOffenseRecord(offenseId);
@@ -104,7 +129,7 @@ public class OffenseInformationController {
     }
 
     @GetMapping("/{offenseId}")
-    @Operation(summary = "查询违法详情")
+    @Operation(summary = "Get")
     public ResponseEntity<OffenseRecord> get(@PathVariable Long offenseId) {
         try {
             OffenseRecord record = offenseRecordService.findById(offenseId);
@@ -116,10 +141,11 @@ public class OffenseInformationController {
     }
 
     @GetMapping
-    @Operation(summary = "查询全部违法记录")
-    public ResponseEntity<List<OffenseRecord>> list() {
+    @Operation(summary = "List")
+    public ResponseEntity<List<OffenseRecord>> list(@RequestParam(defaultValue = "1") int page,
+                                                    @RequestParam(defaultValue = "20") int size) {
         try {
-            return ResponseEntity.ok(offenseRecordService.findAll());
+            return ResponseEntity.ok(offenseRecordService.listOffenses(page, size));
         } catch (Exception ex) {
             LOG.log(Level.WARNING, "List offenses failed", ex);
             return ResponseEntity.status(resolveStatus(ex)).build();
@@ -127,7 +153,8 @@ public class OffenseInformationController {
     }
 
     @GetMapping("/driver/{driverId}")
-    @Operation(summary = "按驾驶证分页查询违法")
+    @Operation(summary = "By Driver")
+    @RolesAllowed({"SUPER_ADMIN", "ADMIN", "TRAFFIC_POLICE", "APPEAL_REVIEWER", "FINANCE"})
     public ResponseEntity<List<OffenseRecord>> byDriver(@PathVariable Long driverId,
                                                         @RequestParam(defaultValue = "1") int page,
                                                         @RequestParam(defaultValue = "20") int size) {
@@ -140,7 +167,8 @@ public class OffenseInformationController {
     }
 
     @GetMapping("/vehicle/{vehicleId}")
-    @Operation(summary = "按车辆分页查询违法")
+    @Operation(summary = "By Vehicle")
+    @RolesAllowed({"SUPER_ADMIN", "ADMIN", "TRAFFIC_POLICE", "APPEAL_REVIEWER", "FINANCE"})
     public ResponseEntity<List<OffenseRecord>> byVehicle(@PathVariable Long vehicleId,
                                                          @RequestParam(defaultValue = "1") int page,
                                                          @RequestParam(defaultValue = "20") int size) {
@@ -153,7 +181,7 @@ public class OffenseInformationController {
     }
 
     @GetMapping("/search/code")
-    @Operation(summary = "按违法代码搜索")
+    @Operation(summary = "Search By Code")
     public ResponseEntity<List<OffenseRecord>> searchByCode(@RequestParam String offenseCode,
                                                             @RequestParam(defaultValue = "1") int page,
                                                             @RequestParam(defaultValue = "20") int size) {
@@ -165,13 +193,28 @@ public class OffenseInformationController {
         }
     }
 
+    @GetMapping("/search/type")
+    @Operation(summary = "Search By Type")
+    public ResponseEntity<List<OffenseRecord>> searchByType(@RequestParam String offenseType,
+                                                            @RequestParam(defaultValue = "1") int page,
+                                                            @RequestParam(defaultValue = "20") int size) {
+        try {
+            return ResponseEntity.ok(offenseRecordService.searchByOffenseType(offenseType, page, size));
+        } catch (Exception ex) {
+            LOG.log(Level.WARNING, "Search offense by type failed", ex);
+            return ResponseEntity.status(resolveStatus(ex)).build();
+        }
+    }
+
     @GetMapping("/search/status")
-    @Operation(summary = "按处理状态搜索")
-    public ResponseEntity<List<OffenseRecord>> searchByStatus(@RequestParam String status,
+    @Operation(summary = "Search By Status")
+    public ResponseEntity<List<OffenseRecord>> searchByStatus(@RequestParam(required = false) String status,
+                                                              @RequestParam(required = false) String processStatus,
                                                               @RequestParam(defaultValue = "1") int page,
                                                               @RequestParam(defaultValue = "20") int size) {
         try {
-            return ResponseEntity.ok(offenseRecordService.searchByProcessStatus(status, page, size));
+            return ResponseEntity.ok(
+                    offenseRecordService.searchByProcessStatus(firstNonBlank(status, processStatus), page, size));
         } catch (Exception ex) {
             LOG.log(Level.WARNING, "Search offense by status failed", ex);
             return ResponseEntity.status(resolveStatus(ex)).build();
@@ -179,7 +222,7 @@ public class OffenseInformationController {
     }
 
     @GetMapping("/search/time-range")
-    @Operation(summary = "按违法时间范围搜索")
+    @Operation(summary = "Search By Time Range")
     public ResponseEntity<List<OffenseRecord>> searchByTimeRange(@RequestParam String startTime,
                                                                  @RequestParam String endTime,
                                                                  @RequestParam(defaultValue = "1") int page,
@@ -193,7 +236,7 @@ public class OffenseInformationController {
     }
 
     @GetMapping("/search/number")
-    @Operation(summary = "按违法编号搜索")
+    @Operation(summary = "Search By Number")
     public ResponseEntity<List<OffenseRecord>> searchByNumber(@RequestParam String offenseNumber,
                                                               @RequestParam(defaultValue = "1") int page,
                                                               @RequestParam(defaultValue = "20") int size) {
@@ -206,7 +249,7 @@ public class OffenseInformationController {
     }
 
     @GetMapping("/search/location")
-    @Operation(summary = "Search offenses by location")
+    @Operation(summary = "Search By Location")
     public ResponseEntity<List<OffenseRecord>> searchByLocation(@RequestParam String offenseLocation,
                                                                  @RequestParam(defaultValue = "1") int page,
                                                                  @RequestParam(defaultValue = "20") int size) {
@@ -219,7 +262,7 @@ public class OffenseInformationController {
     }
 
     @GetMapping("/search/province")
-    @Operation(summary = "Search offenses by province")
+    @Operation(summary = "Search By Province")
     public ResponseEntity<List<OffenseRecord>> searchByProvince(@RequestParam String offenseProvince,
                                                                  @RequestParam(defaultValue = "1") int page,
                                                                  @RequestParam(defaultValue = "20") int size) {
@@ -232,7 +275,7 @@ public class OffenseInformationController {
     }
 
     @GetMapping("/search/city")
-    @Operation(summary = "Search offenses by city")
+    @Operation(summary = "Search By City")
     public ResponseEntity<List<OffenseRecord>> searchByCity(@RequestParam String offenseCity,
                                                             @RequestParam(defaultValue = "1") int page,
                                                             @RequestParam(defaultValue = "20") int size) {
@@ -245,7 +288,7 @@ public class OffenseInformationController {
     }
 
     @GetMapping("/search/notification")
-    @Operation(summary = "Search offenses by notification status")
+    @Operation(summary = "Search By Notification")
     public ResponseEntity<List<OffenseRecord>> searchByNotification(@RequestParam String notificationStatus,
                                                                     @RequestParam(defaultValue = "1") int page,
                                                                     @RequestParam(defaultValue = "20") int size) {
@@ -258,7 +301,7 @@ public class OffenseInformationController {
     }
 
     @GetMapping("/search/agency")
-    @Operation(summary = "Search offenses by enforcement agency")
+    @Operation(summary = "Search By Agency")
     public ResponseEntity<List<OffenseRecord>> searchByAgency(@RequestParam String enforcementAgency,
                                                               @RequestParam(defaultValue = "1") int page,
                                                               @RequestParam(defaultValue = "20") int size) {
@@ -271,7 +314,7 @@ public class OffenseInformationController {
     }
 
     @GetMapping("/search/fine-range")
-    @Operation(summary = "Search offenses by fine amount range")
+    @Operation(summary = "Search By Fine Range")
     public ResponseEntity<List<OffenseRecord>> searchByFineRange(@RequestParam double minAmount,
                                                                  @RequestParam double maxAmount,
                                                                  @RequestParam(defaultValue = "1") int page,
@@ -286,6 +329,18 @@ public class OffenseInformationController {
 
     private boolean hasKey(String value) {
         return value != null && !value.isBlank();
+    }
+
+    private String firstNonBlank(String... values) {
+        if (values == null) {
+            return null;
+        }
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                return value;
+            }
+        }
+        return null;
     }
 
     private HttpStatus resolveStatus(Exception ex) {

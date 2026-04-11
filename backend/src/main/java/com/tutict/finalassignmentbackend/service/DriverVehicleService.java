@@ -4,14 +4,17 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tutict.finalassignmentbackend.config.websocket.WsAction;
+import com.tutict.finalassignmentbackend.entity.DriverInformation;
 import com.tutict.finalassignmentbackend.entity.DriverVehicle;
 import com.tutict.finalassignmentbackend.entity.SysRequestHistory;
 import com.tutict.finalassignmentbackend.entity.VehicleInformation;
 import com.tutict.finalassignmentbackend.entity.elastic.DriverVehicleDocument;
+import com.tutict.finalassignmentbackend.mapper.DriverInformationMapper;
 import com.tutict.finalassignmentbackend.mapper.DriverVehicleMapper;
 import com.tutict.finalassignmentbackend.mapper.SysRequestHistoryMapper;
 import com.tutict.finalassignmentbackend.mapper.VehicleInformationMapper;
 import com.tutict.finalassignmentbackend.repository.DriverVehicleSearchRepository;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
@@ -24,6 +27,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.web.context.request.RequestAttributes;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -41,6 +47,7 @@ public class DriverVehicleService {
     private static final String CACHE_NAME = "driverVehicleCache";
 
     private final DriverVehicleMapper driverVehicleMapper;
+    private final DriverInformationMapper driverInformationMapper;
     private final SysRequestHistoryMapper sysRequestHistoryMapper;
     private final DriverVehicleSearchRepository driverVehicleSearchRepository;
     private final VehicleInformationMapper vehicleInformationMapper;
@@ -49,12 +56,14 @@ public class DriverVehicleService {
 
     @Autowired
     public DriverVehicleService(DriverVehicleMapper driverVehicleMapper,
+                                DriverInformationMapper driverInformationMapper,
                                 SysRequestHistoryMapper sysRequestHistoryMapper,
                                 DriverVehicleSearchRepository driverVehicleSearchRepository,
                                 VehicleInformationMapper vehicleInformationMapper,
                                 KafkaTemplate<String, String> kafkaTemplate,
                                 ObjectMapper objectMapper) {
         this.driverVehicleMapper = driverVehicleMapper;
+        this.driverInformationMapper = driverInformationMapper;
         this.sysRequestHistoryMapper = sysRequestHistoryMapper;
         this.driverVehicleSearchRepository = driverVehicleSearchRepository;
         this.vehicleInformationMapper = vehicleInformationMapper;
@@ -73,20 +82,10 @@ public class DriverVehicleService {
             throw new RuntimeException("Duplicate driver-vehicle request detected");
         }
 
-        SysRequestHistory history = new SysRequestHistory();
-        history.setIdempotencyKey(idempotencyKey);
-        history.setBusinessStatus("PROCESSING");
-        history.setCreatedAt(LocalDateTime.now());
-        history.setUpdatedAt(LocalDateTime.now());
+        SysRequestHistory history = buildHistory(idempotencyKey, binding, action);
         sysRequestHistoryMapper.insert(history);
 
         sendKafkaMessage("driver_vehicle_" + action, idempotencyKey, binding);
-
-        history.setBusinessStatus("SUCCESS");
-        history.setBusinessId(binding.getId());
-        history.setRequestParams("PENDING");
-        history.setUpdatedAt(LocalDateTime.now());
-        sysRequestHistoryMapper.updateById(history);
     }
 
     @Transactional
@@ -121,12 +120,7 @@ public class DriverVehicleService {
         if (rows == 0) {
             throw new IllegalStateException("Driver-vehicle binding not found for id=" + id);
         }
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                driverVehicleSearchRepository.deleteById(id);
-            }
-        });
+        runAfterCommitOrNow(() -> driverVehicleSearchRepository.deleteById(id));
     }
 
     @Transactional(readOnly = true)
@@ -156,6 +150,19 @@ public class DriverVehicleService {
         List<DriverVehicle> fromDb = driverVehicleMapper.selectList(null);
         syncBatchToIndexAfterCommit(fromDb);
         return fromDb;
+    }
+
+    @Transactional(readOnly = true)
+    @Cacheable(
+            cacheNames = CACHE_NAME,
+            key = "'all:' + #page + ':' + #size",
+            unless = "#result == null || #result.isEmpty()")
+    public List<DriverVehicle> findAll(int page, int size) {
+        validatePagination(page, size);
+        QueryWrapper<DriverVehicle> wrapper = new QueryWrapper<>();
+        wrapper.orderByDesc("is_primary")
+                .orderByDesc("id");
+        return fetchFromDatabase(wrapper, page, size);
     }
 
     @Cacheable(cacheNames = CACHE_NAME, key = "'driver:' + #driverId + ':' + #page + ':' + #size", unless = "#result == null || #result.isEmpty()")
@@ -218,7 +225,8 @@ public class DriverVehicleService {
         SysRequestHistory history = sysRequestHistoryMapper.selectByIdempotencyKey(idempotencyKey);
         return history != null
                 && "SUCCESS".equalsIgnoreCase(history.getBusinessStatus())
-                && "DONE".equalsIgnoreCase(history.getRequestParams());
+                && history.getBusinessId() != null
+                && history.getBusinessId() > 0;
     }
 
     public void markHistorySuccess(String idempotencyKey, Long bindingId) {
@@ -229,7 +237,6 @@ public class DriverVehicleService {
         }
         history.setBusinessStatus("SUCCESS");
         history.setBusinessId(bindingId);
-        history.setRequestParams("DONE");
         history.setUpdatedAt(LocalDateTime.now());
         sysRequestHistoryMapper.updateById(history);
     }
@@ -241,9 +248,70 @@ public class DriverVehicleService {
             return;
         }
         history.setBusinessStatus("FAILED");
-        history.setRequestParams(truncate(reason));
+        history.setRequestParams(appendFailureReason(history.getRequestParams(), reason));
         history.setUpdatedAt(LocalDateTime.now());
         sysRequestHistoryMapper.updateById(history);
+    }
+
+    private SysRequestHistory buildHistory(String idempotencyKey, DriverVehicle binding, String action) {
+        SysRequestHistory history = new SysRequestHistory();
+        history.setIdempotencyKey(idempotencyKey);
+        history.setRequestMethod(resolveRequestMethod("POST"));
+        history.setRequestUrl(resolveRequestUrl(resolveDefaultRequestUrl(binding)));
+        history.setRequestParams(buildRequestParams(binding));
+        history.setBusinessType(resolveBusinessType(action));
+        history.setBusinessStatus("PROCESSING");
+        history.setRequestIp(resolveRequestIp());
+        history.setCreatedAt(LocalDateTime.now());
+        history.setUpdatedAt(LocalDateTime.now());
+        return history;
+    }
+
+    private String resolveDefaultRequestUrl(DriverVehicle binding) {
+        Long vehicleId = binding == null ? null : binding.getVehicleId();
+        return vehicleId == null ? "/api/vehicles/drivers" : "/api/vehicles/" + vehicleId + "/drivers";
+    }
+
+    private String buildRequestParams(DriverVehicle binding) {
+        if (binding == null) {
+            return null;
+        }
+        StringBuilder builder = new StringBuilder();
+        appendParam(builder, "driverId", binding.getDriverId());
+        appendParam(builder, "vehicleId", binding.getVehicleId());
+        appendParam(builder, "relationship", binding.getRelationship());
+        appendParam(builder, "isPrimary", binding.getIsPrimary());
+        return truncate(builder.toString());
+    }
+
+    private String resolveBusinessType(String action) {
+        String normalized = isBlank(action) ? "CREATE" : action.trim().toUpperCase();
+        return "DRIVER_VEHICLE_" + normalized;
+    }
+
+    private void appendParam(StringBuilder builder, String key, Object value) {
+        if (builder == null || value == null) {
+            return;
+        }
+        String normalized = value.toString().trim();
+        if (normalized.isEmpty()) {
+            return;
+        }
+        if (!builder.isEmpty()) {
+            builder.append(',');
+        }
+        builder.append(key).append('=').append(normalized);
+    }
+
+    private String appendFailureReason(String existing, String reason) {
+        String normalizedReason = truncate(reason);
+        if (isBlank(normalizedReason)) {
+            return existing;
+        }
+        if (isBlank(existing)) {
+            return "failure=" + normalizedReason;
+        }
+        return truncate(existing + ",failure=" + normalizedReason);
     }
 
     private void sendKafkaMessage(String topic, String idempotencyKey, DriverVehicle binding) {
@@ -260,13 +328,10 @@ public class DriverVehicleService {
         if (binding == null) {
             return;
         }
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                DriverVehicleDocument doc = DriverVehicleDocument.fromEntity(binding);
-                if (doc != null) {
-                    driverVehicleSearchRepository.save(doc);
-                }
+        runAfterCommitOrNow(() -> {
+            DriverVehicleDocument doc = DriverVehicleDocument.fromEntity(binding);
+            if (doc != null) {
+                driverVehicleSearchRepository.save(doc);
             }
         });
     }
@@ -275,19 +340,32 @@ public class DriverVehicleService {
         if (records == null || records.isEmpty()) {
             return;
         }
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                List<DriverVehicleDocument> documents = records.stream()
-                        .filter(Objects::nonNull)
-                        .map(DriverVehicleDocument::fromEntity)
-                        .filter(Objects::nonNull)
-                        .collect(Collectors.toList());
-                if (!documents.isEmpty()) {
-                    driverVehicleSearchRepository.saveAll(documents);
-                }
+        runAfterCommitOrNow(() -> {
+            List<DriverVehicleDocument> documents = records.stream()
+                    .filter(Objects::nonNull)
+                    .map(DriverVehicleDocument::fromEntity)
+                    .filter(Objects::nonNull)
+                    .collect(Collectors.toList());
+            if (!documents.isEmpty()) {
+                driverVehicleSearchRepository.saveAll(documents);
             }
         });
+    }
+
+    private void runAfterCommitOrNow(Runnable task) {
+        if (task == null) {
+            return;
+        }
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    task.run();
+                }
+            });
+            return;
+        }
+        task.run();
     }
 
     private List<DriverVehicle> fetchFromDatabase(QueryWrapper<DriverVehicle> wrapper, int page, int size) {
@@ -316,12 +394,32 @@ public class DriverVehicleService {
         Objects.requireNonNull(binding, "DriverVehicle must not be null");
         requirePositive(binding.getDriverId(), "Driver ID");
         requirePositive(binding.getVehicleId(), "Vehicle ID");
+        DriverInformation driver = driverInformationMapper.selectById(binding.getDriverId());
+        if (driver == null) {
+            throw new IllegalArgumentException("Driver does not exist: " + binding.getDriverId());
+        }
         VehicleInformation vehicle = vehicleInformationMapper.selectById(binding.getVehicleId());
         if (vehicle == null) {
             throw new IllegalArgumentException("Vehicle does not exist: " + binding.getVehicleId());
         }
+        if (binding.getId() != null) {
+            DriverVehicle existing = driverVehicleMapper.selectById(binding.getId());
+            if (existing != null) {
+                if (existing.getDriverId() != null
+                        && !Objects.equals(existing.getDriverId(), binding.getDriverId())) {
+                    throw new IllegalArgumentException("Driver ID cannot be changed for an existing binding");
+                }
+                if (existing.getVehicleId() != null
+                        && !Objects.equals(existing.getVehicleId(), binding.getVehicleId())) {
+                    throw new IllegalArgumentException("Vehicle ID cannot be changed for an existing binding");
+                }
+            }
+        }
         if (binding.getBindDate() == null) {
             binding.setBindDate(LocalDate.now());
+        }
+        if (binding.getUnbindDate() != null && binding.getUnbindDate().isBefore(binding.getBindDate())) {
+            throw new IllegalArgumentException("Unbind date cannot be before bind date");
         }
         if (binding.getIsPrimary() == null) {
             binding.setIsPrimary(false);
@@ -329,6 +427,7 @@ public class DriverVehicleService {
         if (isBlank(binding.getStatus())) {
             binding.setStatus("Active");
         }
+        ensureNoDuplicateActiveBinding(binding);
     }
 
     private void enforcePrimaryConstraints(DriverVehicle binding) {
@@ -339,10 +438,39 @@ public class DriverVehicleService {
         QueryWrapper<DriverVehicle> wrapper = new QueryWrapper<>();
         wrapper.eq("driver_id", binding.getDriverId())
                 .eq("is_primary", true);
-        DriverVehicle existing = driverVehicleMapper.selectOne(wrapper);
-        if (existing != null && !Objects.equals(existing.getId(), binding.getId())) {
-            log.log(Level.INFO, "Demoting existing primary binding {0} for driver {1}",
-                    new Object[]{existing.getId(), binding.getDriverId()});
+        demoteOtherPrimaryBindings("driver_id", binding.getDriverId(), binding.getId(), "driver");
+        demoteOtherPrimaryBindings("vehicle_id", binding.getVehicleId(), binding.getId(), "vehicle");
+    }
+
+    private void ensureNoDuplicateActiveBinding(DriverVehicle binding) {
+        QueryWrapper<DriverVehicle> wrapper = new QueryWrapper<>();
+        wrapper.eq("driver_id", binding.getDriverId())
+                .eq("vehicle_id", binding.getVehicleId());
+        List<DriverVehicle> existingBindings = driverVehicleMapper.selectList(wrapper);
+        for (DriverVehicle existing : existingBindings) {
+            if (existing == null || Objects.equals(existing.getId(), binding.getId())) {
+                continue;
+            }
+            if (!"Inactive".equalsIgnoreCase(trimToEmpty(existing.getStatus()))) {
+                throw new IllegalStateException("An active binding already exists for this driver and vehicle");
+            }
+        }
+    }
+
+    private void demoteOtherPrimaryBindings(String fieldName,
+                                            Long fieldValue,
+                                            Long currentBindingId,
+                                            String scope) {
+        QueryWrapper<DriverVehicle> wrapper = new QueryWrapper<>();
+        wrapper.eq(fieldName, fieldValue)
+                .eq("is_primary", true);
+        List<DriverVehicle> primaryBindings = driverVehicleMapper.selectList(wrapper);
+        for (DriverVehicle existing : primaryBindings) {
+            if (existing == null || Objects.equals(existing.getId(), currentBindingId)) {
+                continue;
+            }
+            log.log(Level.INFO, "Demoting existing primary binding {0} for {1} {2}",
+                    new Object[]{existing.getId(), scope, fieldValue});
             existing.setIsPrimary(false);
             driverVehicleMapper.updateById(existing);
             syncToIndexAfterCommit(existing);
@@ -365,10 +493,59 @@ public class DriverVehicleService {
         return value == null || value.trim().isEmpty();
     }
 
+    private String resolveRequestMethod(String fallback) {
+        RequestAttributes requestAttributes = RequestContextHolder.getRequestAttributes();
+        if (!(requestAttributes instanceof ServletRequestAttributes servletRequestAttributes)) {
+            return fallback;
+        }
+        HttpServletRequest request = servletRequestAttributes.getRequest();
+        if (request == null || isBlank(request.getMethod())) {
+            return fallback;
+        }
+        return request.getMethod().trim().toUpperCase();
+    }
+
+    private String resolveRequestUrl(String fallback) {
+        RequestAttributes requestAttributes = RequestContextHolder.getRequestAttributes();
+        if (!(requestAttributes instanceof ServletRequestAttributes servletRequestAttributes)) {
+            return fallback;
+        }
+        HttpServletRequest request = servletRequestAttributes.getRequest();
+        if (request == null || isBlank(request.getRequestURI())) {
+            return fallback;
+        }
+        return request.getRequestURI().trim();
+    }
+
+    private String resolveRequestIp() {
+        RequestAttributes requestAttributes = RequestContextHolder.getRequestAttributes();
+        if (!(requestAttributes instanceof ServletRequestAttributes servletRequestAttributes)) {
+            return null;
+        }
+        HttpServletRequest request = servletRequestAttributes.getRequest();
+        if (request == null) {
+            return null;
+        }
+        String forwardedFor = request.getHeader("X-Forwarded-For");
+        if (!isBlank(forwardedFor)) {
+            return forwardedFor.split(",")[0].trim();
+        }
+        String realIp = request.getHeader("X-Real-IP");
+        if (!isBlank(realIp)) {
+            return realIp.trim();
+        }
+        String remoteAddr = request.getRemoteAddr();
+        return isBlank(remoteAddr) ? null : remoteAddr.trim();
+    }
+
     private String truncate(String value) {
         if (value == null) {
             return null;
         }
         return value.length() <= 500 ? value : value.substring(0, 500);
+    }
+
+    private String trimToEmpty(String value) {
+        return value == null ? "" : value.trim();
     }
 }

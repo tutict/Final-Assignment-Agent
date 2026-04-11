@@ -34,7 +34,7 @@ import java.util.logging.Logger;
 
 @RestController
 @RequestMapping("/api/progress")
-@Tag(name = "Progress Tracker", description = "幂等请求进度跟踪接口")
+@Tag(name = "", description = " endpoints")
 @SecurityRequirement(name = "bearerAuth")
 @RolesAllowed({"SUPER_ADMIN", "ADMIN", "TRAFFIC_POLICE", "FINANCE", "APPEAL_REVIEWER"})
 public class ProgressItemController {
@@ -54,7 +54,7 @@ public class ProgressItemController {
     }
 
     @PostMapping
-    @Operation(summary = "创建进度记录")
+    @Operation(summary = "Create")
     public ResponseEntity<SysRequestHistory> create(@RequestBody SysRequestHistory request,
                                                     @RequestHeader(value = "Idempotency-Key", required = false)
                                                     String idempotencyKey) {
@@ -62,7 +62,7 @@ public class ProgressItemController {
     }
 
     @PutMapping("/{historyId}")
-    @Operation(summary = "更新进度记录")
+    @Operation(summary = "Update")
     public ResponseEntity<SysRequestHistory> update(@PathVariable Long historyId,
                                                     @RequestBody SysRequestHistory request,
                                                     @RequestHeader(value = "Idempotency-Key", required = false)
@@ -71,13 +71,13 @@ public class ProgressItemController {
     }
 
     @DeleteMapping("/{historyId}")
-    @Operation(summary = "删除进度记录")
+    @Operation(summary = "Delete")
     public ResponseEntity<Void> delete(@PathVariable Long historyId) {
         return ResponseEntity.status(HttpStatus.METHOD_NOT_ALLOWED).build();
     }
 
     @GetMapping("/{historyId}")
-    @Operation(summary = "查询进度详情")
+    @Operation(summary = "Get")
     public ResponseEntity<SysRequestHistory> get(@PathVariable Long historyId) {
         try {
             SysRequestHistory history = sysRequestHistoryService.findById(historyId);
@@ -89,7 +89,7 @@ public class ProgressItemController {
     }
 
     @GetMapping
-    @Operation(summary = "查询全部进度记录")
+    @Operation(summary = "List")
     public ResponseEntity<List<SysRequestHistory>> list(@RequestParam(defaultValue = "1") int page,
                                                         @RequestParam(defaultValue = "20") int size) {
         try {
@@ -102,7 +102,7 @@ public class ProgressItemController {
 
     @GetMapping("/me")
     @RolesAllowed({"USER"})
-    @Operation(summary = "鏌ヨ褰撳墠鐧诲綍鐢ㄦ埛杩涘害璁板綍")
+    @Operation(summary = "List Current User Progress")
     public ResponseEntity<List<SysRequestHistory>> listCurrentUserProgress(@RequestParam(defaultValue = "1") int page,
                                                                            @RequestParam(defaultValue = "20") int size,
                                                                            @RequestParam(required = false) Long appealId) {
@@ -202,7 +202,7 @@ public class ProgressItemController {
     }
 
     @GetMapping("/status")
-    @Operation(summary = "按业务状态分页查询进度")
+    @Operation(summary = "List By Status")
     public ResponseEntity<List<SysRequestHistory>> listByStatus(@RequestParam String status,
                                                                 @RequestParam(defaultValue = "1") int page,
                                                                 @RequestParam(defaultValue = "20") int size) {
@@ -215,7 +215,7 @@ public class ProgressItemController {
     }
 
     @GetMapping("/idempotency/{key}")
-    @Operation(summary = "根据幂等键查询进度")
+    @Operation(summary = "Get By Idempotency Key")
     public ResponseEntity<SysRequestHistory> getByIdempotencyKey(@PathVariable String key) {
         try {
             Optional<SysRequestHistory> history = sysRequestHistoryService.findByIdempotencyKey(key);
@@ -227,7 +227,7 @@ public class ProgressItemController {
     }
 
     @GetMapping("/refunds")
-    @Operation(summary = "鏌ヨ閫€娆惧璁¤褰?")
+    @Operation(summary = "List Refund Audits")
     public ResponseEntity<List<SysRequestHistory>> listRefundAudits(@RequestParam(required = false) String status,
                                                                     @RequestParam(required = false) Long fineId,
                                                                     @RequestParam(required = false) Long paymentId,

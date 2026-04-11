@@ -22,11 +22,9 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import java.util.stream.Collectors;
-
 @RestController
 @RequestMapping("/api/system/backup")
-@Tag(name = "Backup & Restore", description = "系统备份与还原管理接口")
+@Tag(name = "Backup & Restore", description = "Backup & Restore endpoints")
 @SecurityRequirement(name = "bearerAuth")
 @RolesAllowed({"SUPER_ADMIN", "ADMIN"})
 public class BackupRestoreController {
@@ -40,7 +38,7 @@ public class BackupRestoreController {
     }
 
     @PostMapping
-    @Operation(summary = "创建备份/还原任务")
+    @Operation(summary = "Create")
     public ResponseEntity<SysBackupRestore> create(@RequestBody SysBackupRestore request,
                                                    @RequestHeader(value = "Idempotency-Key", required = false)
                                                    String idempotencyKey) {
@@ -67,7 +65,7 @@ public class BackupRestoreController {
     }
 
     @PutMapping("/{backupId}")
-    @Operation(summary = "更新备份/还原任务")
+    @Operation(summary = "Update")
     public ResponseEntity<SysBackupRestore> update(@PathVariable Long backupId,
                                                    @RequestBody SysBackupRestore request,
                                                    @RequestHeader(value = "Idempotency-Key", required = false)
@@ -76,6 +74,9 @@ public class BackupRestoreController {
         try {
             request.setBackupId(backupId);
             if (useKey) {
+                if (backupRestoreService.shouldSkipProcessing(idempotencyKey)) {
+                    return ResponseEntity.status(HttpStatus.ALREADY_REPORTED).build();
+                }
                 backupRestoreService.checkAndInsertIdempotency(idempotencyKey, request, "update");
             }
             SysBackupRestore updated = backupRestoreService.updateSysBackupRestore(request);
@@ -93,7 +94,7 @@ public class BackupRestoreController {
     }
 
     @DeleteMapping("/{backupId}")
-    @Operation(summary = "删除备份/还原任务")
+    @Operation(summary = "Delete")
     public ResponseEntity<Void> delete(@PathVariable Long backupId) {
         try {
             backupRestoreService.deleteSysBackupRestore(backupId);
@@ -105,7 +106,7 @@ public class BackupRestoreController {
     }
 
     @GetMapping("/{backupId}")
-    @Operation(summary = "查询备份/还原详情")
+    @Operation(summary = "Get")
     public ResponseEntity<SysBackupRestore> get(@PathVariable Long backupId) {
         try {
             SysBackupRestore record = backupRestoreService.findById(backupId);
@@ -117,17 +118,15 @@ public class BackupRestoreController {
     }
 
     @GetMapping
-    @Operation(summary = "查询备份/还原任务列表")
-    public ResponseEntity<List<SysBackupRestore>> list(@RequestParam(value = "status", required = false) String status) {
+    @Operation(summary = "List")
+    public ResponseEntity<List<SysBackupRestore>> list(@RequestParam(value = "status", required = false) String status,
+                                                       @RequestParam(defaultValue = "1") int page,
+                                                       @RequestParam(defaultValue = "20") int size) {
         try {
-            List<SysBackupRestore> all = backupRestoreService.findAll();
             if (status == null || status.isBlank()) {
-                return ResponseEntity.ok(all);
+                return ResponseEntity.ok(backupRestoreService.listBackups(page, size));
             }
-            List<SysBackupRestore> filtered = all.stream()
-                    .filter(item -> status.equalsIgnoreCase(item.getStatus()))
-                    .collect(Collectors.toList());
-            return ResponseEntity.ok(filtered);
+            return ResponseEntity.ok(backupRestoreService.searchByStatus(status, page, size));
         } catch (Exception ex) {
             LOG.log(Level.WARNING, "List backup tasks failed", ex);
             return ResponseEntity.status(resolveStatus(ex)).build();
@@ -135,7 +134,7 @@ public class BackupRestoreController {
     }
 
     @GetMapping("/search/type")
-    @Operation(summary = "Search backup tasks by type")
+    @Operation(summary = "Search By Type")
     public ResponseEntity<List<SysBackupRestore>> searchByType(@RequestParam String backupType,
                                                                @RequestParam(defaultValue = "1") int page,
                                                                @RequestParam(defaultValue = "20") int size) {
@@ -143,7 +142,7 @@ public class BackupRestoreController {
     }
 
     @GetMapping("/search/file-name")
-    @Operation(summary = "Search backup tasks by file name prefix")
+    @Operation(summary = "Search By File Name")
     public ResponseEntity<List<SysBackupRestore>> searchByFileName(@RequestParam String backupFileName,
                                                                    @RequestParam(defaultValue = "1") int page,
                                                                    @RequestParam(defaultValue = "20") int size) {
@@ -151,7 +150,7 @@ public class BackupRestoreController {
     }
 
     @GetMapping("/search/handler")
-    @Operation(summary = "Search backup tasks by handler")
+    @Operation(summary = "Search By Handler")
     public ResponseEntity<List<SysBackupRestore>> searchByHandler(@RequestParam String backupHandler,
                                                                   @RequestParam(defaultValue = "1") int page,
                                                                   @RequestParam(defaultValue = "20") int size) {
@@ -159,7 +158,7 @@ public class BackupRestoreController {
     }
 
     @GetMapping("/search/restore-status")
-    @Operation(summary = "Search backup tasks by restore status")
+    @Operation(summary = "Search By Restore Status")
     public ResponseEntity<List<SysBackupRestore>> searchByRestoreStatus(@RequestParam String restoreStatus,
                                                                         @RequestParam(defaultValue = "1") int page,
                                                                         @RequestParam(defaultValue = "20") int size) {
@@ -167,7 +166,7 @@ public class BackupRestoreController {
     }
 
     @GetMapping("/search/status")
-    @Operation(summary = "Search backup tasks by status")
+    @Operation(summary = "Search By Status")
     public ResponseEntity<List<SysBackupRestore>> searchByStatus(@RequestParam String status,
                                                                  @RequestParam(defaultValue = "1") int page,
                                                                  @RequestParam(defaultValue = "20") int size) {
@@ -175,7 +174,7 @@ public class BackupRestoreController {
     }
 
     @GetMapping("/search/backup-time-range")
-    @Operation(summary = "Search backup tasks by backup time range")
+    @Operation(summary = "Search By Backup Time Range")
     public ResponseEntity<List<SysBackupRestore>> searchByBackupTimeRange(@RequestParam String startTime,
                                                                           @RequestParam String endTime,
                                                                           @RequestParam(defaultValue = "1") int page,
@@ -184,7 +183,7 @@ public class BackupRestoreController {
     }
 
     @GetMapping("/search/restore-time-range")
-    @Operation(summary = "Search backup tasks by restore time range")
+    @Operation(summary = "Search By Restore Time Range")
     public ResponseEntity<List<SysBackupRestore>> searchByRestoreTimeRange(@RequestParam String startTime,
                                                                            @RequestParam String endTime,
                                                                            @RequestParam(defaultValue = "1") int page,

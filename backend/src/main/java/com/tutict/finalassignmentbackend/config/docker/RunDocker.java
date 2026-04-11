@@ -23,6 +23,8 @@ public class RunDocker implements ApplicationContextInitializer<ConfigurableAppl
     private static final Logger log = Logger.getLogger(RunDocker.class.getName());
     private static final String PROPERTY_SOURCE_NAME = "docker";
     private static final String DEFAULT_MANTICORE_IMAGE = "manticoresearch/manticore:dev";
+    private static final String DEFAULT_ELASTICSEARCH_IMAGE = "tutict/elasticsearch-with-plugins:9.2.6-for-my-work";
+    private static final String DEFAULT_ELASTICSEARCH_COMPATIBLE_IMAGE = "docker.elastic.co/elasticsearch/elasticsearch";
     private static volatile boolean shutdownHookRegistered = false;
 
     private static RedisContainer redisContainer;
@@ -73,15 +75,33 @@ public class RunDocker implements ApplicationContextInitializer<ConfigurableAppl
 
     private void startElasticsearch(ConfigurableApplicationContext applicationContext) {
         try {
-            // å£°æ˜Žè‡ªå®šä¹‰é•œåƒä¸Žå®˜æ–¹é•œåƒå…¼å®¹
-            DockerImageName myImage = DockerImageName.parse("tutict/elasticsearch-with-plugins:8.17.3-for-my-work")
-                    .asCompatibleSubstituteFor("docker.elastic.co/elasticsearch/elasticsearch");
+            String configuredUris = applicationContext.getEnvironment().getProperty("spring.elasticsearch.uris");
+            if (configuredUris != null && !configuredUris.isBlank()) {
+                log.log(Level.INFO, "Detected existing spring.elasticsearch.uris={0}, skipping Elasticsearch container startup", configuredUris);
+                return;
+            }
 
-            // ä½¿ç”¨è‡ªå®šä¹‰é•œåƒå¯åŠ¨å®¹å™¨ï¼Œä»…è®¾ç½®å•èŠ‚ç‚¹æ¨¡å¼
+            boolean elasticsearchEnabled = applicationContext.getEnvironment()
+                    .getProperty("app.docker.elasticsearch.enabled", Boolean.class, true);
+            if (!elasticsearchEnabled) {
+                log.log(Level.INFO, "Elasticsearch container startup disabled by app.docker.elasticsearch.enabled=false");
+                return;
+            }
+
+            String elasticsearchImage = applicationContext.getEnvironment()
+                    .getProperty("app.docker.elasticsearch.image", DEFAULT_ELASTICSEARCH_IMAGE);
+            String compatibleImage = applicationContext.getEnvironment()
+                    .getProperty("app.docker.elasticsearch.compatible-image", DEFAULT_ELASTICSEARCH_COMPATIBLE_IMAGE);
+
+            // Allow custom plugin images while keeping Testcontainers compatibility with Elasticsearch.
+            DockerImageName myImage = DockerImageName.parse(elasticsearchImage)
+                    .asCompatibleSubstituteFor(compatibleImage);
+
+            // Start the custom image in single-node mode when the container is not already running.
             if (elasticsearchContainer == null || !elasticsearchContainer.isRunning()) {
                 elasticsearchContainer = new ElasticsearchContainer(myImage)
                         .withEnv("xpack.security.enabled", "false")
-                        .withEnv("discovery.type", "single-node"); // å¯ç”¨å•èŠ‚ç‚¹æ¨¡å¼?
+                        .withEnv("discovery.type", "single-node"); // Enable single-node discovery mode.
                 elasticsearchContainer.start();
             }
 

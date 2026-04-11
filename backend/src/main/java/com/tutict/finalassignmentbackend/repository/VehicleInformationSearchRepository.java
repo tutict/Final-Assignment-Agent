@@ -197,9 +197,9 @@ public interface VehicleInformationSearchRepository extends ElasticsearchReposit
 
     @Query("""
     {
-      "match_phrase_prefix": {
-        "ownerIdCard": {
-          "query": "?0"
+      "term": {
+        "ownerIdCard.keyword": {
+          "value": "?0"
         }
       }
     }

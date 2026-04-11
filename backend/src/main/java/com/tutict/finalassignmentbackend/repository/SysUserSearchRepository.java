@@ -77,9 +77,9 @@ public interface SysUserSearchRepository extends ElasticsearchRepository<SysUser
 
     @Query("""
             {
-              "match_phrase_prefix": {
-                "idCardNumber": {
-                  "query": "?0"
+              "term": {
+                "idCardNumber.keyword": {
+                  "value": "?0"
                 }
               }
             }
@@ -108,6 +108,21 @@ public interface SysUserSearchRepository extends ElasticsearchRepository<SysUser
     @Query("""
             {
               "match_phrase_prefix": {
+                "email": {
+                  "query": "?0"
+                }
+              }
+            }
+            """)
+    SearchHits<SysUserDocument> searchByEmail(String email, Pageable pageable);
+
+    default SearchHits<SysUserDocument> searchByEmail(String email) {
+        return searchByEmail(email, PageRequest.of(0, DEFAULT_PAGE_SIZE));
+    }
+
+    @Query("""
+            {
+              "match_phrase_prefix": {
                 "department": {
                   "query": "?0"
                 }
@@ -122,9 +137,9 @@ public interface SysUserSearchRepository extends ElasticsearchRepository<SysUser
 
     @Query("""
             {
-              "match_phrase_prefix": {
-                "employeeNumber": {
-                  "query": "?0"
+              "term": {
+                "employeeNumber.keyword": {
+                  "value": "?0"
                 }
               }
             }

@@ -19,7 +19,7 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
- * 违法记录处理状态机配置
+ * State machine configuration for offense processing workflow.
  */
 @Configuration
 @EnableStateMachineFactory(name = "offenseProcessStateMachineFactory")
@@ -30,8 +30,7 @@ public class OffenseProcessStateMachineConfig extends StateMachineConfigurerAdap
     @Override
     public void configure(StateMachineConfigurationConfigurer<OffenseProcessState, OffenseProcessEvent> config)
             throws Exception {
-        config
-                .withConfiguration()
+        config.withConfiguration()
                 .autoStartup(true)
                 .listener(offenseProcessStateMachineListener());
     }
@@ -39,8 +38,7 @@ public class OffenseProcessStateMachineConfig extends StateMachineConfigurerAdap
     @Override
     public void configure(StateMachineStateConfigurer<OffenseProcessState, OffenseProcessEvent> states)
             throws Exception {
-        states
-                .withStates()
+        states.withStates()
                 .initial(OffenseProcessState.UNPROCESSED)
                 .states(EnumSet.allOf(OffenseProcessState.class));
     }
@@ -49,49 +47,56 @@ public class OffenseProcessStateMachineConfig extends StateMachineConfigurerAdap
     public void configure(StateMachineTransitionConfigurer<OffenseProcessState, OffenseProcessEvent> transitions)
             throws Exception {
         transitions
-                // 未处理 -> 处理中
+                // Unprocessed -> Processing
                 .withExternal()
                 .source(OffenseProcessState.UNPROCESSED)
                 .target(OffenseProcessState.PROCESSING)
                 .event(OffenseProcessEvent.START_PROCESSING)
                 .and()
 
-                // 处理中 -> 已处理
+                // Processing -> Processed
                 .withExternal()
                 .source(OffenseProcessState.PROCESSING)
                 .target(OffenseProcessState.PROCESSED)
                 .event(OffenseProcessEvent.COMPLETE_PROCESSING)
                 .and()
 
-                // 已处理 -> 申诉中
+                // Processed -> Appealing
                 .withExternal()
                 .source(OffenseProcessState.PROCESSED)
                 .target(OffenseProcessState.APPEALING)
                 .event(OffenseProcessEvent.SUBMIT_APPEAL)
                 .and()
 
-                // 申诉中 -> 申诉通过
+                // Appeal rejected -> Appealing again
+                .withExternal()
+                .source(OffenseProcessState.APPEAL_REJECTED)
+                .target(OffenseProcessState.APPEALING)
+                .event(OffenseProcessEvent.SUBMIT_APPEAL)
+                .and()
+
+                // Appealing -> Appeal approved
                 .withExternal()
                 .source(OffenseProcessState.APPEALING)
                 .target(OffenseProcessState.APPEAL_APPROVED)
                 .event(OffenseProcessEvent.APPROVE_APPEAL)
                 .and()
 
-                // 申诉中 -> 申诉驳回
+                // Appealing -> Appeal rejected
                 .withExternal()
                 .source(OffenseProcessState.APPEALING)
                 .target(OffenseProcessState.APPEAL_REJECTED)
                 .event(OffenseProcessEvent.REJECT_APPEAL)
                 .and()
 
-                // 申诉中 -> 已处理（撤回申诉）
+                // Appealing -> Processed (appeal withdrawn)
                 .withExternal()
                 .source(OffenseProcessState.APPEALING)
                 .target(OffenseProcessState.PROCESSED)
                 .event(OffenseProcessEvent.WITHDRAW_APPEAL)
                 .and()
 
-                // 任何状态 -> 已取消（数据库 Cancelled 状态）
+                // Any active workflow state -> Cancelled
                 .withExternal()
                 .source(OffenseProcessState.UNPROCESSED)
                 .target(OffenseProcessState.CANCELLED)
@@ -129,14 +134,14 @@ public class OffenseProcessStateMachineConfig extends StateMachineConfigurerAdap
             @Override
             public void stateChanged(State<OffenseProcessState, OffenseProcessEvent> from,
                                      State<OffenseProcessState, OffenseProcessEvent> to) {
-                LOG.log(Level.INFO, "违法记录状态变更: {0} -> {1}",
+                LOG.log(Level.INFO, "Offense process state changed: {0} -> {1}",
                         new Object[]{from != null ? from.getId() : "null", to != null ? to.getId() : "null"});
             }
 
             @Override
             public void transition(Transition<OffenseProcessState, OffenseProcessEvent> transition) {
                 if (transition.getSource() != null && transition.getTarget() != null && transition.getTrigger() != null) {
-                    LOG.log(Level.INFO, "违法记录状态转换: {0} -> {1} via {2}",
+                    LOG.log(Level.INFO, "Offense process transition: {0} -> {1} via {2}",
                             new Object[]{transition.getSource().getId(),
                                     transition.getTarget().getId(),
                                     transition.getTrigger().getEvent()});

@@ -25,7 +25,7 @@ import java.util.logging.Logger;
 
 @RestController
 @RequestMapping("/api/logs/login")
-@Tag(name = "Login Audit", description = "系统登录日志管理接口")
+@Tag(name = "", description = " endpoints")
 @SecurityRequirement(name = "bearerAuth")
 @RolesAllowed({"SUPER_ADMIN", "ADMIN"})
 public class LoginLogController {
@@ -39,72 +39,30 @@ public class LoginLogController {
     }
 
     @PostMapping
-    @Operation(summary = "写入登录日志")
+    @Operation(summary = "Create")
     public ResponseEntity<AuditLoginLog> create(@RequestBody AuditLoginLog request,
                                                 @RequestHeader(value = "Idempotency-Key", required = false)
                                                 String idempotencyKey) {
-        boolean useKey = hasKey(idempotencyKey);
-        try {
-            if (useKey) {
-                if (auditLoginLogService.shouldSkipProcessing(idempotencyKey)) {
-                    return ResponseEntity.status(HttpStatus.ALREADY_REPORTED).build();
-                }
-                auditLoginLogService.checkAndInsertIdempotency(idempotencyKey, request, "create");
-            }
-            AuditLoginLog saved = auditLoginLogService.createAuditLoginLog(request);
-            if (useKey && saved.getLogId() != null) {
-                auditLoginLogService.markHistorySuccess(idempotencyKey, saved.getLogId());
-            }
-            return ResponseEntity.status(HttpStatus.CREATED).body(saved);
-        } catch (Exception ex) {
-            if (useKey) {
-                auditLoginLogService.markHistoryFailure(idempotencyKey, ex.getMessage());
-            }
-            LOG.log(Level.SEVERE, "Create login log failed", ex);
-            return ResponseEntity.status(resolveStatus(ex)).build();
-        }
+        return ResponseEntity.status(HttpStatus.METHOD_NOT_ALLOWED).build();
     }
 
     @PutMapping("/{logId}")
-    @Operation(summary = "更新登录日志")
+    @Operation(summary = "Update")
     public ResponseEntity<AuditLoginLog> update(@PathVariable Long logId,
                                                 @RequestBody AuditLoginLog request,
                                                 @RequestHeader(value = "Idempotency-Key", required = false)
                                                 String idempotencyKey) {
-        boolean useKey = hasKey(idempotencyKey);
-        try {
-            request.setLogId(logId);
-            if (useKey) {
-                auditLoginLogService.checkAndInsertIdempotency(idempotencyKey, request, "update");
-            }
-            AuditLoginLog updated = auditLoginLogService.updateAuditLoginLog(request);
-            if (useKey && updated.getLogId() != null) {
-                auditLoginLogService.markHistorySuccess(idempotencyKey, updated.getLogId());
-            }
-            return ResponseEntity.ok(updated);
-        } catch (Exception ex) {
-            if (useKey) {
-                auditLoginLogService.markHistoryFailure(idempotencyKey, ex.getMessage());
-            }
-            LOG.log(Level.SEVERE, "Update login log failed", ex);
-            return ResponseEntity.status(resolveStatus(ex)).build();
-        }
+        return ResponseEntity.status(HttpStatus.METHOD_NOT_ALLOWED).build();
     }
 
     @DeleteMapping("/{logId}")
-    @Operation(summary = "删除登录日志")
+    @Operation(summary = "Delete")
     public ResponseEntity<Void> delete(@PathVariable Long logId) {
-        try {
-            auditLoginLogService.deleteAuditLoginLog(logId);
-            return ResponseEntity.noContent().build();
-        } catch (Exception ex) {
-            LOG.log(Level.WARNING, "Delete login log failed", ex);
-            return ResponseEntity.status(resolveStatus(ex)).build();
-        }
+        return ResponseEntity.status(HttpStatus.METHOD_NOT_ALLOWED).build();
     }
 
     @GetMapping("/{logId}")
-    @Operation(summary = "查询登录日志详情")
+    @Operation(summary = "Get")
     public ResponseEntity<AuditLoginLog> get(@PathVariable Long logId) {
         try {
             AuditLoginLog log = auditLoginLogService.findById(logId);
@@ -116,10 +74,11 @@ public class LoginLogController {
     }
 
     @GetMapping
-    @Operation(summary = "查询全部登录日志")
-    public ResponseEntity<List<AuditLoginLog>> list() {
+    @Operation(summary = "List")
+    public ResponseEntity<List<AuditLoginLog>> list(@RequestParam(defaultValue = "1") int page,
+                                                    @RequestParam(defaultValue = "20") int size) {
         try {
-            return ResponseEntity.ok(auditLoginLogService.findAll());
+            return ResponseEntity.ok(auditLoginLogService.listLogs(page, size));
         } catch (Exception ex) {
             LOG.log(Level.WARNING, "List login logs failed", ex);
             return ResponseEntity.status(resolveStatus(ex)).build();
@@ -127,7 +86,7 @@ public class LoginLogController {
     }
 
     @GetMapping("/search/username")
-    @Operation(summary = "按用户名搜索登录日志")
+    @Operation(summary = "Search By Username")
     public ResponseEntity<List<AuditLoginLog>> searchByUsername(@RequestParam String username,
                                                                 @RequestParam(defaultValue = "1") int page,
                                                                 @RequestParam(defaultValue = "20") int size) {
@@ -140,7 +99,7 @@ public class LoginLogController {
     }
 
     @GetMapping("/search/result")
-    @Operation(summary = "按登录结果搜索")
+    @Operation(summary = "Search By Result")
     public ResponseEntity<List<AuditLoginLog>> searchByResult(@RequestParam String result,
                                                               @RequestParam(defaultValue = "1") int page,
                                                               @RequestParam(defaultValue = "20") int size) {
@@ -153,7 +112,7 @@ public class LoginLogController {
     }
 
     @GetMapping("/search/time-range")
-    @Operation(summary = "按登录时间范围搜索")
+    @Operation(summary = "Search By Time Range")
     public ResponseEntity<List<AuditLoginLog>> searchByTimeRange(@RequestParam String startTime,
                                                                  @RequestParam String endTime,
                                                                  @RequestParam(defaultValue = "1") int page,
@@ -167,7 +126,7 @@ public class LoginLogController {
     }
 
     @GetMapping("/search/ip")
-    @Operation(summary = "按登录 IP 搜索")
+    @Operation(summary = "Search By Ip")
     public ResponseEntity<List<AuditLoginLog>> searchByIp(@RequestParam String ip,
                                                           @RequestParam(defaultValue = "1") int page,
                                                           @RequestParam(defaultValue = "20") int size) {
@@ -180,7 +139,7 @@ public class LoginLogController {
     }
 
     @GetMapping("/search/location")
-    @Operation(summary = "Search login logs by location")
+    @Operation(summary = "Search By Location")
     public ResponseEntity<List<AuditLoginLog>> searchByLocation(@RequestParam String loginLocation,
                                                                 @RequestParam(defaultValue = "1") int page,
                                                                 @RequestParam(defaultValue = "20") int size) {
@@ -193,7 +152,7 @@ public class LoginLogController {
     }
 
     @GetMapping("/search/device-type")
-    @Operation(summary = "Search login logs by device type")
+    @Operation(summary = "Search By Device Type")
     public ResponseEntity<List<AuditLoginLog>> searchByDeviceType(@RequestParam String deviceType,
                                                                   @RequestParam(defaultValue = "1") int page,
                                                                   @RequestParam(defaultValue = "20") int size) {
@@ -206,7 +165,7 @@ public class LoginLogController {
     }
 
     @GetMapping("/search/browser-type")
-    @Operation(summary = "Search login logs by browser type")
+    @Operation(summary = "Search By Browser Type")
     public ResponseEntity<List<AuditLoginLog>> searchByBrowserType(@RequestParam String browserType,
                                                                    @RequestParam(defaultValue = "1") int page,
                                                                    @RequestParam(defaultValue = "20") int size) {
@@ -219,7 +178,7 @@ public class LoginLogController {
     }
 
     @GetMapping("/search/logout-time-range")
-    @Operation(summary = "Search login logs by logout time range")
+    @Operation(summary = "Search By Logout Time Range")
     public ResponseEntity<List<AuditLoginLog>> searchByLogoutTimeRange(@RequestParam String startTime,
                                                                        @RequestParam String endTime,
                                                                        @RequestParam(defaultValue = "1") int page,
@@ -230,10 +189,6 @@ public class LoginLogController {
             LOG.log(Level.WARNING, "Search login log by logout time range failed", ex);
             return ResponseEntity.status(resolveStatus(ex)).build();
         }
-    }
-
-    private boolean hasKey(String value) {
-        return value != null && !value.isBlank();
     }
 
     private HttpStatus resolveStatus(Exception ex) {

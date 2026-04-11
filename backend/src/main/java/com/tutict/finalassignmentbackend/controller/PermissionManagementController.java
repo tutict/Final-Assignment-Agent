@@ -25,7 +25,7 @@ import java.util.logging.Logger;
 
 @RestController
 @RequestMapping("/api/permissions")
-@Tag(name = "Permission Management", description = "系统权限管理接口")
+@Tag(name = "", description = " endpoints")
 @SecurityRequirement(name = "bearerAuth")
 @RolesAllowed({"SUPER_ADMIN", "ADMIN"})
 public class PermissionManagementController {
@@ -39,7 +39,7 @@ public class PermissionManagementController {
     }
 
     @PostMapping
-    @Operation(summary = "创建权限")
+    @Operation(summary = "Create")
     public ResponseEntity<SysPermission> create(@RequestBody SysPermission request,
                                                 @RequestHeader(value = "Idempotency-Key", required = false)
                                                 String idempotencyKey) {
@@ -66,7 +66,7 @@ public class PermissionManagementController {
     }
 
     @PutMapping("/{permissionId}")
-    @Operation(summary = "更新权限")
+    @Operation(summary = "Update")
     public ResponseEntity<SysPermission> update(@PathVariable Integer permissionId,
                                                 @RequestBody SysPermission request,
                                                 @RequestHeader(value = "Idempotency-Key", required = false)
@@ -75,6 +75,9 @@ public class PermissionManagementController {
         try {
             request.setPermissionId(permissionId);
             if (useKey) {
+                if (sysPermissionService.shouldSkipProcessing(idempotencyKey)) {
+                    return ResponseEntity.status(HttpStatus.ALREADY_REPORTED).build();
+                }
                 sysPermissionService.checkAndInsertIdempotency(idempotencyKey, request, "update");
             }
             SysPermission updated = sysPermissionService.updateSysPermission(request);
@@ -92,7 +95,7 @@ public class PermissionManagementController {
     }
 
     @DeleteMapping("/{permissionId}")
-    @Operation(summary = "删除权限")
+    @Operation(summary = "Delete")
     public ResponseEntity<Void> delete(@PathVariable Integer permissionId) {
         try {
             sysPermissionService.deleteSysPermission(permissionId);
@@ -104,7 +107,7 @@ public class PermissionManagementController {
     }
 
     @GetMapping("/{permissionId}")
-    @Operation(summary = "查询权限详情")
+    @Operation(summary = "Get")
     public ResponseEntity<SysPermission> get(@PathVariable Integer permissionId) {
         try {
             SysPermission permission = sysPermissionService.findById(permissionId);
@@ -116,10 +119,11 @@ public class PermissionManagementController {
     }
 
     @GetMapping
-    @Operation(summary = "查询全部权限")
-    public ResponseEntity<List<SysPermission>> list() {
+    @Operation(summary = "List")
+    public ResponseEntity<List<SysPermission>> list(@RequestParam(defaultValue = "1") int page,
+                                                    @RequestParam(defaultValue = "50") int size) {
         try {
-            return ResponseEntity.ok(sysPermissionService.findAll());
+            return ResponseEntity.ok(sysPermissionService.findAll(page, size));
         } catch (Exception ex) {
             LOG.log(Level.WARNING, "List permissions failed", ex);
             return ResponseEntity.status(resolveStatus(ex)).build();
@@ -127,7 +131,7 @@ public class PermissionManagementController {
     }
 
     @GetMapping("/parent/{parentId}")
-    @Operation(summary = "按父节点查询权限")
+    @Operation(summary = "List By Parent")
     public ResponseEntity<List<SysPermission>> listByParent(@PathVariable Integer parentId,
                                                             @RequestParam(defaultValue = "1") int page,
                                                             @RequestParam(defaultValue = "50") int size) {
@@ -140,7 +144,7 @@ public class PermissionManagementController {
     }
 
     @GetMapping("/search/code/prefix")
-    @Operation(summary = "Search permissions by code prefix")
+    @Operation(summary = "Search By Code Prefix")
     public ResponseEntity<List<SysPermission>> searchByCodePrefix(@RequestParam String permissionCode,
                                                                   @RequestParam(defaultValue = "1") int page,
                                                                   @RequestParam(defaultValue = "50") int size) {
@@ -148,7 +152,7 @@ public class PermissionManagementController {
     }
 
     @GetMapping("/search/code/fuzzy")
-    @Operation(summary = "Search permissions by code fuzzy")
+    @Operation(summary = "Search By Code Fuzzy")
     public ResponseEntity<List<SysPermission>> searchByCodeFuzzy(@RequestParam String permissionCode,
                                                                  @RequestParam(defaultValue = "1") int page,
                                                                  @RequestParam(defaultValue = "50") int size) {
@@ -156,7 +160,7 @@ public class PermissionManagementController {
     }
 
     @GetMapping("/search/name/prefix")
-    @Operation(summary = "Search permissions by name prefix")
+    @Operation(summary = "Search By Name Prefix")
     public ResponseEntity<List<SysPermission>> searchByNamePrefix(@RequestParam String permissionName,
                                                                   @RequestParam(defaultValue = "1") int page,
                                                                   @RequestParam(defaultValue = "50") int size) {
@@ -164,7 +168,7 @@ public class PermissionManagementController {
     }
 
     @GetMapping("/search/name/fuzzy")
-    @Operation(summary = "Search permissions by name fuzzy")
+    @Operation(summary = "Search By Name Fuzzy")
     public ResponseEntity<List<SysPermission>> searchByNameFuzzy(@RequestParam String permissionName,
                                                                  @RequestParam(defaultValue = "1") int page,
                                                                  @RequestParam(defaultValue = "50") int size) {
@@ -172,7 +176,7 @@ public class PermissionManagementController {
     }
 
     @GetMapping("/search/type")
-    @Operation(summary = "Search permissions by type")
+    @Operation(summary = "Search By Type")
     public ResponseEntity<List<SysPermission>> searchByType(@RequestParam String permissionType,
                                                             @RequestParam(defaultValue = "1") int page,
                                                             @RequestParam(defaultValue = "50") int size) {
@@ -180,7 +184,7 @@ public class PermissionManagementController {
     }
 
     @GetMapping("/search/api-path")
-    @Operation(summary = "Search permissions by API path prefix")
+    @Operation(summary = "Search By Api Path")
     public ResponseEntity<List<SysPermission>> searchByApiPath(@RequestParam String apiPath,
                                                                @RequestParam(defaultValue = "1") int page,
                                                                @RequestParam(defaultValue = "50") int size) {
@@ -188,7 +192,7 @@ public class PermissionManagementController {
     }
 
     @GetMapping("/search/menu-path")
-    @Operation(summary = "Search permissions by menu path prefix")
+    @Operation(summary = "Search By Menu Path")
     public ResponseEntity<List<SysPermission>> searchByMenuPath(@RequestParam String menuPath,
                                                                 @RequestParam(defaultValue = "1") int page,
                                                                 @RequestParam(defaultValue = "50") int size) {
@@ -196,7 +200,7 @@ public class PermissionManagementController {
     }
 
     @GetMapping("/search/visible")
-    @Operation(summary = "Search permissions by visibility")
+    @Operation(summary = "Search By Visible")
     public ResponseEntity<List<SysPermission>> searchByVisible(@RequestParam boolean isVisible,
                                                                @RequestParam(defaultValue = "1") int page,
                                                                @RequestParam(defaultValue = "50") int size) {
@@ -204,7 +208,7 @@ public class PermissionManagementController {
     }
 
     @GetMapping("/search/external")
-    @Operation(summary = "Search permissions by external flag")
+    @Operation(summary = "Search By External")
     public ResponseEntity<List<SysPermission>> searchByExternal(@RequestParam boolean isExternal,
                                                                 @RequestParam(defaultValue = "1") int page,
                                                                 @RequestParam(defaultValue = "50") int size) {
@@ -212,7 +216,7 @@ public class PermissionManagementController {
     }
 
     @GetMapping("/search/status")
-    @Operation(summary = "Search permissions by status")
+    @Operation(summary = "Search By Status")
     public ResponseEntity<List<SysPermission>> searchByStatus(@RequestParam String status,
                                                               @RequestParam(defaultValue = "1") int page,
                                                               @RequestParam(defaultValue = "50") int size) {

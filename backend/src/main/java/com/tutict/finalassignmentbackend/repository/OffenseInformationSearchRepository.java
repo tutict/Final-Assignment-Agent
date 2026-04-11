@@ -60,6 +60,21 @@ public interface OffenseInformationSearchRepository extends ElasticsearchReposit
 
     @Query("""
     {
+      "match_phrase_prefix": {
+        "offenseType": {
+          "query": "?0"
+        }
+      }
+    }
+    """)
+    SearchHits<OffenseRecordDocument> searchByOffenseType(String offenseType, Pageable pageable);
+
+    default SearchHits<OffenseRecordDocument> searchByOffenseType(String offenseType) {
+        return searchByOffenseType(offenseType, PageRequest.of(0, DEFAULT_PAGE_SIZE));
+    }
+
+    @Query("""
+    {
       "term": {
         "processStatus.keyword": {
           "value": "?0"
@@ -91,9 +106,9 @@ public interface OffenseInformationSearchRepository extends ElasticsearchReposit
 
     @Query("""
     {
-      "match_phrase_prefix": {
-        "offenseNumber": {
-          "query": "?0"
+      "term": {
+        "offenseNumber.keyword": {
+          "value": "?0"
         }
       }
     }

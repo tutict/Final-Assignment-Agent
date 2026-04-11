@@ -22,7 +22,6 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.stream.Collectors;
@@ -64,20 +63,10 @@ public class SysPermissionService {
             throw new RuntimeException("Duplicate sys permission request detected");
         }
 
-        SysRequestHistory history = new SysRequestHistory();
-        history.setIdempotencyKey(idempotencyKey);
-        history.setBusinessStatus("PROCESSING");
-        history.setCreatedAt(LocalDateTime.now());
-        history.setUpdatedAt(LocalDateTime.now());
+        SysRequestHistory history = buildHistory(idempotencyKey, permission, action);
         sysRequestHistoryMapper.insert(history);
 
         sendKafkaMessage("sys_permission_" + action, idempotencyKey, permission);
-
-        history.setBusinessStatus("SUCCESS");
-        history.setBusinessId(Optional.ofNullable(permission.getPermissionId()).map(Integer::longValue).orElse(null));
-        history.setRequestParams("PENDING");
-        history.setUpdatedAt(LocalDateTime.now());
-        sysRequestHistoryMapper.updateById(history);
     }
 
     @Transactional
@@ -110,12 +99,7 @@ public class SysPermissionService {
         if (rows == 0) {
             throw new IllegalStateException("SysPermission not found for id=" + permissionId);
         }
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                sysPermissionSearchRepository.deleteById(permissionId);
-            }
-        });
+        runAfterCommitOrNow(() -> sysPermissionSearchRepository.deleteById(permissionId));
     }
 
     @Transactional(readOnly = true)
@@ -145,6 +129,19 @@ public class SysPermissionService {
         List<SysPermission> fromDb = sysPermissionMapper.selectList(null);
         syncBatchToIndexAfterCommit(fromDb);
         return fromDb;
+    }
+
+    @Transactional(readOnly = true)
+    @Cacheable(
+            cacheNames = CACHE_NAME,
+            key = "'all:' + #page + ':' + #size",
+            unless = "#result == null || #result.isEmpty()")
+    public List<SysPermission> findAll(int page, int size) {
+        validatePagination(page, size);
+        QueryWrapper<SysPermission> wrapper = new QueryWrapper<>();
+        wrapper.orderByAsc("sort_order")
+                .orderByAsc("permission_id");
+        return fetchFromDatabase(wrapper, page, size);
     }
 
     @Cacheable(cacheNames = CACHE_NAME, key = "'parent:' + #parentId + ':' + #page + ':' + #size", unless = "#result == null || #result.isEmpty()")
@@ -329,7 +326,8 @@ public class SysPermissionService {
         SysRequestHistory history = sysRequestHistoryMapper.selectByIdempotencyKey(idempotencyKey);
         return history != null
                 && "SUCCESS".equalsIgnoreCase(history.getBusinessStatus())
-                && "DONE".equalsIgnoreCase(history.getRequestParams());
+                && history.getBusinessId() != null
+                && history.getBusinessId() > 0;
     }
 
     public void markHistorySuccess(String idempotencyKey, Integer permissionId) {
@@ -340,7 +338,6 @@ public class SysPermissionService {
         }
         history.setBusinessStatus("SUCCESS");
         history.setBusinessId(permissionId != null ? permissionId.longValue() : null);
-        history.setRequestParams("DONE");
         history.setUpdatedAt(LocalDateTime.now());
         sysRequestHistoryMapper.updateById(history);
     }
@@ -352,9 +349,66 @@ public class SysPermissionService {
             return;
         }
         history.setBusinessStatus("FAILED");
-        history.setRequestParams(truncate(reason));
+        history.setRequestParams(appendFailureReason(history.getRequestParams(), reason));
         history.setUpdatedAt(LocalDateTime.now());
         sysRequestHistoryMapper.updateById(history);
+    }
+
+    private SysRequestHistory buildHistory(String idempotencyKey, SysPermission permission, String action) {
+        SysRequestHistory history = new SysRequestHistory();
+        history.setIdempotencyKey(idempotencyKey);
+        history.setRequestMethod("POST");
+        history.setRequestUrl("/api/sys/permissions");
+        history.setRequestParams(buildRequestParams(permission));
+        history.setBusinessType(resolveBusinessType(action));
+        history.setBusinessStatus("PROCESSING");
+        history.setCreatedAt(LocalDateTime.now());
+        history.setUpdatedAt(LocalDateTime.now());
+        return history;
+    }
+
+    private String buildRequestParams(SysPermission permission) {
+        if (permission == null) {
+            return null;
+        }
+        StringBuilder builder = new StringBuilder();
+        appendParam(builder, "permissionCode", permission.getPermissionCode());
+        appendParam(builder, "permissionName", permission.getPermissionName());
+        appendParam(builder, "permissionType", permission.getPermissionType());
+        appendParam(builder, "apiPath", permission.getApiPath());
+        appendParam(builder, "menuPath", permission.getMenuPath());
+        appendParam(builder, "status", permission.getStatus());
+        return truncate(builder.toString());
+    }
+
+    private String resolveBusinessType(String action) {
+        String normalized = isBlank(action) ? "CREATE" : action.trim().toUpperCase();
+        return "SYS_PERMISSION_" + normalized;
+    }
+
+    private void appendParam(StringBuilder builder, String key, Object value) {
+        if (builder == null || value == null) {
+            return;
+        }
+        String normalized = value.toString().trim();
+        if (normalized.isEmpty()) {
+            return;
+        }
+        if (!builder.isEmpty()) {
+            builder.append(',');
+        }
+        builder.append(key).append('=').append(normalized);
+    }
+
+    private String appendFailureReason(String existing, String reason) {
+        String normalizedReason = truncate(reason);
+        if (isBlank(normalizedReason)) {
+            return existing;
+        }
+        if (isBlank(existing)) {
+            return "failure=" + normalizedReason;
+        }
+        return truncate(existing + ",failure=" + normalizedReason);
     }
 
     private void sendKafkaMessage(String topic, String idempotencyKey, SysPermission permission) {
@@ -371,13 +425,10 @@ public class SysPermissionService {
         if (permission == null) {
             return;
         }
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                SysPermissionDocument doc = SysPermissionDocument.fromEntity(permission);
-                if (doc != null) {
-                    sysPermissionSearchRepository.save(doc);
-                }
+        runAfterCommitOrNow(() -> {
+            SysPermissionDocument doc = SysPermissionDocument.fromEntity(permission);
+            if (doc != null) {
+                sysPermissionSearchRepository.save(doc);
             }
         });
     }
@@ -386,17 +437,14 @@ public class SysPermissionService {
         if (records == null || records.isEmpty()) {
             return;
         }
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                List<SysPermissionDocument> documents = records.stream()
-                        .filter(Objects::nonNull)
-                        .map(SysPermissionDocument::fromEntity)
-                        .filter(Objects::nonNull)
-                        .collect(Collectors.toList());
-                if (!documents.isEmpty()) {
-                    sysPermissionSearchRepository.saveAll(documents);
-                }
+        runAfterCommitOrNow(() -> {
+            List<SysPermissionDocument> documents = records.stream()
+                    .filter(Objects::nonNull)
+                    .map(SysPermissionDocument::fromEntity)
+                    .filter(Objects::nonNull)
+                    .collect(Collectors.toList());
+            if (!documents.isEmpty()) {
+                sysPermissionSearchRepository.saveAll(documents);
             }
         });
     }
@@ -471,5 +519,21 @@ public class SysPermissionService {
             return null;
         }
         return value.length() <= 500 ? value : value.substring(0, 500);
+    }
+
+    private void runAfterCommitOrNow(Runnable task) {
+        if (task == null) {
+            return;
+        }
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    task.run();
+                }
+            });
+            return;
+        }
+        task.run();
     }
 }

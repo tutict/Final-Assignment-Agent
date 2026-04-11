@@ -32,7 +32,7 @@ import java.util.logging.Logger;
 
 @RestController
 @RequestMapping("/api/auth")
-@Tag(name = "Authentication", description = "用户身份认证与注册接口")
+@Tag(name = "Authentication", description = "Authentication and registration endpoints")
 public class AuthController {
 
     private static final Logger LOG = Logger.getLogger(AuthController.class.getName());
@@ -48,32 +48,32 @@ public class AuthController {
     @PermitAll
     @Async
     @Operation(
-            summary = "用户登录",
-            description = "允许用户通过用户名和密码登录，成功后返回携带角色信息的 JWT 令牌。"
+            summary = "User login",
+            description = "Authenticates a user with username and password and returns a JWT payload."
     )
     @ApiResponses({
             @ApiResponse(
                     responseCode = "200",
-                    description = "登录成功，返回包含令牌的结构化响应",
+                    description = "Login succeeded and returned a structured token payload.",
                     content = @Content(mediaType = "application/json",
                             schema = @Schema(type = "object",
                                     example = "{\"jwtToken\":\"<token>\",\"username\":\"admin\",\"roles\":[\"ROLE_ADMIN\"]}")))
             ,
             @ApiResponse(
                     responseCode = "400",
-                    description = "请求参数缺失或无效",
+                    description = "Request parameters are missing or invalid.",
                     content = @Content(mediaType = "application/json",
                             schema = @Schema(type = "object", example = "{\"error\":\"Username and password are required\"}")))
             ,
             @ApiResponse(
                     responseCode = "401",
-                    description = "用户名或密码错误",
+                    description = "Username or password is incorrect.",
                     content = @Content(mediaType = "application/json",
                             schema = @Schema(type = "object", example = "{\"error\":\"Invalid credentials\"}")))
     })
     public CompletableFuture<ResponseEntity<Map<String, Object>>> login(
             @RequestBody
-            @Parameter(description = "登录请求体，包含用户名和密码", required = true)
+            @Parameter(description = "Login request payload containing username and password", required = true)
             AuthWsService.LoginRequest loginRequest) {
         if (loginRequest == null || loginRequest.getUsername() == null || loginRequest.getPassword() == null) {
             LOG.log(Level.WARNING, "Login request missing username or password");
@@ -96,36 +96,55 @@ public class AuthController {
         }, VIRTUAL_THREAD_EXECUTOR);
     }
 
+    @PostMapping("/refresh")
+    @PermitAll
+    @Operation(summary = "Refresh access token")
+    public ResponseEntity<Map<String, Object>> refreshToken(
+            @RequestBody AuthWsService.RefreshRequest refreshRequest) {
+        if (refreshRequest == null || refreshRequest.getRefreshToken() == null || refreshRequest.getRefreshToken().isBlank()) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(Map.of("error", "Refresh token is required"));
+        }
+        try {
+            return ResponseEntity.ok(authWsService.refreshToken(refreshRequest.getRefreshToken()));
+        } catch (Exception ex) {
+            LOG.log(Level.WARNING, "Refresh token failed: {0}", ex.getMessage());
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(Map.of("error", ex.getMessage()));
+        }
+    }
+
     @PostMapping("/register")
     @PermitAll
     @Async
     @Transactional
     @Operation(
-            summary = "用户注册",
-            description = "注册新用户并自动分配角色，支持幂等性保护。"
+            summary = "User registration",
+            description = "Registers a new user, assigns the default role, and supports idempotent requests."
     )
     @ApiResponses({
             @ApiResponse(
                     responseCode = "201",
-                    description = "注册成功",
+                    description = "Registration succeeded.",
                     content = @Content(mediaType = "application/json",
                             schema = @Schema(type = "object", example = "{\"status\":\"CREATED\"}")))
             ,
             @ApiResponse(
                     responseCode = "409",
-                    description = "用户名已存在或重复请求",
+                    description = "Username already exists or the request is duplicated.",
                     content = @Content(mediaType = "application/json",
-                            schema = @Schema(type = "object", example = "{\"error\":\"用户名已存在\"}")))
+                            schema = @Schema(type = "object", example = "{\"error\":\"Username already exists\"}")))
             ,
             @ApiResponse(
                     responseCode = "500",
-                    description = "服务器内部错误",
+                    description = "Internal server error.",
                     content = @Content(mediaType = "application/json",
                             schema = @Schema(type = "object", example = "{\"error\":\"Internal server error\"}")))
     })
     public CompletableFuture<ResponseEntity<Map<String, String>>> registerUser(
             @RequestBody
-            @Parameter(description = "注册请求体，包含用户名、密码、角色以及幂等键", required = true)
+            @Parameter(description = "Registration request payload containing username, password, role, and idempotency key",
+                    required = true)
             AuthWsService.RegisterRequest registerRequest) {
         return CompletableFuture.supplyAsync(() -> {
                     try {
@@ -152,19 +171,19 @@ public class AuthController {
     @RolesAllowed({"SUPER_ADMIN", "ADMIN"})
     @SecurityRequirement(name = "bearerAuth")
     @Operation(
-            summary = "获取全部系统用户",
-            description = "仅管理员角色可查询系统中所有用户的基本信息。"
+            summary = "List all users",
+            description = "Returns all system users. Restricted to administrator roles."
     )
     @ApiResponses({
             @ApiResponse(
                     responseCode = "200",
-                    description = "查询成功",
+                    description = "Query succeeded.",
                     content = @Content(mediaType = "application/json",
                             schema = @Schema(implementation = SysUser.class)))
             ,
             @ApiResponse(
                     responseCode = "403",
-                    description = "无访问权限",
+                    description = "Access denied.",
                     content = @Content(mediaType = "application/json",
                             schema = @Schema(type = "object", example = "{\"error\":\"Access denied\"}")))
     })
@@ -179,4 +198,3 @@ public class AuthController {
         }
     }
 }
-

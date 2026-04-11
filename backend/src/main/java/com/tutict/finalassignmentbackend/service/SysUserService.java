@@ -2,7 +2,6 @@ package com.tutict.finalassignmentbackend.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tutict.finalassignmentbackend.config.websocket.WsAction;
 import com.tutict.finalassignmentbackend.entity.SysRequestHistory;
 import com.tutict.finalassignmentbackend.entity.SysUser;
@@ -11,21 +10,29 @@ import com.tutict.finalassignmentbackend.mapper.SysRequestHistoryMapper;
 import com.tutict.finalassignmentbackend.mapper.SysUserMapper;
 import com.tutict.finalassignmentbackend.repository.SysUserSearchRepository;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.cache.Cache;
+import org.springframework.cache.CacheManager;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
-import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.util.StringUtils;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeParseException;
 import java.util.Collections;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Objects;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 
@@ -34,24 +41,25 @@ public class SysUserService {
 
     private static final Logger LOG = Logger.getLogger(SysUserService.class.getName());
     private static final String CACHE_NAME = "sysUserCache";
+    private static final Pattern BCRYPT_PATTERN = Pattern.compile("^\\$2[aby]?\\$.{56}$");
 
     private final SysUserMapper sysUserMapper;
     private final SysRequestHistoryMapper sysRequestHistoryMapper;
     private final SysUserSearchRepository sysUserSearchRepository;
-    private final KafkaTemplate<String, String> kafkaTemplate;
-    private final ObjectMapper objectMapper;
+    private final PasswordEncoder passwordEncoder;
+    private final CacheManager cacheManager;
 
     @Autowired
     public SysUserService(SysUserMapper sysUserMapper,
                           SysRequestHistoryMapper sysRequestHistoryMapper,
                           SysUserSearchRepository sysUserSearchRepository,
-                          KafkaTemplate<String, String> kafkaTemplate,
-                          ObjectMapper objectMapper) {
+                          PasswordEncoder passwordEncoder,
+                          CacheManager cacheManager) {
         this.sysUserMapper = sysUserMapper;
         this.sysRequestHistoryMapper = sysRequestHistoryMapper;
         this.sysUserSearchRepository = sysUserSearchRepository;
-        this.kafkaTemplate = kafkaTemplate;
-        this.objectMapper = objectMapper;
+        this.passwordEncoder = passwordEncoder;
+        this.cacheManager = cacheManager;
     }
 
     @Transactional
@@ -65,26 +73,15 @@ public class SysUserService {
             throw new RuntimeException("Duplicate sys user request detected");
         }
 
-        SysRequestHistory history = new SysRequestHistory();
-        history.setIdempotencyKey(idempotencyKey);
-        history.setBusinessStatus("PROCESSING");
-        history.setCreatedAt(LocalDateTime.now());
-        history.setUpdatedAt(LocalDateTime.now());
+        SysRequestHistory history = buildHistory(idempotencyKey, sysUser, action);
         sysRequestHistoryMapper.insert(history);
-
-        sendKafkaMessage("sys_user_" + action, idempotencyKey, sysUser);
-
-        history.setBusinessStatus("SUCCESS");
-        history.setBusinessId(sysUser.getUserId());
-        history.setRequestParams("PENDING");
-        history.setUpdatedAt(LocalDateTime.now());
-        sysRequestHistoryMapper.updateById(history);
     }
 
     @Transactional
     @CacheEvict(cacheNames = CACHE_NAME, allEntries = true)
     public SysUser createSysUser(SysUser sysUser) {
         validateSysUser(sysUser);
+        preparePasswordForPersistence(sysUser);
         sysUserMapper.insert(sysUser);
         syncToIndexAfterCommit(sysUser);
         return sysUser;
@@ -93,14 +90,45 @@ public class SysUserService {
     @Transactional
     @CacheEvict(cacheNames = CACHE_NAME, allEntries = true)
     public SysUser updateSysUser(SysUser sysUser) {
-        validateSysUser(sysUser);
-        requirePositive(sysUser.getUserId());
-        int rows = sysUserMapper.updateById(sysUser);
-        if (rows == 0) {
-            throw new IllegalStateException("SysUser not found for id=" + sysUser.getUserId());
+        return persistExistingUser(sysUser);
+    }
+
+    @Transactional
+    public SysUser updatePassword(SysUser sysUser, String rawPassword) {
+        if (sysUser == null) {
+            throw new IllegalArgumentException("SysUser must not be null");
         }
-        syncToIndexAfterCommit(sysUser);
-        return sysUser;
+        if (isBlank(rawPassword)) {
+            throw new IllegalArgumentException("Password must not be blank");
+        }
+        sysUser.setPassword(rawPassword.trim());
+        sysUser.setPasswordUpdateTime(LocalDateTime.now());
+        sysUser.setUpdatedAt(LocalDateTime.now());
+        SysUser updated = persistExistingUser(sysUser);
+        evictUserCache();
+        return updated;
+    }
+
+    @Transactional
+    public boolean verifyPassword(SysUser sysUser, String rawPassword) {
+        if (sysUser == null || isBlank(rawPassword) || isBlank(sysUser.getPassword())) {
+            return false;
+        }
+        String candidate = rawPassword.trim();
+        String storedPassword = sysUser.getPassword().trim();
+        if (isEncodedPassword(storedPassword)) {
+            return passwordEncoder.matches(candidate, storedPassword);
+        }
+        boolean matched = Objects.equals(storedPassword, candidate);
+        if (matched) {
+            LOG.log(Level.INFO, "Upgrading legacy plaintext password for userId={0}", sysUser.getUserId());
+            sysUser.setPassword(candidate);
+            sysUser.setPasswordUpdateTime(LocalDateTime.now());
+            sysUser.setUpdatedAt(LocalDateTime.now());
+            persistExistingUser(sysUser);
+            evictUserCache();
+        }
+        return matched;
     }
 
     @Transactional
@@ -111,12 +139,7 @@ public class SysUserService {
         if (rows == 0) {
             throw new IllegalStateException("SysUser not found for id=" + userId);
         }
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                sysUserSearchRepository.deleteById(userId);
-            }
-        });
+        runAfterCommitOrNow(() -> sysUserSearchRepository.deleteById(userId));
     }
 
     @Transactional(readOnly = true)
@@ -147,6 +170,16 @@ public class SysUserService {
         List<SysUser> fromDb = sysUserMapper.selectList(null);
         syncBatchToIndexAfterCommit(fromDb);
         return fromDb;
+    }
+
+    @Transactional(readOnly = true)
+    @Cacheable(cacheNames = CACHE_NAME, key = "'list:' + #page + ':' + #size", unless = "#result == null || #result.isEmpty()")
+    public List<SysUser> listUsers(int page, int size) {
+        validatePagination(page, size);
+        QueryWrapper<SysUser> wrapper = new QueryWrapper<>();
+        wrapper.orderByAsc("username")
+                .orderByAsc("user_id");
+        return fetchFromDatabase(wrapper, page, size);
     }
 
     @Cacheable(cacheNames = CACHE_NAME, key = "'usernamePrefix:' + #username + ':' + #page + ':' + #size",
@@ -225,7 +258,7 @@ public class SysUserService {
             return index;
         }
         QueryWrapper<SysUser> wrapper = new QueryWrapper<>();
-        wrapper.likeRight("id_card_number", idCardNumber);
+        wrapper.eq("id_card_number", idCardNumber);
         return fetchFromDatabase(wrapper, page, size);
     }
 
@@ -242,6 +275,22 @@ public class SysUserService {
         }
         QueryWrapper<SysUser> wrapper = new QueryWrapper<>();
         wrapper.likeRight("contact_number", contactNumber);
+        return fetchFromDatabase(wrapper, page, size);
+    }
+
+    @Cacheable(cacheNames = CACHE_NAME, key = "'email:' + #email + ':' + #page + ':' + #size",
+            unless = "#result == null || #result.isEmpty()")
+    public List<SysUser> searchByEmail(String email, int page, int size) {
+        if (isBlank(email)) {
+            return List.of();
+        }
+        validatePagination(page, size);
+        List<SysUser> index = mapHits(sysUserSearchRepository.searchByEmail(email, pageable(page, size)));
+        if (!index.isEmpty()) {
+            return index;
+        }
+        QueryWrapper<SysUser> wrapper = new QueryWrapper<>();
+        wrapper.likeRight("email", email);
         return fetchFromDatabase(wrapper, page, size);
     }
 
@@ -273,7 +322,7 @@ public class SysUserService {
             return index;
         }
         QueryWrapper<SysUser> wrapper = new QueryWrapper<>();
-        wrapper.likeRight("employee_number", employeeNumber);
+        wrapper.eq("employee_number", employeeNumber);
         return fetchFromDatabase(wrapper, page, size);
     }
 
@@ -299,6 +348,26 @@ public class SysUserService {
         QueryWrapper<SysUser> wrapper = new QueryWrapper<>();
         wrapper.eq("username", username);
         return sysUserMapper.selectCount(wrapper) > 0;
+    }
+
+    @Transactional(readOnly = true)
+    public SysUser findByExactEmail(String email) {
+        if (isBlank(email)) {
+            return null;
+        }
+        QueryWrapper<SysUser> wrapper = new QueryWrapper<>();
+        wrapper.eq("email", email.trim()).last("limit 1");
+        return sysUserMapper.selectOne(wrapper);
+    }
+
+    @Transactional(readOnly = true)
+    public SysUser findByExactIdCardNumber(String idCardNumber) {
+        if (isBlank(idCardNumber)) {
+            return null;
+        }
+        QueryWrapper<SysUser> wrapper = new QueryWrapper<>();
+        wrapper.eq("id_card_number", idCardNumber.trim()).last("limit 1");
+        return sysUserMapper.selectOne(wrapper);
     }
 
     @Transactional(readOnly = true)
@@ -357,7 +426,76 @@ public class SysUserService {
         SysRequestHistory history = sysRequestHistoryMapper.selectByIdempotencyKey(idempotencyKey);
         return history != null
                 && "SUCCESS".equalsIgnoreCase(history.getBusinessStatus())
-                && "DONE".equalsIgnoreCase(history.getRequestParams());
+                && history.getBusinessId() != null
+                && history.getBusinessId() > 0;
+    }
+
+    public PasswordChangeIdempotencyStatus beginPasswordChange(String idempotencyKey,
+                                                               Long userId,
+                                                               String fingerprint) {
+        if (isBlank(idempotencyKey)) {
+            return PasswordChangeIdempotencyStatus.STARTED;
+        }
+        if (userId == null || userId <= 0) {
+            throw new IllegalArgumentException("User ID must be positive");
+        }
+        if (isBlank(fingerprint)) {
+            throw new IllegalArgumentException("Password change fingerprint must not be blank");
+        }
+
+        SysRequestHistory history = sysRequestHistoryMapper.selectByIdempotencyKey(idempotencyKey);
+        if (history == null) {
+            sysRequestHistoryMapper.insert(buildPasswordChangeHistory(idempotencyKey, userId, fingerprint));
+            return PasswordChangeIdempotencyStatus.STARTED;
+        }
+        if (!"SYS_USER_PASSWORD_UPDATE".equalsIgnoreCase(history.getBusinessType())
+                || (history.getUserId() != null && !Objects.equals(history.getUserId(), userId))) {
+            return PasswordChangeIdempotencyStatus.CONFLICT;
+        }
+        String recordedFingerprint = extractRequestParam(history.getRequestParams(), "fingerprint");
+        if (StringUtils.hasText(recordedFingerprint) && !recordedFingerprint.equals(fingerprint)) {
+            return PasswordChangeIdempotencyStatus.CONFLICT;
+        }
+        if ("SUCCESS".equalsIgnoreCase(history.getBusinessStatus())
+                && history.getBusinessId() != null
+                && Objects.equals(history.getBusinessId(), userId)) {
+            return PasswordChangeIdempotencyStatus.ALREADY_SUCCEEDED;
+        }
+        if ("PROCESSING".equalsIgnoreCase(history.getBusinessStatus())) {
+            return PasswordChangeIdempotencyStatus.ALREADY_PROCESSING;
+        }
+        history.setBusinessStatus("PROCESSING");
+        history.setBusinessId(null);
+        history.setRequestParams(buildPasswordChangeRequestParams(userId, fingerprint));
+        history.setUpdatedAt(LocalDateTime.now());
+        sysRequestHistoryMapper.updateById(history);
+        return PasswordChangeIdempotencyStatus.STARTED;
+    }
+
+    public String buildPasswordChangeFingerprint(String currentPassword, String newPassword) {
+        if (isBlank(currentPassword) || isBlank(newPassword)) {
+            throw new IllegalArgumentException("Password values must not be blank");
+        }
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] bytes = digest.digest((currentPassword.trim() + "\n" + newPassword.trim())
+                    .getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(bytes);
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 is not available", e);
+        }
+    }
+
+    public void markPasswordChangeSuccess(String idempotencyKey, Long userId) {
+        if (!isBlank(idempotencyKey)) {
+            markHistorySuccess(idempotencyKey, userId);
+        }
+    }
+
+    public void markPasswordChangeFailure(String idempotencyKey, String reason) {
+        if (!isBlank(idempotencyKey)) {
+            markHistoryFailure(idempotencyKey, reason);
+        }
     }
 
     public void markHistorySuccess(String idempotencyKey, Long userId) {
@@ -368,7 +506,6 @@ public class SysUserService {
         }
         history.setBusinessStatus("SUCCESS");
         history.setBusinessId(userId);
-        history.setRequestParams("DONE");
         history.setUpdatedAt(LocalDateTime.now());
         sysRequestHistoryMapper.updateById(history);
     }
@@ -380,53 +517,133 @@ public class SysUserService {
             return;
         }
         history.setBusinessStatus("FAILED");
-        history.setRequestParams(truncate(reason));
+        history.setRequestParams(appendFailureReason(history.getRequestParams(), reason));
         history.setUpdatedAt(LocalDateTime.now());
         sysRequestHistoryMapper.updateById(history);
     }
 
-    private void sendKafkaMessage(String topic, String idempotencyKey, SysUser sysUser) {
-        try {
-            String payload = objectMapper.writeValueAsString(sysUser);
-            kafkaTemplate.send(topic, idempotencyKey, payload);
-        } catch (Exception ex) {
-            LOG.log(Level.SEVERE, "Failed to send SysUser Kafka message", ex);
-            throw new RuntimeException("Failed to send sys user event", ex);
+    private SysRequestHistory buildHistory(String idempotencyKey, SysUser sysUser, String action) {
+        SysRequestHistory history = new SysRequestHistory();
+        history.setIdempotencyKey(idempotencyKey);
+        history.setRequestMethod("POST");
+        history.setRequestUrl("/api/sys/users");
+        history.setRequestParams(buildRequestParams(sysUser));
+        history.setBusinessType(resolveBusinessType(action));
+        history.setBusinessStatus("PROCESSING");
+        history.setCreatedAt(LocalDateTime.now());
+        history.setUpdatedAt(LocalDateTime.now());
+        return history;
+    }
+
+    private SysRequestHistory buildPasswordChangeHistory(String idempotencyKey, Long userId, String fingerprint) {
+        SysRequestHistory history = new SysRequestHistory();
+        history.setIdempotencyKey(idempotencyKey);
+        history.setRequestMethod("PUT");
+        history.setRequestUrl("/api/users/me/password");
+        history.setRequestParams(buildPasswordChangeRequestParams(userId, fingerprint));
+        history.setBusinessType("SYS_USER_PASSWORD_UPDATE");
+        history.setBusinessStatus("PROCESSING");
+        history.setBusinessId(null);
+        history.setUserId(userId);
+        history.setCreatedAt(LocalDateTime.now());
+        history.setUpdatedAt(LocalDateTime.now());
+        return history;
+    }
+
+    private String buildRequestParams(SysUser sysUser) {
+        if (sysUser == null) {
+            return null;
         }
+        StringBuilder builder = new StringBuilder();
+        appendParam(builder, "username", sysUser.getUsername());
+        appendParam(builder, "realName", sysUser.getRealName());
+        appendParam(builder, "department", sysUser.getDepartment());
+        appendParam(builder, "employeeNumber", sysUser.getEmployeeNumber());
+        appendParam(builder, "status", sysUser.getStatus());
+        return truncate(builder.toString());
+    }
+
+    private String buildPasswordChangeRequestParams(Long userId, String fingerprint) {
+        StringBuilder builder = new StringBuilder();
+        appendParam(builder, "userId", userId);
+        appendParam(builder, "operation", "PASSWORD_CHANGE");
+        appendParam(builder, "fingerprint", fingerprint);
+        return truncate(builder.toString());
+    }
+
+    private String resolveBusinessType(String action) {
+        String normalized = isBlank(action) ? "CREATE" : action.trim().toUpperCase();
+        return "SYS_USER_" + normalized;
+    }
+
+    private void appendParam(StringBuilder builder, String key, Object value) {
+        if (builder == null || value == null) {
+            return;
+        }
+        String normalized = value.toString().trim();
+        if (normalized.isEmpty()) {
+            return;
+        }
+        if (!builder.isEmpty()) {
+            builder.append(',');
+        }
+        builder.append(key).append('=').append(normalized);
+    }
+
+    private String appendFailureReason(String existing, String reason) {
+        String normalizedReason = truncate(reason);
+        if (isBlank(normalizedReason)) {
+            return existing;
+        }
+        if (isBlank(existing)) {
+            return "failure=" + normalizedReason;
+        }
+        return truncate(existing + ",failure=" + normalizedReason);
+    }
+
+    private String extractRequestParam(String requestParams, String key) {
+        if (isBlank(requestParams) || isBlank(key)) {
+            return null;
+        }
+        for (String part : requestParams.split(",")) {
+            int separator = part.indexOf('=');
+            if (separator <= 0) {
+                continue;
+            }
+            String candidateKey = part.substring(0, separator).trim();
+            if (!candidateKey.equalsIgnoreCase(key)) {
+                continue;
+            }
+            String value = part.substring(separator + 1).trim();
+            return value.isEmpty() ? null : value;
+        }
+        return null;
     }
 
     private void syncToIndexAfterCommit(SysUser sysUser) {
         if (sysUser == null) {
             return;
         }
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                SysUserDocument doc = SysUserDocument.fromEntity(sysUser);
-                if (doc != null) {
-                    sysUserSearchRepository.save(doc);
-                }
-            }
-        });
+        SysUserDocument doc = SysUserDocument.fromEntity(sysUser);
+        if (doc == null) {
+            return;
+        }
+        runAfterCommitOrNow(() -> sysUserSearchRepository.save(doc));
     }
 
     private void syncBatchToIndexAfterCommit(List<SysUser> records) {
         if (records == null || records.isEmpty()) {
             return;
         }
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                List<SysUserDocument> documents = records.stream()
-                        .filter(Objects::nonNull)
-                        .map(SysUserDocument::fromEntity)
-                        .filter(Objects::nonNull)
-                        .collect(Collectors.toList());
-                if (!documents.isEmpty()) {
-                    sysUserSearchRepository.saveAll(documents);
-                }
-            }
-        });
+        List<SysUserDocument> documents = records.stream()
+                .filter(Objects::nonNull)
+                .map(SysUserDocument::fromEntity)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toList());
+        if (documents.isEmpty()) {
+            return;
+        }
+        runAfterCommitOrNow(() -> sysUserSearchRepository.saveAll(documents));
     }
 
     private void validateSysUser(SysUser sysUser) {
@@ -439,6 +656,7 @@ public class SysUserService {
         if (isBlank(sysUser.getPassword())) {
             throw new IllegalArgumentException("Password must not be blank");
         }
+        sysUser.setUsername(sysUser.getUsername().trim());
         if (sysUser.getCreatedAt() == null) {
             sysUser.setCreatedAt(LocalDateTime.now());
         }
@@ -448,6 +666,31 @@ public class SysUserService {
         if (isBlank(sysUser.getStatus())) {
             sysUser.setStatus("Active");
         }
+    }
+
+    private void preparePasswordForPersistence(SysUser sysUser) {
+        String normalizedPassword = sysUser.getPassword().trim();
+        boolean needsEncoding = !isEncodedPassword(normalizedPassword);
+        if (needsEncoding) {
+            sysUser.setPassword(passwordEncoder.encode(normalizedPassword));
+            if (sysUser.getPasswordUpdateTime() == null) {
+                sysUser.setPasswordUpdateTime(LocalDateTime.now());
+            }
+            return;
+        }
+        sysUser.setPassword(normalizedPassword);
+    }
+
+    private SysUser persistExistingUser(SysUser sysUser) {
+        validateSysUser(sysUser);
+        requirePositive(sysUser.getUserId());
+        preparePasswordForPersistence(sysUser);
+        int rows = sysUserMapper.updateById(sysUser);
+        if (rows == 0) {
+            throw new IllegalStateException("SysUser not found for id=" + sysUser.getUserId());
+        }
+        syncToIndexAfterCommit(sysUser);
+        return sysUser;
     }
 
     private void validatePagination(int page, int size) {
@@ -500,10 +743,41 @@ public class SysUserService {
         return value == null || value.trim().isEmpty();
     }
 
+    private boolean isEncodedPassword(String password) {
+        return !isBlank(password) && BCRYPT_PATTERN.matcher(password.trim()).matches();
+    }
+
+    private void evictUserCache() {
+        Cache cache = cacheManager.getCache(CACHE_NAME);
+        if (cache != null) {
+            cache.clear();
+        }
+    }
+
     private String truncate(String value) {
         if (value == null) {
             return null;
         }
         return value.length() <= 500 ? value : value.substring(0, 500);
+    }
+
+    private void runAfterCommitOrNow(Runnable task) {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    task.run();
+                }
+            });
+            return;
+        }
+        task.run();
+    }
+
+    public enum PasswordChangeIdempotencyStatus {
+        STARTED,
+        ALREADY_SUCCEEDED,
+        ALREADY_PROCESSING,
+        CONFLICT
     }
 }

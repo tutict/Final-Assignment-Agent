@@ -1,6 +1,7 @@
 package com.tutict.finalassignmentbackend.entity;
 
 import com.baomidou.mybatisplus.annotation.*;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Data;
 
 import java.io.Serial;
@@ -37,12 +38,14 @@ public class SysUser implements Serializable {
      * 密码 (加密存储)
      */
     @TableField("password")
+    @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
     private String password;
 
     /**
      * 密码盐值
      */
     @TableField("salt")
+    @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
     private String salt;
 
     /**

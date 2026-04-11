@@ -30,9 +30,9 @@ public interface AppealRecordSearchRepository extends ElasticsearchRepository<Ap
 
     @Query("""
             {
-              "match_phrase_prefix": {
-                "appealNumber": {
-                  "query": "?0"
+              "term": {
+                "appealNumber.keyword": {
+                  "value": "?0"
                 }
               }
             }
@@ -45,10 +45,9 @@ public interface AppealRecordSearchRepository extends ElasticsearchRepository<Ap
 
     @Query("""
             {
-              "match": {
-                "appealNumber": {
-                  "query": "?0",
-                  "fuzziness": "AUTO"
+              "term": {
+                "appealNumber.keyword": {
+                  "value": "?0"
                 }
               }
             }
@@ -57,6 +56,22 @@ public interface AppealRecordSearchRepository extends ElasticsearchRepository<Ap
 
     default SearchHits<AppealRecordDocument> searchByAppealNumberFuzzy(String appealNumber) {
         return searchByAppealNumberFuzzy(appealNumber, PageRequest.of(0, DEFAULT_PAGE_SIZE));
+    }
+
+    @Query("""
+            {
+              "match": {
+                "appealReason": {
+                  "query": "?0",
+                  "fuzziness": "AUTO"
+                }
+              }
+            }
+            """)
+    SearchHits<AppealRecordDocument> searchByAppealReasonFuzzy(String appealReason, Pageable pageable);
+
+    default SearchHits<AppealRecordDocument> searchByAppealReasonFuzzy(String appealReason) {
+        return searchByAppealReasonFuzzy(appealReason, PageRequest.of(0, DEFAULT_PAGE_SIZE));
     }
 
     @Query("""
@@ -92,9 +107,9 @@ public interface AppealRecordSearchRepository extends ElasticsearchRepository<Ap
 
     @Query("""
             {
-              "match_phrase_prefix": {
-                "appellantIdCard": {
-                  "query": "?0"
+              "term": {
+                "appellantIdCard.keyword": {
+                  "value": "?0"
                 }
               }
             }

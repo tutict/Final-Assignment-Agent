@@ -62,20 +62,10 @@ public class SysRolePermissionService {
             throw new RuntimeException("Duplicate role-permission request detected");
         }
 
-        SysRequestHistory history = new SysRequestHistory();
-        history.setIdempotencyKey(idempotencyKey);
-        history.setBusinessStatus("PROCESSING");
-        history.setCreatedAt(LocalDateTime.now());
-        history.setUpdatedAt(LocalDateTime.now());
+        SysRequestHistory history = buildHistory(idempotencyKey, relation, action);
         sysRequestHistoryMapper.insert(history);
 
         sendKafkaMessage("sys_role_permission_" + action, idempotencyKey, relation);
-
-        history.setBusinessStatus("SUCCESS");
-        history.setBusinessId(relation.getId());
-        history.setRequestParams("PENDING");
-        history.setUpdatedAt(LocalDateTime.now());
-        sysRequestHistoryMapper.updateById(history);
     }
 
     @Transactional
@@ -90,8 +80,23 @@ public class SysRolePermissionService {
     @Transactional
     @CacheEvict(cacheNames = CACHE_NAME, allEntries = true)
     public SysRolePermission updateRelation(SysRolePermission relation) {
+        throw new IllegalStateException("Role-permission bindings cannot be manually updated; recreate the binding instead");
+    }
+
+    @Transactional
+    @CacheEvict(cacheNames = CACHE_NAME, allEntries = true)
+    public SysRolePermission updateRelationSystemManaged(SysRolePermission relation) {
         validateRelation(relation);
         requirePositive(relation.getId(), "Relation ID");
+        SysRolePermission existing = sysRolePermissionMapper.selectById(relation.getId());
+        if (existing == null) {
+            throw new IllegalStateException("SysRolePermission not found for id=" + relation.getId());
+        }
+        ensureRelationIdentityIsStable(relation, existing);
+        relation.setRoleId(existing.getRoleId());
+        relation.setPermissionId(existing.getPermissionId());
+        relation.setCreatedAt(existing.getCreatedAt());
+        relation.setCreatedBy(existing.getCreatedBy());
         int rows = sysRolePermissionMapper.updateById(relation);
         if (rows == 0) {
             throw new IllegalStateException("SysRolePermission not found for id=" + relation.getId());
@@ -108,12 +113,7 @@ public class SysRolePermissionService {
         if (rows == 0) {
             throw new IllegalStateException("SysRolePermission not found for id=" + id);
         }
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                sysRolePermissionSearchRepository.deleteById(id);
-            }
-        });
+        runAfterCommitOrNow(() -> sysRolePermissionSearchRepository.deleteById(id));
     }
 
     @Transactional(readOnly = true)
@@ -191,7 +191,8 @@ public class SysRolePermissionService {
         SysRequestHistory history = sysRequestHistoryMapper.selectByIdempotencyKey(idempotencyKey);
         return history != null
                 && "SUCCESS".equalsIgnoreCase(history.getBusinessStatus())
-                && "DONE".equalsIgnoreCase(history.getRequestParams());
+                && history.getBusinessId() != null
+                && history.getBusinessId() > 0;
     }
 
     public void markHistorySuccess(String idempotencyKey, Long relationId) {
@@ -202,7 +203,6 @@ public class SysRolePermissionService {
         }
         history.setBusinessStatus("SUCCESS");
         history.setBusinessId(relationId);
-        history.setRequestParams("DONE");
         history.setUpdatedAt(LocalDateTime.now());
         sysRequestHistoryMapper.updateById(history);
     }
@@ -214,9 +214,63 @@ public class SysRolePermissionService {
             return;
         }
         history.setBusinessStatus("FAILED");
-        history.setRequestParams(truncate(reason));
+        history.setRequestParams(appendFailureReason(history.getRequestParams(), reason));
         history.setUpdatedAt(LocalDateTime.now());
         sysRequestHistoryMapper.updateById(history);
+    }
+
+    private SysRequestHistory buildHistory(String idempotencyKey, SysRolePermission relation, String action) {
+        SysRequestHistory history = new SysRequestHistory();
+        history.setIdempotencyKey(idempotencyKey);
+        history.setRequestMethod("POST");
+        history.setRequestUrl("/api/sys/role-permissions");
+        history.setRequestParams(buildRequestParams(relation));
+        history.setBusinessType(resolveBusinessType(action));
+        history.setBusinessStatus("PROCESSING");
+        history.setCreatedAt(LocalDateTime.now());
+        history.setUpdatedAt(LocalDateTime.now());
+        return history;
+    }
+
+    private String buildRequestParams(SysRolePermission relation) {
+        if (relation == null) {
+            return null;
+        }
+        StringBuilder builder = new StringBuilder();
+        appendParam(builder, "roleId", relation.getRoleId());
+        appendParam(builder, "permissionId", relation.getPermissionId());
+        appendParam(builder, "createdBy", relation.getCreatedBy());
+        return truncate(builder.toString());
+    }
+
+    private String resolveBusinessType(String action) {
+        String normalized = isBlank(action) ? "CREATE" : action.trim().toUpperCase();
+        return "SYS_ROLE_PERMISSION_" + normalized;
+    }
+
+    private void appendParam(StringBuilder builder, String key, Object value) {
+        if (builder == null || value == null) {
+            return;
+        }
+        String normalized = value.toString().trim();
+        if (normalized.isEmpty()) {
+            return;
+        }
+        if (!builder.isEmpty()) {
+            builder.append(',');
+        }
+        builder.append(key).append('=').append(normalized);
+    }
+
+    private String appendFailureReason(String existing, String reason) {
+        String normalizedReason = truncate(reason);
+        if (isBlank(normalizedReason)) {
+            return existing;
+        }
+        if (isBlank(existing)) {
+            return "failure=" + normalizedReason;
+        }
+        return truncate(existing + ",failure=" + normalizedReason);
     }
 
     private void sendKafkaMessage(String topic, String idempotencyKey, SysRolePermission relation) {
@@ -233,13 +287,10 @@ public class SysRolePermissionService {
         if (relation == null) {
             return;
         }
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                SysRolePermissionDocument doc = SysRolePermissionDocument.fromEntity(relation);
-                if (doc != null) {
-                    sysRolePermissionSearchRepository.save(doc);
-                }
+        runAfterCommitOrNow(() -> {
+            SysRolePermissionDocument doc = SysRolePermissionDocument.fromEntity(relation);
+            if (doc != null) {
+                sysRolePermissionSearchRepository.save(doc);
             }
         });
     }
@@ -248,17 +299,14 @@ public class SysRolePermissionService {
         if (records == null || records.isEmpty()) {
             return;
         }
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                List<SysRolePermissionDocument> documents = records.stream()
-                        .filter(Objects::nonNull)
-                        .map(SysRolePermissionDocument::fromEntity)
-                        .filter(Objects::nonNull)
-                        .collect(Collectors.toList());
-                if (!documents.isEmpty()) {
-                    sysRolePermissionSearchRepository.saveAll(documents);
-                }
+        runAfterCommitOrNow(() -> {
+            List<SysRolePermissionDocument> documents = records.stream()
+                    .filter(Objects::nonNull)
+                    .map(SysRolePermissionDocument::fromEntity)
+                    .filter(Objects::nonNull)
+                    .collect(Collectors.toList());
+            if (!documents.isEmpty()) {
+                sysRolePermissionSearchRepository.saveAll(documents);
             }
         });
     }
@@ -296,6 +344,18 @@ public class SysRolePermissionService {
         }
     }
 
+    private void ensureRelationIdentityIsStable(SysRolePermission relation, SysRolePermission existing) {
+        if (relation == null || existing == null) {
+            return;
+        }
+        if (relation.getRoleId() != null && !relation.getRoleId().equals(existing.getRoleId())) {
+            throw new IllegalStateException("Role ID cannot be changed for an existing role-permission binding");
+        }
+        if (relation.getPermissionId() != null && !relation.getPermissionId().equals(existing.getPermissionId())) {
+            throw new IllegalStateException("Permission ID cannot be changed for an existing role-permission binding");
+        }
+    }
+
     private void validatePagination(int page, int size) {
         if (page < 1 || size < 1) {
             throw new IllegalArgumentException("Page must be >= 1 and size must be >= 1");
@@ -317,5 +377,21 @@ public class SysRolePermissionService {
             return null;
         }
         return value.length() <= 500 ? value : value.substring(0, 500);
+    }
+
+    private void runAfterCommitOrNow(Runnable task) {
+        if (task == null) {
+            return;
+        }
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    task.run();
+                }
+            });
+            return;
+        }
+        task.run();
     }
 }

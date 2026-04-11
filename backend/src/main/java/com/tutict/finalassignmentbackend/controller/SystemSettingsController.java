@@ -27,7 +27,7 @@ import java.util.logging.Logger;
 
 @RestController
 @RequestMapping("/api/system/settings")
-@Tag(name = "System Settings", description = "系统配置与字典管理接口")
+@Tag(name = "System Settings", description = "System Settings endpoints")
 @SecurityRequirement(name = "bearerAuth")
 @RolesAllowed({"SUPER_ADMIN", "ADMIN"})
 public class SystemSettingsController {
@@ -44,7 +44,7 @@ public class SystemSettingsController {
     }
 
     @PostMapping
-    @Operation(summary = "创建系统配置")
+    @Operation(summary = "Create Setting")
     public ResponseEntity<SysSettings> createSetting(@RequestBody SysSettings request,
                                                      @RequestHeader(value = "Idempotency-Key", required = false)
                                                      String idempotencyKey) {
@@ -71,7 +71,7 @@ public class SystemSettingsController {
     }
 
     @PutMapping("/{settingId}")
-    @Operation(summary = "更新系统配置")
+    @Operation(summary = "Update Setting")
     public ResponseEntity<SysSettings> updateSetting(@PathVariable Integer settingId,
                                                      @RequestBody SysSettings request,
                                                      @RequestHeader(value = "Idempotency-Key", required = false)
@@ -80,6 +80,9 @@ public class SystemSettingsController {
         try {
             request.setSettingId(settingId);
             if (useKey) {
+                if (sysSettingsService.shouldSkipProcessing(idempotencyKey)) {
+                    return ResponseEntity.status(HttpStatus.ALREADY_REPORTED).build();
+                }
                 sysSettingsService.checkAndInsertIdempotency(idempotencyKey, request, "update");
             }
             SysSettings updated = sysSettingsService.updateSysSettings(request);
@@ -97,7 +100,7 @@ public class SystemSettingsController {
     }
 
     @DeleteMapping("/{settingId}")
-    @Operation(summary = "删除系统配置")
+    @Operation(summary = "Delete Setting")
     public ResponseEntity<Void> deleteSetting(@PathVariable Integer settingId) {
         try {
             sysSettingsService.deleteSysSettings(settingId);
@@ -109,7 +112,7 @@ public class SystemSettingsController {
     }
 
     @GetMapping("/{settingId}")
-    @Operation(summary = "查询系统配置详情")
+    @Operation(summary = "Get Setting")
     public ResponseEntity<SysSettings> getSetting(@PathVariable Integer settingId) {
         try {
             SysSettings settings = sysSettingsService.findById(settingId);
@@ -121,10 +124,11 @@ public class SystemSettingsController {
     }
 
     @GetMapping
-    @Operation(summary = "查询全部系统配置")
-    public ResponseEntity<List<SysSettings>> listSettings() {
+    @Operation(summary = "List Settings")
+    public ResponseEntity<List<SysSettings>> listSettings(@RequestParam(defaultValue = "1") int page,
+                                                          @RequestParam(defaultValue = "50") int size) {
         try {
-            return ResponseEntity.ok(sysSettingsService.findAll());
+            return ResponseEntity.ok(sysSettingsService.findAll(page, size));
         } catch (Exception ex) {
             LOG.log(Level.WARNING, "List settings failed", ex);
             return ResponseEntity.status(resolveStatus(ex)).build();
@@ -132,7 +136,7 @@ public class SystemSettingsController {
     }
 
     @GetMapping("/key/{settingKey}")
-    @Operation(summary = "根据配置键查询")
+    @Operation(summary = "Get By Key")
     public ResponseEntity<SysSettings> getByKey(@PathVariable String settingKey) {
         try {
             SysSettings settings = sysSettingsService.findByKey(settingKey);
@@ -144,7 +148,7 @@ public class SystemSettingsController {
     }
 
     @GetMapping("/category/{category}")
-    @Operation(summary = "按分类查询配置")
+    @Operation(summary = "Get By Category")
     public ResponseEntity<List<SysSettings>> getByCategory(@PathVariable String category,
                                                            @RequestParam(defaultValue = "1") int page,
                                                            @RequestParam(defaultValue = "50") int size) {
@@ -157,7 +161,7 @@ public class SystemSettingsController {
     }
 
     @GetMapping("/search/key/prefix")
-    @Operation(summary = "Search settings by key prefix")
+    @Operation(summary = "Search By Key Prefix")
     public ResponseEntity<List<SysSettings>> searchByKeyPrefix(@RequestParam String settingKey,
                                                                @RequestParam(defaultValue = "1") int page,
                                                                @RequestParam(defaultValue = "50") int size) {
@@ -165,7 +169,7 @@ public class SystemSettingsController {
     }
 
     @GetMapping("/search/key/fuzzy")
-    @Operation(summary = "Search settings by key fuzzy")
+    @Operation(summary = "Search By Key Fuzzy")
     public ResponseEntity<List<SysSettings>> searchByKeyFuzzy(@RequestParam String settingKey,
                                                               @RequestParam(defaultValue = "1") int page,
                                                               @RequestParam(defaultValue = "50") int size) {
@@ -173,7 +177,7 @@ public class SystemSettingsController {
     }
 
     @GetMapping("/search/type")
-    @Operation(summary = "Search settings by type")
+    @Operation(summary = "Search By Type")
     public ResponseEntity<List<SysSettings>> searchByType(@RequestParam String settingType,
                                                           @RequestParam(defaultValue = "1") int page,
                                                           @RequestParam(defaultValue = "50") int size) {
@@ -181,7 +185,7 @@ public class SystemSettingsController {
     }
 
     @GetMapping("/search/editable")
-    @Operation(summary = "Search settings by editable flag")
+    @Operation(summary = "Search By Editable")
     public ResponseEntity<List<SysSettings>> searchByEditable(@RequestParam boolean isEditable,
                                                               @RequestParam(defaultValue = "1") int page,
                                                               @RequestParam(defaultValue = "50") int size) {
@@ -189,7 +193,7 @@ public class SystemSettingsController {
     }
 
     @GetMapping("/search/encrypted")
-    @Operation(summary = "Search settings by encrypted flag")
+    @Operation(summary = "Search By Encrypted")
     public ResponseEntity<List<SysSettings>> searchByEncrypted(@RequestParam boolean isEncrypted,
                                                                @RequestParam(defaultValue = "1") int page,
                                                                @RequestParam(defaultValue = "50") int size) {
@@ -197,7 +201,7 @@ public class SystemSettingsController {
     }
 
     @PostMapping("/dicts")
-    @Operation(summary = "创建数据字典")
+    @Operation(summary = "Create Dict")
     public ResponseEntity<SysDict> createDict(@RequestBody SysDict request,
                                               @RequestHeader(value = "Idempotency-Key", required = false)
                                               String idempotencyKey) {
@@ -224,7 +228,7 @@ public class SystemSettingsController {
     }
 
     @PutMapping("/dicts/{dictId}")
-    @Operation(summary = "更新数据字典")
+    @Operation(summary = "Update Dict")
     public ResponseEntity<SysDict> updateDict(@PathVariable Integer dictId,
                                               @RequestBody SysDict request,
                                               @RequestHeader(value = "Idempotency-Key", required = false)
@@ -233,6 +237,9 @@ public class SystemSettingsController {
         try {
             request.setDictId(dictId);
             if (useKey) {
+                if (sysDictService.shouldSkipProcessing(idempotencyKey)) {
+                    return ResponseEntity.status(HttpStatus.ALREADY_REPORTED).build();
+                }
                 sysDictService.checkAndInsertIdempotency(idempotencyKey, request, "update");
             }
             SysDict updated = sysDictService.updateSysDict(request);
@@ -250,7 +257,7 @@ public class SystemSettingsController {
     }
 
     @DeleteMapping("/dicts/{dictId}")
-    @Operation(summary = "删除数据字典")
+    @Operation(summary = "Delete Dict")
     public ResponseEntity<Void> deleteDict(@PathVariable Integer dictId) {
         try {
             sysDictService.deleteSysDict(dictId);
@@ -262,7 +269,7 @@ public class SystemSettingsController {
     }
 
     @GetMapping("/dicts/{dictId}")
-    @Operation(summary = "查询字典详情")
+    @Operation(summary = "Get Dict")
     public ResponseEntity<SysDict> getDict(@PathVariable Integer dictId) {
         try {
             SysDict dict = sysDictService.findById(dictId);
@@ -274,7 +281,7 @@ public class SystemSettingsController {
     }
 
     @GetMapping("/dicts/search/type")
-    @Operation(summary = "Search dicts by type")
+    @Operation(summary = "Search Dict By Type")
     public ResponseEntity<List<SysDict>> searchDictByType(@RequestParam String dictType,
                                                           @RequestParam(defaultValue = "1") int page,
                                                           @RequestParam(defaultValue = "50") int size) {
@@ -282,7 +289,7 @@ public class SystemSettingsController {
     }
 
     @GetMapping("/dicts/search/code")
-    @Operation(summary = "Search dicts by code prefix")
+    @Operation(summary = "Search Dict By Code")
     public ResponseEntity<List<SysDict>> searchDictByCode(@RequestParam String dictCode,
                                                           @RequestParam(defaultValue = "1") int page,
                                                           @RequestParam(defaultValue = "50") int size) {
@@ -290,7 +297,7 @@ public class SystemSettingsController {
     }
 
     @GetMapping("/dicts/search/label/prefix")
-    @Operation(summary = "Search dicts by label prefix")
+    @Operation(summary = "Search Dict By Label Prefix")
     public ResponseEntity<List<SysDict>> searchDictByLabelPrefix(@RequestParam String dictLabel,
                                                                  @RequestParam(defaultValue = "1") int page,
                                                                  @RequestParam(defaultValue = "50") int size) {
@@ -298,7 +305,7 @@ public class SystemSettingsController {
     }
 
     @GetMapping("/dicts/search/label/fuzzy")
-    @Operation(summary = "Search dicts by label fuzzy")
+    @Operation(summary = "Search Dict By Label Fuzzy")
     public ResponseEntity<List<SysDict>> searchDictByLabelFuzzy(@RequestParam String dictLabel,
                                                                 @RequestParam(defaultValue = "1") int page,
                                                                 @RequestParam(defaultValue = "50") int size) {
@@ -306,7 +313,7 @@ public class SystemSettingsController {
     }
 
     @GetMapping("/dicts/search/parent")
-    @Operation(summary = "Search dicts by parent id")
+    @Operation(summary = "Search Dict By Parent")
     public ResponseEntity<List<SysDict>> searchDictByParent(@RequestParam Integer parentId,
                                                             @RequestParam(defaultValue = "1") int page,
                                                             @RequestParam(defaultValue = "50") int size) {
@@ -314,7 +321,7 @@ public class SystemSettingsController {
     }
 
     @GetMapping("/dicts/search/default")
-    @Operation(summary = "Search dicts by default flag")
+    @Operation(summary = "Search Dict By Default")
     public ResponseEntity<List<SysDict>> searchDictByDefault(@RequestParam boolean isDefault,
                                                              @RequestParam(defaultValue = "1") int page,
                                                              @RequestParam(defaultValue = "50") int size) {
@@ -322,7 +329,7 @@ public class SystemSettingsController {
     }
 
     @GetMapping("/dicts/search/status")
-    @Operation(summary = "Search dicts by status")
+    @Operation(summary = "Search Dict By Status")
     public ResponseEntity<List<SysDict>> searchDictByStatus(@RequestParam String status,
                                                             @RequestParam(defaultValue = "1") int page,
                                                             @RequestParam(defaultValue = "50") int size) {
@@ -330,10 +337,11 @@ public class SystemSettingsController {
     }
 
     @GetMapping("/dicts")
-    @Operation(summary = "查询全部数据字典")
-    public ResponseEntity<List<SysDict>> listDicts() {
+    @Operation(summary = "List Dicts")
+    public ResponseEntity<List<SysDict>> listDicts(@RequestParam(defaultValue = "1") int page,
+                                                   @RequestParam(defaultValue = "50") int size) {
         try {
-            return ResponseEntity.ok(sysDictService.findAll());
+            return ResponseEntity.ok(sysDictService.findAll(page, size));
         } catch (Exception ex) {
             LOG.log(Level.WARNING, "List dicts failed", ex);
             return ResponseEntity.status(resolveStatus(ex)).build();

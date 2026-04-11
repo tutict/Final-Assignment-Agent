@@ -68,9 +68,9 @@ public class AuditLoginLogKafkaListener {
             AuditLoginLog result;
             if ("create".equalsIgnoreCase(action)) {
                 payload.setLogId(null);
-                result = auditLoginLogService.createAuditLoginLog(payload);
+                result = auditLoginLogService.createAuditLoginLogSystemManaged(payload);
             } else if ("update".equalsIgnoreCase(action)) {
-                result = auditLoginLogService.updateAuditLoginLog(payload);
+                result = auditLoginLogService.updateAuditLoginLogSystemManaged(payload);
             } else {
                 log.log(Level.WARNING, "Unsupported action: {0}", action);
                 return;

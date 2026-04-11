@@ -21,7 +21,7 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/api/ai")
-@Tag(name = "AI Chat", description = "交通违法业务 Agent 接口")
+@Tag(name = "AI Chat", description = "AI chat and action endpoints")
 public class ChatController {
 
     private final ChatAgent chatAgent;
@@ -32,52 +32,52 @@ public class ChatController {
 
     @GetMapping(value = "/chat", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     @Operation(
-            summary = "交通业务 Agent 流式对话",
-            description = "通过 SSE 返回 Agent 的状态、联网检索结果、回答正文和动作建议。"
+            summary = "Stream chat events",
+            description = "Streams agent status, web-search progress, answer content, and suggested actions via SSE."
     )
     @ApiResponses({
-            @ApiResponse(responseCode = "200", description = "成功返回流式响应"),
-            @ApiResponse(responseCode = "400", description = "缺少 message/massage 参数"),
-            @ApiResponse(responseCode = "500", description = "服务内部错误")
+            @ApiResponse(responseCode = "200", description = "Streaming response started successfully."),
+            @ApiResponse(responseCode = "400", description = "Missing message or massage parameter."),
+            @ApiResponse(responseCode = "500", description = "Internal server error.")
     })
     public Flux<ServerSentEvent<AgentEvent>> chat(
             @RequestParam(value = "message", required = false)
-            @Parameter(description = "用户输入，推荐使用该参数", example = "如何处理超速罚单？")
+            @Parameter(description = "Primary user input", example = "How do I handle a speeding ticket?")
             String message,
             @RequestParam(value = "massage", required = false)
-            @Parameter(description = "兼容旧参数，已废弃", deprecated = true)
+            @Parameter(description = "Legacy alias for message", deprecated = true)
             String massage,
             @RequestParam(value = "webSearch", defaultValue = "false")
-            @Parameter(description = "是否启用联网检索", example = "true")
+            @Parameter(description = "Whether to enable web search", example = "true")
             boolean webSearch) {
         return chatAgent.streamChat(message, massage, webSearch);
     }
 
     @GetMapping(value = "/chat/actions", produces = MediaType.APPLICATION_JSON_VALUE)
     @Operation(
-            summary = "获取 Agent 动作方案",
-            description = "返回可执行的页面动作建议，适合前端二次确认后执行。"
+            summary = "Get chat actions",
+            description = "Returns suggested UI actions that the frontend can confirm before executing."
     )
     @ApiResponses({
-            @ApiResponse(responseCode = "200", description = "成功返回动作方案"),
-            @ApiResponse(responseCode = "400", description = "缺少 message/massage 参数"),
-            @ApiResponse(responseCode = "500", description = "服务内部错误")
+            @ApiResponse(responseCode = "200", description = "Action plan returned successfully."),
+            @ApiResponse(responseCode = "400", description = "Missing message or massage parameter."),
+            @ApiResponse(responseCode = "500", description = "Internal server error.")
     })
     public ChatActionResponse chatActions(
             @RequestParam(value = "message", required = false)
-            @Parameter(description = "用户输入，推荐使用该参数", example = "帮我打开罚款查询页面")
+            @Parameter(description = "Primary user input", example = "Open the fine search page for me")
             String message,
             @RequestParam(value = "massage", required = false)
-            @Parameter(description = "兼容旧参数，已废弃", deprecated = true)
+            @Parameter(description = "Legacy alias for message", deprecated = true)
             String massage,
             @RequestParam(value = "webSearch", defaultValue = "false")
-            @Parameter(description = "是否启用联网检索", example = "true")
+            @Parameter(description = "Whether to enable web search", example = "true")
             boolean webSearch) {
         return chatAgent.chatWithActions(message, massage, webSearch);
     }
 
     @GetMapping(value = "/skills", produces = MediaType.APPLICATION_JSON_VALUE)
-    @Operation(summary = "列出当前 Agent skills", description = "前端可据此展示 Agent 的能力清单。")
+    @Operation(summary = "List skills", description = "Returns the skills currently exposed by the agent.")
     public List<AgentSkillInfo> skills() {
         return chatAgent.listSkills();
     }

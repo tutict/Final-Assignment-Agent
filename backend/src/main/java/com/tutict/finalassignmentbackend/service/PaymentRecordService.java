@@ -40,6 +40,7 @@ import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -51,6 +52,9 @@ public class PaymentRecordService {
 
     private static final Logger log = Logger.getLogger(PaymentRecordService.class.getName());
     private static final String CACHE_NAME = "paymentRecordCache";
+    private static final Set<String> SELF_SERVICE_PAYMENT_CHANNELS = Set.of("APP", "USER_SELF_SERVICE");
+    private static final String FINANCE_REVIEW_PREFIX = "[FINANCE_REVIEW]|";
+    private static final Set<String> FINANCE_REVIEW_RESULTS = Set.of("APPROVED", "NEED_PROOF");
 
     private final PaymentRecordMapper paymentRecordMapper;
     private final SysRequestHistoryMapper sysRequestHistoryMapper;
@@ -93,10 +97,10 @@ public class PaymentRecordService {
             throw new RuntimeException("Duplicate payment record request detected");
         }
 
-        SysRequestHistory history = buildCreateHistory(idempotencyKey, paymentRecord);
+        SysRequestHistory history = buildHistory(idempotencyKey, paymentRecord, action);
         sysRequestHistoryMapper.insert(history);
 
-        // 閸掆晝鏁?Kafka 楠炴寧鎸遍弨顖欑帛娴滃娆㈢紒鎾寸亯閿涘奔浜掓笟鍨吀鐠佲€虫嫲鐎电澶?
+        // Persist the idempotency record first, then publish the Kafka event for downstream indexing.
         sendKafkaMessage("payment_record_" + action, idempotencyKey, paymentRecord);
 
     }
@@ -164,6 +168,107 @@ public class PaymentRecordService {
             throw new IllegalStateException("Payment state did not transition to the expected target state");
         }
         return updatePaymentStatus(paymentId, newState);
+    }
+
+    @Transactional
+    @CacheEvict(cacheNames = CACHE_NAME, allEntries = true)
+    public PaymentRecord updateSelfServicePaymentConfirmationDetails(Long paymentId,
+                                                                    String transactionId,
+                                                                    String receiptUrl) {
+        requirePositive(paymentId, "Payment ID");
+        String normalizedTransactionId = trimToNull(transactionId);
+        if (normalizedTransactionId == null) {
+            throw new IllegalArgumentException("Transaction ID must not be blank");
+        }
+        PaymentRecord existing = paymentRecordMapper.selectById(paymentId);
+        if (existing == null) {
+            throw new IllegalStateException("PaymentRecord not found for id=" + paymentId);
+        }
+        if (!shouldCreateAsPendingSelfServicePayment(existing)) {
+            throw new IllegalStateException("Only self-service payment orders can accept confirmation details");
+        }
+        if (!Objects.equals(resolvePaymentState(existing.getPaymentStatus()), PaymentState.UNPAID)) {
+            throw new IllegalStateException("Only pending self-service payment orders can accept confirmation details");
+        }
+        ensureUniqueTransactionId(normalizedTransactionId, paymentId);
+
+        LocalDateTime confirmationTime = LocalDateTime.now();
+        existing.setTransactionId(normalizedTransactionId);
+        existing.setReceiptUrl(trimToNull(receiptUrl));
+        existing.setReceiptNumber(defaultIfBlank(existing.getReceiptNumber(), generateReferenceNumber("RCT")));
+        existing.setPaymentTime(confirmationTime);
+        existing.setUpdatedAt(confirmationTime);
+        paymentRecordMapper.updateById(existing);
+        syncToIndexAfterCommit(existing);
+        return existing;
+    }
+
+    @Transactional
+    @CacheEvict(cacheNames = CACHE_NAME, allEntries = true)
+    public PaymentRecord recordFinanceReview(Long paymentId, String reviewResult, String reviewOpinion) {
+        requirePositive(paymentId, "Payment ID");
+        String normalizedReviewResult = normalizeFinanceReviewResult(reviewResult);
+        String normalizedReviewOpinion = normalizeFinanceReviewOpinion(reviewOpinion);
+        if ("NEED_PROOF".equals(normalizedReviewResult) && normalizedReviewOpinion == null) {
+            throw new IllegalArgumentException("Review opinion must not be blank when requesting more proof");
+        }
+
+        PaymentRecord existing = paymentRecordMapper.selectById(paymentId);
+        if (existing == null) {
+            throw new IllegalStateException("PaymentRecord not found for id=" + paymentId);
+        }
+        if (!shouldCreateAsPendingSelfServicePayment(existing)) {
+            throw new IllegalStateException("Only self-service payment records can be reviewed in this flow");
+        }
+
+        PaymentState paymentState = resolvePaymentState(existing.getPaymentStatus());
+        if (paymentState != PaymentState.PAID && paymentState != PaymentState.PARTIAL) {
+            throw new IllegalStateException("Only confirmed self-service payment records can be reviewed");
+        }
+
+        LocalDateTime reviewTime = LocalDateTime.now();
+        String operator = defaultIfBlank(resolveOperatorName(), "system");
+        existing.setRemarks(appendRemark(
+                existing.getRemarks(),
+                buildFinanceReviewRemark(normalizedReviewResult, operator, reviewTime, normalizedReviewOpinion)));
+        existing.setUpdatedAt(reviewTime);
+        existing.setUpdatedBy(operator);
+        paymentRecordMapper.updateById(existing);
+        syncToIndexAfterCommit(existing);
+        return existing;
+    }
+
+    @Transactional
+    @CacheEvict(cacheNames = CACHE_NAME, allEntries = true)
+    public PaymentRecord updateSelfServicePaymentReceiptProof(Long paymentId, String receiptUrl) {
+        requirePositive(paymentId, "Payment ID");
+        String normalizedReceiptUrl = trimToNull(receiptUrl);
+        if (normalizedReceiptUrl == null) {
+            throw new IllegalArgumentException("Receipt URL must not be blank");
+        }
+
+        PaymentRecord existing = paymentRecordMapper.selectById(paymentId);
+        if (existing == null) {
+            throw new IllegalStateException("PaymentRecord not found for id=" + paymentId);
+        }
+        if (!shouldCreateAsPendingSelfServicePayment(existing)) {
+            throw new IllegalStateException("Only self-service payment records can update proof in this flow");
+        }
+
+        PaymentState paymentState = resolvePaymentState(existing.getPaymentStatus());
+        if (paymentState != PaymentState.PAID && paymentState != PaymentState.PARTIAL) {
+            throw new IllegalStateException("Only confirmed self-service payment records can update proof");
+        }
+
+        LocalDateTime updateTime = LocalDateTime.now();
+        String operator = defaultIfBlank(resolveOperatorName(), "system");
+        existing.setReceiptUrl(normalizedReceiptUrl);
+        existing.setRemarks(appendRemark(existing.getRemarks(), buildUserProofUploadRemark(updateTime, normalizedReceiptUrl)));
+        existing.setUpdatedAt(updateTime);
+        existing.setUpdatedBy(operator);
+        paymentRecordMapper.updateById(existing);
+        syncToIndexAfterCommit(existing);
+        return existing;
     }
 
     @Transactional
@@ -422,6 +527,44 @@ public class PaymentRecordService {
         return fetchFromDatabase(wrapper, page, size);
     }
 
+    @Transactional(readOnly = true)
+    public List<PaymentRecord> listFinanceReviewTasks(int page, int size) {
+        validatePagination(page, size);
+        int startIndex = (page - 1) * size;
+        int endExclusive = startIndex + size;
+        int candidatePage = 1;
+        int candidateBatchSize = Math.max(size * 3, 50);
+        List<PaymentRecord> matched = new java.util.ArrayList<>();
+
+        while (matched.size() < endExclusive) {
+            QueryWrapper<PaymentRecord> wrapper = new QueryWrapper<>();
+            wrapper.in("payment_channel", SELF_SERVICE_PAYMENT_CHANNELS)
+                    .in("payment_status", PaymentState.PAID.getCode(), PaymentState.PARTIAL.getCode())
+                    .orderByDesc("updated_at")
+                    .orderByDesc("payment_time")
+                    .orderByDesc("payment_id");
+            Page<PaymentRecord> candidatePageResult = paymentRecordMapper.selectPage(
+                    new Page<>(candidatePage, candidateBatchSize),
+                    wrapper);
+            List<PaymentRecord> records = candidatePageResult.getRecords();
+            if (records == null || records.isEmpty()) {
+                break;
+            }
+            records.stream()
+                    .filter(this::requiresFinanceReviewTask)
+                    .forEach(matched::add);
+            if (records.size() < candidateBatchSize) {
+                break;
+            }
+            candidatePage++;
+        }
+
+        if (matched.size() <= startIndex) {
+            return List.of();
+        }
+        return matched.subList(startIndex, Math.min(endExclusive, matched.size()));
+    }
+
     @Cacheable(cacheNames = CACHE_NAME, key = "'timeRange:' + #startTime + ':' + #endTime + ':' + #page + ':' + #size", unless = "#result == null || #result.isEmpty()")
     public List<PaymentRecord> searchByPaymentTimeRange(String startTime, String endTime, int page, int size) {
         validatePagination(page, size);
@@ -472,14 +615,20 @@ public class PaymentRecordService {
         sysRequestHistoryMapper.updateById(history);
     }
 
-    private SysRequestHistory buildCreateHistory(String idempotencyKey, PaymentRecord paymentRecord) {
+    private SysRequestHistory buildHistory(String idempotencyKey, PaymentRecord paymentRecord, String action) {
         SysRequestHistory history = new SysRequestHistory();
+        String normalizedAction = action == null ? "" : action.trim().toLowerCase();
         history.setIdempotencyKey(idempotencyKey);
         history.setRequestMethod("POST");
-        history.setRequestUrl("/api/payments");
-        history.setRequestParams(buildCreateRequestParams(paymentRecord));
-        history.setBusinessType("PAYMENT_CREATE");
+        history.setRequestUrl(resolveHistoryRequestUrl(paymentRecord, normalizedAction));
+        history.setRequestParams(buildRequestParams(paymentRecord));
+        history.setBusinessType(resolveHistoryBusinessType(normalizedAction));
         history.setBusinessStatus("PROCESSING");
+        if (("confirm".equals(normalizedAction)
+                || "review".equals(normalizedAction)
+                || "proof".equals(normalizedAction)) && paymentRecord != null) {
+            history.setBusinessId(paymentRecord.getPaymentId());
+        }
         history.setUserId(resolveCurrentUserId());
         history.setRequestIp(resolveRequestIp());
         history.setCreatedAt(LocalDateTime.now());
@@ -487,11 +636,34 @@ public class PaymentRecordService {
         return history;
     }
 
-    private String buildCreateRequestParams(PaymentRecord paymentRecord) {
+    private String resolveHistoryRequestUrl(PaymentRecord paymentRecord, String action) {
+        if ("confirm".equals(action) && paymentRecord != null && paymentRecord.getPaymentId() != null) {
+            return "/api/payments/me/" + paymentRecord.getPaymentId() + "/confirm";
+        }
+        if ("review".equals(action) && paymentRecord != null && paymentRecord.getPaymentId() != null) {
+            return "/api/payments/" + paymentRecord.getPaymentId() + "/finance-review";
+        }
+        if ("proof".equals(action) && paymentRecord != null && paymentRecord.getPaymentId() != null) {
+            return "/api/payments/me/" + paymentRecord.getPaymentId() + "/proof";
+        }
+        return "/api/payments";
+    }
+
+    private String resolveHistoryBusinessType(String action) {
+        return switch (action) {
+            case "confirm" -> "PAYMENT_CONFIRM";
+            case "review" -> "PAYMENT_REVIEW";
+            case "proof" -> "PAYMENT_PROOF_UPDATE";
+            default -> "PAYMENT_CREATE";
+        };
+    }
+
+    private String buildRequestParams(PaymentRecord paymentRecord) {
         if (paymentRecord == null) {
             return null;
         }
         StringBuilder builder = new StringBuilder();
+        appendParam(builder, "paymentId", paymentRecord.getPaymentId());
         appendParam(builder, "fineId", paymentRecord.getFineId());
         appendParam(builder, "paymentAmount", paymentRecord.getPaymentAmount());
         appendParam(builder, "paymentMethod", paymentRecord.getPaymentMethod());
@@ -499,7 +671,24 @@ public class PaymentRecordService {
         appendParam(builder, "paymentTime", paymentRecord.getPaymentTime());
         appendParam(builder, "payerName", paymentRecord.getPayerName());
         appendParam(builder, "transactionId", paymentRecord.getTransactionId());
+        appendParam(builder, "receiptUrl", paymentRecord.getReceiptUrl());
+        appendParam(builder, "remarks", paymentRecord.getRemarks());
         return truncate(builder.toString());
+    }
+
+    private void ensureUniqueTransactionId(String transactionId, Long currentPaymentId) {
+        if (isBlank(transactionId)) {
+            return;
+        }
+        QueryWrapper<PaymentRecord> wrapper = new QueryWrapper<>();
+        wrapper.eq("transaction_id", transactionId.trim());
+        if (currentPaymentId != null) {
+            wrapper.ne("payment_id", currentPaymentId);
+        }
+        Long duplicateCount = paymentRecordMapper.selectCount(wrapper);
+        if (duplicateCount != null && duplicateCount > 0) {
+            throw new IllegalStateException("Transaction ID is already used by another payment record");
+        }
     }
 
     private void appendParam(StringBuilder builder, String key, Object value) {
@@ -527,7 +716,7 @@ public class PaymentRecordService {
         return truncate(existing + ",failure=" + normalizedReason);
     }
 
-    // 闁俺绻冩禍瀣閸ョ偠鐨熼敍宀€鈥樻穱婵嗗涧閺堝鏆熼幑顔肩氨閹绘劒姘﹂幋鎰閸氬孩澧犻崚閿嬫煀 ES閿涘矂浼╅崗宥堝壈閺佺増宓?
+    // Refresh the Elasticsearch document after the transaction commits so search reads the latest state.
     private void syncToIndexAfterCommit(PaymentRecord paymentRecord) {
         if (paymentRecord == null) {
             return;
@@ -710,8 +899,13 @@ public class PaymentRecordService {
         }
         paymentRecord.setPaymentId(null);
         paymentRecord.setPaymentNumber(defaultIfBlank(paymentRecord.getPaymentNumber(), generateReferenceNumber("PAY")));
-        paymentRecord.setReceiptNumber(defaultIfBlank(paymentRecord.getReceiptNumber(), generateReferenceNumber("RCT")));
-        paymentRecord.setTransactionId(defaultIfBlank(paymentRecord.getTransactionId(), generateReferenceNumber("TXN")));
+        if (shouldCreateAsPendingSelfServicePayment(paymentRecord)) {
+            paymentRecord.setReceiptNumber(null);
+            paymentRecord.setTransactionId(null);
+        } else {
+            paymentRecord.setReceiptNumber(defaultIfBlank(paymentRecord.getReceiptNumber(), generateReferenceNumber("RCT")));
+            paymentRecord.setTransactionId(defaultIfBlank(paymentRecord.getTransactionId(), generateReferenceNumber("TXN")));
+        }
         paymentRecord.setRefundAmount(BigDecimal.ZERO);
         paymentRecord.setRefundTime(null);
         paymentRecord.setPaymentStatus(defaultPaymentStateForCreate(paymentRecord, fineRecord).getCode());
@@ -728,6 +922,9 @@ public class PaymentRecordService {
 
     private PaymentState defaultPaymentStateForCreate(PaymentRecord paymentRecord, FineRecord fineRecord) {
         if (paymentRecord == null) {
+            return PaymentState.UNPAID;
+        }
+        if (shouldCreateAsPendingSelfServicePayment(paymentRecord)) {
             return PaymentState.UNPAID;
         }
         FineRecord existingFineRecord = fineRecord;
@@ -766,13 +963,25 @@ public class PaymentRecordService {
                 }
             }
             case UNPAID, OVERDUE -> {
-                if (netPaidAmount.signum() > 0) {
+                if (netPaidAmount.signum() > 0
+                        && !(targetState == PaymentState.UNPAID && shouldCreateAsPendingSelfServicePayment(paymentRecord))) {
                     throw new IllegalStateException("Unpaid or overdue payment states cannot keep a positive net paid amount");
                 }
             }
             case WAIVED -> {
             }
         }
+    }
+
+    private boolean shouldCreateAsPendingSelfServicePayment(PaymentRecord paymentRecord) {
+        if (paymentRecord == null) {
+            return false;
+        }
+        String paymentChannel = paymentRecord.getPaymentChannel();
+        if (isBlank(paymentChannel)) {
+            return false;
+        }
+        return SELF_SERVICE_PAYMENT_CHANNELS.contains(paymentChannel.trim().toUpperCase());
     }
 
     private PaymentState resolvePaymentState(String code) {
@@ -817,6 +1026,14 @@ public class PaymentRecordService {
 
     private String defaultIfBlank(String value, String fallback) {
         return isBlank(value) ? fallback : value.trim();
+    }
+
+    private String trimToNull(String value) {
+        if (value == null) {
+            return null;
+        }
+        String normalized = value.trim();
+        return normalized.isEmpty() ? null : normalized;
     }
 
     private String generateReferenceNumber(String prefix) {
@@ -910,6 +1127,80 @@ public class PaymentRecordService {
             return suffix;
         }
         return truncate(existing + "; " + suffix);
+    }
+
+    private String normalizeFinanceReviewResult(String reviewResult) {
+        if (isBlank(reviewResult)) {
+            throw new IllegalArgumentException("Review result must not be blank");
+        }
+        String normalized = reviewResult.trim().toUpperCase();
+        if (!FINANCE_REVIEW_RESULTS.contains(normalized)) {
+            throw new IllegalArgumentException("Unsupported finance review result: " + reviewResult);
+        }
+        return normalized;
+    }
+
+    private String normalizeFinanceReviewOpinion(String reviewOpinion) {
+        String normalized = trimToNull(reviewOpinion);
+        if (normalized == null) {
+            return null;
+        }
+        normalized = normalized.replace('|', '/').replace(';', ' ');
+        normalized = normalized.replace('\r', ' ').replace('\n', ' ').trim();
+        return normalized.isEmpty() ? null : truncate(normalized);
+    }
+
+    private String buildFinanceReviewRemark(String reviewResult,
+                                            String reviewer,
+                                            LocalDateTime reviewTime,
+                                            String reviewOpinion) {
+        String normalizedReviewer = defaultIfBlank(reviewer, "system");
+        String normalizedTime = reviewTime == null ? LocalDateTime.now().toString() : reviewTime.toString();
+        String normalizedOpinion = reviewOpinion == null ? "" : reviewOpinion;
+        return FINANCE_REVIEW_PREFIX
+                + reviewResult
+                + "|"
+                + normalizedReviewer
+                + "|"
+                + normalizedTime
+                + "|"
+                + normalizedOpinion;
+    }
+
+    private boolean requiresFinanceReviewTask(PaymentRecord paymentRecord) {
+        if (paymentRecord == null || !shouldCreateAsPendingSelfServicePayment(paymentRecord)) {
+            return false;
+        }
+        PaymentState paymentState = resolvePaymentState(paymentRecord.getPaymentStatus());
+        if (paymentState != PaymentState.PAID && paymentState != PaymentState.PARTIAL) {
+            return false;
+        }
+        String latestReviewResult = extractLatestFinanceReviewResult(paymentRecord.getRemarks());
+        return latestReviewResult == null || "NEED_PROOF".equals(latestReviewResult);
+    }
+
+    private String extractLatestFinanceReviewResult(String remarks) {
+        if (isBlank(remarks)) {
+            return null;
+        }
+        String[] segments = remarks.split(";");
+        for (int index = segments.length - 1; index >= 0; index--) {
+            String segment = trimToNull(segments[index]);
+            if (segment == null || !segment.startsWith(FINANCE_REVIEW_PREFIX)) {
+                continue;
+            }
+            String payload = segment.substring(FINANCE_REVIEW_PREFIX.length());
+            int separatorIndex = payload.indexOf('|');
+            String result = separatorIndex >= 0 ? payload.substring(0, separatorIndex) : payload;
+            result = trimToNull(result);
+            return result == null ? null : result.toUpperCase();
+        }
+        return null;
+    }
+
+    private String buildUserProofUploadRemark(LocalDateTime updateTime, String receiptUrl) {
+        String normalizedTime = updateTime == null ? LocalDateTime.now().toString() : updateTime.toString();
+        return "[USER_PROOF_UPLOAD]|" + normalizedTime + "|" + truncate(receiptUrl);
     }
 
     private void recordRefundAudit(PaymentRecord record, BigDecimal refundAmount, String reason, String businessType) {

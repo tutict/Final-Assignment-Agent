@@ -70,7 +70,7 @@ public class SysRolePermissionKafkaListener {
                 payload.setId(null);
                 result = sysRolePermissionService.createRelation(payload);
             } else if ("update".equalsIgnoreCase(action)) {
-                result = sysRolePermissionService.updateRelation(payload);
+                result = sysRolePermissionService.updateRelationSystemManaged(payload);
             } else {
                 log.log(Level.WARNING, "Unsupported SysRolePermission action: {0}", action);
                 return;

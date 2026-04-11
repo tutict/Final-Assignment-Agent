@@ -2,6 +2,7 @@ package com.tutict.finalassignmentbackend.controller;
 
 import com.tutict.finalassignmentbackend.entity.DriverVehicle;
 import com.tutict.finalassignmentbackend.entity.VehicleInformation;
+import com.tutict.finalassignmentbackend.service.CurrentUserTrafficSupportService;
 import com.tutict.finalassignmentbackend.service.DriverVehicleService;
 import com.tutict.finalassignmentbackend.service.VehicleInformationService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -28,7 +29,7 @@ import java.util.logging.Logger;
 
 @RestController
 @RequestMapping("/api/vehicles")
-@Tag(name = "Vehicle Information", description = "车辆档案与绑定管理接口")
+@Tag(name = "Vehicle Information", description = "Vehicle Information endpoints")
 @SecurityRequirement(name = "bearerAuth")
 @RolesAllowed({"SUPER_ADMIN", "ADMIN", "TRAFFIC_POLICE"})
 public class VehicleInformationController {
@@ -37,51 +38,133 @@ public class VehicleInformationController {
 
     private final VehicleInformationService vehicleInformationService;
     private final DriverVehicleService driverVehicleService;
+    private final CurrentUserTrafficSupportService currentUserTrafficSupportService;
 
     public VehicleInformationController(VehicleInformationService vehicleInformationService,
-                                        DriverVehicleService driverVehicleService) {
+                                        DriverVehicleService driverVehicleService,
+                                        CurrentUserTrafficSupportService currentUserTrafficSupportService) {
         this.vehicleInformationService = vehicleInformationService;
         this.driverVehicleService = driverVehicleService;
+        this.currentUserTrafficSupportService = currentUserTrafficSupportService;
+    }
+
+    @GetMapping("/me")
+    @RolesAllowed({"SUPER_ADMIN", "ADMIN", "TRAFFIC_POLICE", "USER"})
+    @Operation(summary = "List Current User Vehicles")
+    public ResponseEntity<List<VehicleInformation>> listCurrentUserVehicles() {
+        try {
+            return ResponseEntity.ok(currentUserTrafficSupportService.listCurrentUserVehicles());
+        } catch (IllegalStateException ex) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        } catch (Exception ex) {
+            LOG.log(Level.WARNING, "List current user vehicles failed", ex);
+            return ResponseEntity.status(resolveStatus(ex)).build();
+        }
+    }
+
+    @PostMapping("/me")
+    @RolesAllowed({"SUPER_ADMIN", "ADMIN", "TRAFFIC_POLICE", "USER"})
+    @Operation(summary = "Create Current User Vehicle")
+    public ResponseEntity<VehicleInformation> createCurrentUserVehicle(@RequestBody VehicleInformation request) {
+        try {
+            return ResponseEntity.status(HttpStatus.CREATED)
+                    .body(currentUserTrafficSupportService.createVehicleForCurrentUser(request));
+        } catch (IllegalStateException ex) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        } catch (Exception ex) {
+            LOG.log(Level.WARNING, "Create current user vehicle failed", ex);
+            return ResponseEntity.status(resolveStatus(ex)).build();
+        }
+    }
+
+    @PutMapping("/me/{vehicleId}")
+    @RolesAllowed({"SUPER_ADMIN", "ADMIN", "TRAFFIC_POLICE", "USER"})
+    @Operation(summary = "Update Current User Vehicle")
+    public ResponseEntity<VehicleInformation> updateCurrentUserVehicle(@PathVariable Long vehicleId,
+                                                                       @RequestBody VehicleInformation request) {
+        try {
+            return ResponseEntity.ok(currentUserTrafficSupportService.updateVehicleForCurrentUser(vehicleId, request));
+        } catch (IllegalStateException ex) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        } catch (Exception ex) {
+            LOG.log(Level.WARNING, "Update current user vehicle failed", ex);
+            return ResponseEntity.status(resolveStatus(ex)).build();
+        }
+    }
+
+    @DeleteMapping("/me/{vehicleId}")
+    @RolesAllowed({"SUPER_ADMIN", "ADMIN", "TRAFFIC_POLICE", "USER"})
+    @Operation(summary = "Delete Current User Vehicle")
+    public ResponseEntity<Void> deleteCurrentUserVehicle(@PathVariable Long vehicleId) {
+        try {
+            currentUserTrafficSupportService.deleteVehicleForCurrentUser(vehicleId);
+            return ResponseEntity.noContent().build();
+        } catch (IllegalStateException ex) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        } catch (Exception ex) {
+            LOG.log(Level.WARNING, "Delete current user vehicle failed", ex);
+            return ResponseEntity.status(resolveStatus(ex)).build();
+        }
     }
 
     @PostMapping
-    @Operation(summary = "创建车辆档案")
+    @Operation(summary = "Create Vehicle")
     public ResponseEntity<VehicleInformation> createVehicle(@RequestBody VehicleInformation request,
                                                             @RequestHeader(value = "Idempotency-Key", required = false)
                                                             String idempotencyKey) {
+        boolean useKey = hasKey(idempotencyKey);
         try {
-            if (hasKey(idempotencyKey)) {
+            if (useKey) {
+                if (vehicleInformationService.shouldSkipProcessing(idempotencyKey)) {
+                    return ResponseEntity.status(HttpStatus.ALREADY_REPORTED).build();
+                }
                 vehicleInformationService.checkAndInsertIdempotency(idempotencyKey, request, "create");
             }
             VehicleInformation saved = vehicleInformationService.createVehicleInformation(request);
+            if (useKey && saved.getVehicleId() != null) {
+                vehicleInformationService.markHistorySuccess(idempotencyKey, saved.getVehicleId());
+            }
             return ResponseEntity.status(HttpStatus.CREATED).body(saved);
         } catch (Exception ex) {
+            if (useKey) {
+                vehicleInformationService.markHistoryFailure(idempotencyKey, ex.getMessage());
+            }
             LOG.log(Level.SEVERE, "Create vehicle failed", ex);
             return ResponseEntity.status(resolveStatus(ex)).build();
         }
     }
 
     @PutMapping("/{vehicleId}")
-    @Operation(summary = "更新车辆档案")
+    @Operation(summary = "Update Vehicle")
     public ResponseEntity<VehicleInformation> updateVehicle(@PathVariable Long vehicleId,
                                                             @RequestBody VehicleInformation request,
                                                             @RequestHeader(value = "Idempotency-Key", required = false)
                                                             String idempotencyKey) {
+        boolean useKey = hasKey(idempotencyKey);
         try {
             request.setVehicleId(vehicleId);
-            if (hasKey(idempotencyKey)) {
+            if (useKey) {
+                if (vehicleInformationService.shouldSkipProcessing(idempotencyKey)) {
+                    return ResponseEntity.status(HttpStatus.ALREADY_REPORTED).build();
+                }
                 vehicleInformationService.checkAndInsertIdempotency(idempotencyKey, request, "update");
             }
             VehicleInformation updated = vehicleInformationService.updateVehicleInformation(request);
+            if (useKey && updated.getVehicleId() != null) {
+                vehicleInformationService.markHistorySuccess(idempotencyKey, updated.getVehicleId());
+            }
             return ResponseEntity.ok(updated);
         } catch (Exception ex) {
+            if (useKey) {
+                vehicleInformationService.markHistoryFailure(idempotencyKey, ex.getMessage());
+            }
             LOG.log(Level.SEVERE, "Update vehicle failed", ex);
             return ResponseEntity.status(resolveStatus(ex)).build();
         }
     }
 
     @DeleteMapping("/{vehicleId}")
-    @Operation(summary = "删除车辆档案")
+    @Operation(summary = "Delete Vehicle")
     public ResponseEntity<Void> deleteVehicle(@PathVariable Long vehicleId) {
         try {
             vehicleInformationService.deleteVehicleInformation(vehicleId);
@@ -93,7 +176,7 @@ public class VehicleInformationController {
     }
 
     @DeleteMapping("/license/{licensePlate}")
-    @Operation(summary = "根据车牌删除车辆档案")
+    @Operation(summary = "Delete Vehicle By License")
     public ResponseEntity<Void> deleteVehicleByLicense(@PathVariable String licensePlate) {
         try {
             vehicleInformationService.deleteVehicleInformationByLicensePlate(licensePlate);
@@ -105,7 +188,7 @@ public class VehicleInformationController {
     }
 
     @GetMapping("/{vehicleId}")
-    @Operation(summary = "查询车辆详情")
+    @Operation(summary = "Get Vehicle")
     public ResponseEntity<VehicleInformation> getVehicle(@PathVariable Long vehicleId) {
         try {
             VehicleInformation vehicle = vehicleInformationService.getVehicleInformationById(vehicleId);
@@ -117,10 +200,11 @@ public class VehicleInformationController {
     }
 
     @GetMapping
-    @Operation(summary = "查询全部车辆")
-    public ResponseEntity<List<VehicleInformation>> listVehicles() {
+    @Operation(summary = "List Vehicles")
+    public ResponseEntity<List<VehicleInformation>> listVehicles(@RequestParam(defaultValue = "1") int page,
+                                                                 @RequestParam(defaultValue = "20") int size) {
         try {
-            return ResponseEntity.ok(vehicleInformationService.getAllVehicleInformation());
+            return ResponseEntity.ok(vehicleInformationService.listVehicles(page, size));
         } catch (Exception ex) {
             LOG.log(Level.WARNING, "List vehicles failed", ex);
             return ResponseEntity.status(resolveStatus(ex)).build();
@@ -128,7 +212,8 @@ public class VehicleInformationController {
     }
 
     @GetMapping("/search/license")
-    @Operation(summary = "按车牌号搜索车辆")
+    @Operation(summary = "Search By License")
+    @RolesAllowed({"SUPER_ADMIN", "ADMIN", "TRAFFIC_POLICE", "FINANCE"})
     public ResponseEntity<VehicleInformation> searchByLicense(@RequestParam String licensePlate) {
         try {
             VehicleInformation vehicle = vehicleInformationService.getVehicleInformationByLicensePlate(licensePlate);
@@ -140,10 +225,12 @@ public class VehicleInformationController {
     }
 
     @GetMapping("/search/owner")
-    @Operation(summary = "按车主身份证号查询车辆")
-    public ResponseEntity<List<VehicleInformation>> searchByOwnerIdCard(@RequestParam String idCard) {
+    @Operation(summary = "Search By Owner Id Card")
+    public ResponseEntity<List<VehicleInformation>> searchByOwnerIdCard(@RequestParam String idCard,
+                                                                        @RequestParam(defaultValue = "1") int page,
+                                                                        @RequestParam(defaultValue = "20") int size) {
         try {
-            return ResponseEntity.ok(vehicleInformationService.getVehicleInformationByIdCardNumber(idCard));
+            return ResponseEntity.ok(vehicleInformationService.searchByOwnerIdCard(idCard, page, size));
         } catch (Exception ex) {
             LOG.log(Level.WARNING, "Search vehicle by id card failed", ex);
             return ResponseEntity.status(resolveStatus(ex)).build();
@@ -151,7 +238,7 @@ public class VehicleInformationController {
     }
 
     @GetMapping("/search/type")
-    @Operation(summary = "按车辆类型查询")
+    @Operation(summary = "Search By Type")
     public ResponseEntity<List<VehicleInformation>> searchByType(@RequestParam String type) {
         try {
             return ResponseEntity.ok(vehicleInformationService.getVehicleInformationByType(type));
@@ -162,10 +249,12 @@ public class VehicleInformationController {
     }
 
     @GetMapping("/search/owner/name")
-    @Operation(summary = "按车主姓名查询车辆")
-    public ResponseEntity<List<VehicleInformation>> searchByOwnerName(@RequestParam String ownerName) {
+    @Operation(summary = "Search By Owner Name")
+    public ResponseEntity<List<VehicleInformation>> searchByOwnerName(@RequestParam String ownerName,
+                                                                      @RequestParam(defaultValue = "1") int page,
+                                                                      @RequestParam(defaultValue = "20") int size) {
         try {
-            return ResponseEntity.ok(vehicleInformationService.getVehicleInformationByOwnerName(ownerName));
+            return ResponseEntity.ok(vehicleInformationService.searchByOwnerName(ownerName, page, size));
         } catch (Exception ex) {
             LOG.log(Level.WARNING, "Search vehicle by owner name failed", ex);
             return ResponseEntity.status(resolveStatus(ex)).build();
@@ -173,10 +262,12 @@ public class VehicleInformationController {
     }
 
     @GetMapping("/search/status")
-    @Operation(summary = "按车辆状态查询")
-    public ResponseEntity<List<VehicleInformation>> searchByStatus(@RequestParam String status) {
+    @Operation(summary = "Search By Status")
+    public ResponseEntity<List<VehicleInformation>> searchByStatus(@RequestParam String status,
+                                                                   @RequestParam(defaultValue = "1") int page,
+                                                                   @RequestParam(defaultValue = "20") int size) {
         try {
-            return ResponseEntity.ok(vehicleInformationService.getVehicleInformationByStatus(status));
+            return ResponseEntity.ok(vehicleInformationService.searchByStatus(status, page, size));
         } catch (Exception ex) {
             LOG.log(Level.WARNING, "Search vehicle by status failed", ex);
             return ResponseEntity.status(resolveStatus(ex)).build();
@@ -184,7 +275,7 @@ public class VehicleInformationController {
     }
 
     @GetMapping("/search/general")
-    @Operation(summary = "关键字分页搜索车辆")
+    @Operation(summary = "Search Vehicles")
     public ResponseEntity<List<VehicleInformation>> searchVehicles(@RequestParam String keywords,
                                                                    @RequestParam(defaultValue = "1") int page,
                                                                    @RequestParam(defaultValue = "20") int size) {
@@ -197,7 +288,7 @@ public class VehicleInformationController {
     }
 
     @PostMapping("/{vehicleId}/drivers")
-    @Operation(summary = "创建车辆与驾驶员的绑定")
+    @Operation(summary = "Bind Driver")
     public ResponseEntity<DriverVehicle> bindDriver(@PathVariable Long vehicleId,
                                                     @RequestBody DriverVehicle relation,
                                                     @RequestHeader(value = "Idempotency-Key", required = false)
@@ -226,7 +317,7 @@ public class VehicleInformationController {
     }
 
     @GetMapping("/{vehicleId}/drivers")
-    @Operation(summary = "查询车辆绑定的驾驶员")
+    @Operation(summary = "List Bindings")
     public ResponseEntity<List<DriverVehicle>> listBindings(@PathVariable Long vehicleId,
                                                             @RequestParam(defaultValue = "1") int page,
                                                             @RequestParam(defaultValue = "20") int size) {
@@ -239,7 +330,7 @@ public class VehicleInformationController {
     }
 
     @DeleteMapping("/bindings/{bindingId}")
-    @Operation(summary = "删除车辆与驾驶员的绑定")
+    @Operation(summary = "Delete Binding")
     public ResponseEntity<Void> deleteBinding(@PathVariable Long bindingId) {
         try {
             driverVehicleService.deleteBinding(bindingId);
@@ -251,7 +342,7 @@ public class VehicleInformationController {
     }
 
     @PutMapping("/bindings/{bindingId}")
-    @Operation(summary = "更新车辆与驾驶员的绑定")
+    @Operation(summary = "Update Binding")
     public ResponseEntity<DriverVehicle> updateBinding(@PathVariable Long bindingId,
                                                        @RequestBody DriverVehicle relation,
                                                        @RequestHeader(value = "Idempotency-Key", required = false)
@@ -260,6 +351,9 @@ public class VehicleInformationController {
         try {
             relation.setId(bindingId);
             if (useKey) {
+                if (driverVehicleService.shouldSkipProcessing(idempotencyKey)) {
+                    return ResponseEntity.status(HttpStatus.ALREADY_REPORTED).build();
+                }
                 driverVehicleService.checkAndInsertIdempotency(idempotencyKey, relation, "update");
             }
             DriverVehicle updated = driverVehicleService.updateBinding(relation);
@@ -277,7 +371,7 @@ public class VehicleInformationController {
     }
 
     @GetMapping("/bindings/{bindingId}")
-    @Operation(summary = "查询绑定详情")
+    @Operation(summary = "Get Binding")
     public ResponseEntity<DriverVehicle> getBinding(@PathVariable Long bindingId) {
         try {
             DriverVehicle binding = driverVehicleService.findById(bindingId);
@@ -289,10 +383,11 @@ public class VehicleInformationController {
     }
 
     @GetMapping("/bindings")
-    @Operation(summary = "查询全部绑定关系")
-    public ResponseEntity<List<DriverVehicle>> listBindingsOverview() {
+    @Operation(summary = "List Bindings Overview")
+    public ResponseEntity<List<DriverVehicle>> listBindingsOverview(@RequestParam(defaultValue = "1") int page,
+                                                                    @RequestParam(defaultValue = "20") int size) {
         try {
-            return ResponseEntity.ok(driverVehicleService.findAll());
+            return ResponseEntity.ok(driverVehicleService.findAll(page, size));
         } catch (Exception ex) {
             LOG.log(Level.WARNING, "List driver-vehicle bindings failed", ex);
             return ResponseEntity.status(resolveStatus(ex)).build();
@@ -300,7 +395,7 @@ public class VehicleInformationController {
     }
 
     @GetMapping("/drivers/{driverId}/vehicles")
-    @Operation(summary = "按驾驶员查询绑定的车辆")
+    @Operation(summary = "List By Driver")
     public ResponseEntity<List<DriverVehicle>> listByDriver(@PathVariable Long driverId,
                                                             @RequestParam(defaultValue = "1") int page,
                                                             @RequestParam(defaultValue = "20") int size) {
@@ -313,7 +408,7 @@ public class VehicleInformationController {
     }
 
     @GetMapping("/drivers/{driverId}/vehicles/primary")
-    @Operation(summary = "查询驾驶员的主绑定车辆")
+    @Operation(summary = "Primary Binding")
     public ResponseEntity<List<DriverVehicle>> primaryBinding(@PathVariable Long driverId) {
         try {
             return ResponseEntity.ok(driverVehicleService.findPrimaryBinding(driverId));
@@ -324,7 +419,7 @@ public class VehicleInformationController {
     }
 
     @GetMapping("/bindings/search/relationship")
-    @Operation(summary = "按关系类型搜索绑定")
+    @Operation(summary = "Search By Relationship")
     public ResponseEntity<List<DriverVehicle>> searchByRelationship(@RequestParam String relationship,
                                                                     @RequestParam(defaultValue = "1") int page,
                                                                     @RequestParam(defaultValue = "20") int size) {
@@ -336,8 +431,39 @@ public class VehicleInformationController {
         }
     }
 
+    @GetMapping("/me/autocomplete/plates")
+    @RolesAllowed({"SUPER_ADMIN", "ADMIN", "TRAFFIC_POLICE", "USER"})
+    @Operation(summary = "Current User Plate Autocomplete")
+    public ResponseEntity<List<String>> currentUserPlateAutocomplete(@RequestParam String prefix,
+                                                                     @RequestParam(defaultValue = "10") int size) {
+        try {
+            return ResponseEntity.ok(currentUserTrafficSupportService.getCurrentUserVehiclePlateSuggestions(prefix, size));
+        } catch (IllegalStateException ex) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        } catch (Exception ex) {
+            LOG.log(Level.WARNING, "Fetch current user plate autocomplete failed", ex);
+            return ResponseEntity.status(resolveStatus(ex)).build();
+        }
+    }
+
+    @GetMapping("/me/autocomplete/types")
+    @RolesAllowed({"SUPER_ADMIN", "ADMIN", "TRAFFIC_POLICE", "USER"})
+    @Operation(summary = "Current User Vehicle Type Autocomplete")
+    public ResponseEntity<List<String>> currentUserVehicleTypeAutocomplete(@RequestParam String prefix,
+                                                                           @RequestParam(defaultValue = "10") int size) {
+        try {
+            return ResponseEntity.ok(currentUserTrafficSupportService.getCurrentUserVehicleTypeSuggestions(prefix, size));
+        } catch (IllegalStateException ex) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        } catch (Exception ex) {
+            LOG.log(Level.WARNING, "Fetch current user vehicle type autocomplete failed", ex);
+            return ResponseEntity.status(resolveStatus(ex)).build();
+        }
+    }
+
     @GetMapping("/search/license/global")
-    @Operation(summary = "获取全局车牌补全建议")
+    @Operation(summary = "Global Plate Suggestions")
+    @RolesAllowed({"SUPER_ADMIN", "ADMIN", "TRAFFIC_POLICE", "FINANCE"})
     public ResponseEntity<List<String>> globalPlateSuggestions(@RequestParam String prefix,
                                                                @RequestParam(defaultValue = "10") int size) {
         try {
@@ -349,7 +475,7 @@ public class VehicleInformationController {
     }
 
     @GetMapping("/autocomplete/plates")
-    @Operation(summary = "获取指定车主的车牌补全建议")
+    @Operation(summary = "Plate Autocomplete")
     public ResponseEntity<List<String>> plateAutocomplete(@RequestParam String prefix,
                                                           @RequestParam(defaultValue = "10") int size,
                                                           @RequestParam String idCard) {
@@ -362,7 +488,7 @@ public class VehicleInformationController {
     }
 
     @GetMapping("/autocomplete/types")
-    @Operation(summary = "获取指定车主的车辆类型补全")
+    @Operation(summary = "Vehicle Type Autocomplete")
     public ResponseEntity<List<String>> vehicleTypeAutocomplete(@RequestParam String idCard,
                                                                 @RequestParam String prefix,
                                                                 @RequestParam(defaultValue = "10") int size) {
@@ -375,7 +501,7 @@ public class VehicleInformationController {
     }
 
     @GetMapping("/autocomplete/types/global")
-    @Operation(summary = "全局车辆类型补全建议")
+    @Operation(summary = "Vehicle Type Autocomplete Global")
     public ResponseEntity<List<String>> vehicleTypeAutocompleteGlobal(@RequestParam String prefix,
                                                                       @RequestParam(defaultValue = "10") int size) {
         try {
@@ -387,7 +513,8 @@ public class VehicleInformationController {
     }
 
     @GetMapping("/exists/{licensePlate}")
-    @Operation(summary = "检查车辆是否存在")
+    @RolesAllowed({"SUPER_ADMIN", "ADMIN", "TRAFFIC_POLICE", "USER"})
+    @Operation(summary = "License Exists")
     public ResponseEntity<Map<String, Boolean>> licenseExists(@PathVariable String licensePlate) {
         try {
             boolean exists = vehicleInformationService.isLicensePlateExists(licensePlate);

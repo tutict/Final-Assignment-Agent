@@ -3,25 +3,38 @@ package com.tutict.finalassignmentbackend.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.tutict.finalassignmentbackend.config.statemachine.states.PaymentState;
 import com.tutict.finalassignmentbackend.config.websocket.WsAction;
 import com.tutict.finalassignmentbackend.entity.FineRecord;
 import com.tutict.finalassignmentbackend.entity.SysRequestHistory;
+import com.tutict.finalassignmentbackend.entity.SysUser;
 import com.tutict.finalassignmentbackend.entity.elastic.FineRecordDocument;
 import com.tutict.finalassignmentbackend.mapper.FineRecordMapper;
+import com.tutict.finalassignmentbackend.mapper.PaymentRecordMapper;
 import com.tutict.finalassignmentbackend.mapper.SysRequestHistoryMapper;
 import com.tutict.finalassignmentbackend.repository.FineRecordSearchRepository;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.security.authentication.AnonymousAuthenticationToken;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.web.context.request.RequestAttributes;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeParseException;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.logging.Level;
@@ -36,20 +49,29 @@ public class FineRecordService {
     private static final String CACHE_NAME = "fineRecordCache";
 
     private final FineRecordMapper fineRecordMapper;
+    private final PaymentRecordMapper paymentRecordMapper;
     private final SysRequestHistoryMapper sysRequestHistoryMapper;
     private final FineRecordSearchRepository fineRecordSearchRepository;
+    private final OffenseRecordService offenseRecordService;
+    private final SysUserService sysUserService;
     private final KafkaTemplate<String, String> kafkaTemplate;
     private final ObjectMapper objectMapper;
 
     @Autowired
     public FineRecordService(FineRecordMapper fineRecordMapper,
+                             PaymentRecordMapper paymentRecordMapper,
                              SysRequestHistoryMapper sysRequestHistoryMapper,
                              FineRecordSearchRepository fineRecordSearchRepository,
+                             OffenseRecordService offenseRecordService,
+                             SysUserService sysUserService,
                              KafkaTemplate<String, String> kafkaTemplate,
                              ObjectMapper objectMapper) {
         this.fineRecordMapper = fineRecordMapper;
+        this.paymentRecordMapper = paymentRecordMapper;
         this.sysRequestHistoryMapper = sysRequestHistoryMapper;
         this.fineRecordSearchRepository = fineRecordSearchRepository;
+        this.offenseRecordService = offenseRecordService;
+        this.sysUserService = sysUserService;
         this.kafkaTemplate = kafkaTemplate;
         this.objectMapper = objectMapper;
     }
@@ -63,25 +85,16 @@ public class FineRecordService {
             throw new RuntimeException("Duplicate fine record request detected");
         }
 
-        SysRequestHistory history = new SysRequestHistory();
-        history.setIdempotencyKey(idempotencyKey);
-        history.setBusinessStatus("PROCESSING");
-        history.setCreatedAt(LocalDateTime.now());
-        history.setUpdatedAt(LocalDateTime.now());
+        SysRequestHistory history = buildCreateHistory(idempotencyKey, fineRecord);
         sysRequestHistoryMapper.insert(history);
 
         sendKafkaMessage("fine_record_" + action, idempotencyKey, fineRecord);
-
-        history.setBusinessStatus("SUCCESS");
-        history.setBusinessId(fineRecord.getFineId());
-        history.setRequestParams("PENDING");
-        history.setUpdatedAt(LocalDateTime.now());
-        sysRequestHistoryMapper.updateById(history);
     }
 
     @Transactional
     @CacheEvict(cacheNames = CACHE_NAME, allEntries = true)
     public FineRecord createFineRecord(FineRecord fineRecord) {
+        normalizeManualFineFieldsForCreate(fineRecord);
         validateFineRecord(fineRecord);
         fineRecordMapper.insert(fineRecord);
         syncToIndexAfterCommit(fineRecord);
@@ -91,8 +104,24 @@ public class FineRecordService {
     @Transactional
     @CacheEvict(cacheNames = CACHE_NAME, allEntries = true)
     public FineRecord updateFineRecord(FineRecord fineRecord) {
-        validateFineRecord(fineRecord);
+        throw new IllegalStateException("Fine records are payment evidence and cannot be manually updated");
+    }
+
+    @Transactional
+    @CacheEvict(cacheNames = CACHE_NAME, allEntries = true)
+    public FineRecord updateFineRecordSystemManaged(FineRecord fineRecord) {
         requirePositive(fineRecord.getFineId(), "Fine ID");
+        FineRecord existing = fineRecordMapper.selectById(fineRecord.getFineId());
+        if (existing == null) {
+            throw new IllegalStateException("No FineRecord updated for id=" + fineRecord.getFineId());
+        }
+        ensureOffenseIdentityIsStable(fineRecord, existing);
+        normalizePaymentManagedFields(fineRecord);
+        validateFineRecord(fineRecord);
+        return persistFineRecordUpdate(fineRecord);
+    }
+
+    private FineRecord persistFineRecordUpdate(FineRecord fineRecord) {
         int rows = fineRecordMapper.updateById(fineRecord);
         if (rows == 0) {
             throw new IllegalStateException("No FineRecord updated for id=" + fineRecord.getFineId());
@@ -104,17 +133,7 @@ public class FineRecordService {
     @Transactional
     @CacheEvict(cacheNames = CACHE_NAME, allEntries = true)
     public void deleteFineRecord(Long fineId) {
-        requirePositive(fineId, "Fine ID");
-        int rows = fineRecordMapper.deleteById(fineId);
-        if (rows == 0) {
-            throw new IllegalStateException("No FineRecord deleted for id=" + fineId);
-        }
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                fineRecordSearchRepository.deleteById(fineId);
-            }
-        });
+        throw new IllegalStateException("Fine records are payment evidence and cannot be manually deleted");
     }
 
     @Transactional(readOnly = true)
@@ -146,6 +165,17 @@ public class FineRecordService {
         return fromDb;
     }
 
+    @Transactional(readOnly = true)
+    @Cacheable(cacheNames = CACHE_NAME, key = "'page:' + #page + ':' + #size", unless = "#result == null || #result.isEmpty()")
+    public List<FineRecord> listFines(int page, int size) {
+        validatePagination(page, size);
+        QueryWrapper<FineRecord> wrapper = new QueryWrapper<>();
+        wrapper.orderByDesc("updated_at")
+                .orderByDesc("fine_date")
+                .orderByDesc("fine_id");
+        return fetchFromDatabase(wrapper, page, size);
+    }
+
     @Cacheable(cacheNames = CACHE_NAME, key = "'offense:' + #offenseId + ':' + #page + ':' + #size", unless = "#result == null || #result.isEmpty()")
     public List<FineRecord> findByOffenseId(Long offenseId, int page, int size) {
         requirePositive(offenseId, "Offense ID");
@@ -156,6 +186,20 @@ public class FineRecordService {
         }
         QueryWrapper<FineRecord> wrapper = new QueryWrapper<>();
         wrapper.eq("offense_id", offenseId)
+                .orderByDesc("fine_date");
+        return fetchFromDatabase(wrapper, page, size);
+    }
+
+    @Transactional(readOnly = true)
+    public List<FineRecord> findByOffenseIds(Iterable<Long> offenseIds, int page, int size) {
+        List<Long> normalizedIds = normalizePositiveIds(offenseIds);
+        validatePagination(page, size);
+        if (normalizedIds.isEmpty()) {
+            return List.of();
+        }
+        QueryWrapper<FineRecord> wrapper = new QueryWrapper<>();
+        wrapper.in("offense_id", normalizedIds)
+                .orderByDesc("updated_at")
                 .orderByDesc("fine_date");
         return fetchFromDatabase(wrapper, page, size);
     }
@@ -230,7 +274,8 @@ public class FineRecordService {
         SysRequestHistory history = sysRequestHistoryMapper.selectByIdempotencyKey(idempotencyKey);
         return history != null
                 && "SUCCESS".equalsIgnoreCase(history.getBusinessStatus())
-                && "DONE".equalsIgnoreCase(history.getRequestParams());
+                && history.getBusinessId() != null
+                && history.getBusinessId() > 0;
     }
 
     public void markHistorySuccess(String idempotencyKey, Long fineId) {
@@ -241,7 +286,6 @@ public class FineRecordService {
         }
         history.setBusinessStatus("SUCCESS");
         history.setBusinessId(fineId);
-        history.setRequestParams("DONE");
         history.setUpdatedAt(LocalDateTime.now());
         sysRequestHistoryMapper.updateById(history);
     }
@@ -253,9 +297,62 @@ public class FineRecordService {
             return;
         }
         history.setBusinessStatus("FAILED");
-        history.setRequestParams(truncate(reason));
+        history.setRequestParams(appendFailureReason(history.getRequestParams(), reason));
         history.setUpdatedAt(LocalDateTime.now());
         sysRequestHistoryMapper.updateById(history);
+    }
+
+    private SysRequestHistory buildCreateHistory(String idempotencyKey, FineRecord fineRecord) {
+        SysRequestHistory history = new SysRequestHistory();
+        history.setIdempotencyKey(idempotencyKey);
+        history.setRequestMethod("POST");
+        history.setRequestUrl("/api/fines");
+        history.setRequestParams(buildCreateRequestParams(fineRecord));
+        history.setBusinessType("FINE_CREATE");
+        history.setBusinessStatus("PROCESSING");
+        history.setUserId(resolveCurrentUserId());
+        history.setRequestIp(resolveRequestIp());
+        history.setCreatedAt(LocalDateTime.now());
+        history.setUpdatedAt(LocalDateTime.now());
+        return history;
+    }
+
+    private String buildCreateRequestParams(FineRecord fineRecord) {
+        if (fineRecord == null) {
+            return null;
+        }
+        StringBuilder builder = new StringBuilder();
+        appendParam(builder, "offenseId", fineRecord.getOffenseId());
+        appendParam(builder, "fineAmount", fineRecord.getFineAmount());
+        appendParam(builder, "lateFee", fineRecord.getLateFee());
+        appendParam(builder, "paymentDeadline", fineRecord.getPaymentDeadline());
+        appendParam(builder, "handler", fineRecord.getHandler());
+        return truncate(builder.toString());
+    }
+
+    private void appendParam(StringBuilder builder, String key, Object value) {
+        if (builder == null || value == null) {
+            return;
+        }
+        String normalized = value.toString().trim();
+        if (normalized.isEmpty()) {
+            return;
+        }
+        if (!builder.isEmpty()) {
+            builder.append(',');
+        }
+        builder.append(key).append('=').append(normalized);
+    }
+
+    private String appendFailureReason(String existing, String reason) {
+        String normalizedReason = truncate(reason);
+        if (isBlank(normalizedReason)) {
+            return existing;
+        }
+        if (isBlank(existing)) {
+            return "failure=" + normalizedReason;
+        }
+        return truncate(existing + ",failure=" + normalizedReason);
     }
 
     private void sendKafkaMessage(String topic, String idempotencyKey, FineRecord fineRecord) {
@@ -272,34 +369,26 @@ public class FineRecordService {
         if (fineRecord == null) {
             return;
         }
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                FineRecordDocument doc = FineRecordDocument.fromEntity(fineRecord);
-                if (doc != null) {
-                    fineRecordSearchRepository.save(doc);
-                }
-            }
-        });
+        FineRecordDocument doc = FineRecordDocument.fromEntity(fineRecord);
+        if (doc == null) {
+            return;
+        }
+        runAfterCommitOrNow(() -> fineRecordSearchRepository.save(doc));
     }
 
     private void syncBatchToIndexAfterCommit(List<FineRecord> records) {
         if (records == null || records.isEmpty()) {
             return;
         }
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                List<FineRecordDocument> documents = records.stream()
-                        .filter(Objects::nonNull)
-                        .map(FineRecordDocument::fromEntity)
-                        .filter(Objects::nonNull)
-                        .collect(Collectors.toList());
-                if (!documents.isEmpty()) {
-                    fineRecordSearchRepository.saveAll(documents);
-                }
-            }
-        });
+        List<FineRecordDocument> documents = records.stream()
+                .filter(Objects::nonNull)
+                .map(FineRecordDocument::fromEntity)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toList());
+        if (documents.isEmpty()) {
+            return;
+        }
+        runAfterCommitOrNow(() -> fineRecordSearchRepository.saveAll(documents));
     }
 
     private List<FineRecord> mapHits(org.springframework.data.elasticsearch.core.SearchHits<FineRecordDocument> hits) {
@@ -326,11 +415,119 @@ public class FineRecordService {
 
     private void validateFineRecord(FineRecord fineRecord) {
         Objects.requireNonNull(fineRecord, "FineRecord must not be null");
+        requirePositive(fineRecord.getOffenseId(), "Offense ID");
+        if (offenseRecordService.findById(fineRecord.getOffenseId()) == null) {
+            throw new IllegalArgumentException("Offense record does not exist");
+        }
+        ensureSingleFinePerOffense(fineRecord);
         if (fineRecord.getFineDate() == null) {
             fineRecord.setFineDate(LocalDate.now());
         }
         if (fineRecord.getPaymentStatus() == null || fineRecord.getPaymentStatus().isBlank()) {
             fineRecord.setPaymentStatus("Unpaid");
+        }
+        requireNonNegative(fineRecord.getFineAmount(), "Fine amount");
+        requireNonNegative(fineRecord.getLateFee(), "Late fee");
+        requireNonNegative(fineRecord.getPaidAmount(), "Paid amount");
+        requireNonNegative(fineRecord.getUnpaidAmount(), "Unpaid amount");
+        requireNonNegative(fineRecord.getTotalAmount(), "Total amount");
+        if (fineRecord.getTotalAmount() != null
+                && fineRecord.getPaidAmount() != null
+                && fineRecord.getPaidAmount().compareTo(fineRecord.getTotalAmount()) > 0) {
+            throw new IllegalArgumentException("Paid amount cannot exceed total amount");
+        }
+    }
+
+    private void normalizeManualFineFieldsForCreate(FineRecord fineRecord) {
+        Objects.requireNonNull(fineRecord, "FineRecord must not be null");
+        fineRecord.setFineId(null);
+        normalizePaymentManagedFieldsForManualWrite(
+                fineRecord,
+                BigDecimal.ZERO,
+                false);
+    }
+
+    private void normalizePaymentManagedFields(FineRecord fineRecord) {
+        if (fineRecord == null) {
+            return;
+        }
+        fineRecord.setFineAmount(normalizeAmount(fineRecord.getFineAmount()));
+        fineRecord.setLateFee(normalizeAmount(fineRecord.getLateFee()));
+        BigDecimal totalAmount = fineRecord.getFineAmount().add(fineRecord.getLateFee());
+        fineRecord.setTotalAmount(totalAmount);
+        fineRecord.setPaidAmount(normalizeAmount(fineRecord.getPaidAmount()));
+        fineRecord.setUnpaidAmount(normalizeAmount(fineRecord.getUnpaidAmount()));
+        if (fineRecord.getPaymentStatus() == null || fineRecord.getPaymentStatus().isBlank()) {
+            fineRecord.setPaymentStatus(resolveFinePaymentStatus(
+                    fineRecord.getPaymentDeadline(),
+                    totalAmount,
+                    fineRecord.getPaidAmount(),
+                    fineRecord.getUnpaidAmount()));
+        }
+    }
+
+    private void normalizePaymentManagedFieldsForManualWrite(FineRecord fineRecord,
+                                                             BigDecimal existingPaidAmount,
+                                                             boolean waived) {
+        if (fineRecord == null) {
+            return;
+        }
+        fineRecord.setFineAmount(normalizeAmount(fineRecord.getFineAmount()));
+        fineRecord.setLateFee(normalizeAmount(fineRecord.getLateFee()));
+        BigDecimal totalAmount = fineRecord.getFineAmount().add(fineRecord.getLateFee());
+        fineRecord.setTotalAmount(totalAmount);
+        if (waived) {
+            fineRecord.setPaidAmount(BigDecimal.ZERO);
+            fineRecord.setUnpaidAmount(BigDecimal.ZERO);
+            fineRecord.setPaymentStatus(PaymentState.WAIVED.getCode());
+            return;
+        }
+        BigDecimal paidAmount = normalizeAmount(existingPaidAmount);
+        BigDecimal unpaidAmount = totalAmount.subtract(paidAmount);
+        if (unpaidAmount.signum() < 0) {
+            unpaidAmount = BigDecimal.ZERO;
+        }
+        fineRecord.setPaidAmount(paidAmount);
+        fineRecord.setUnpaidAmount(unpaidAmount);
+        fineRecord.setPaymentStatus(resolveFinePaymentStatus(
+                fineRecord.getPaymentDeadline(),
+                totalAmount,
+                paidAmount,
+                unpaidAmount));
+    }
+
+    private String resolveFinePaymentStatus(LocalDate paymentDeadline,
+                                            BigDecimal totalAmount,
+                                            BigDecimal paidAmount,
+                                            BigDecimal unpaidAmount) {
+        if (unpaidAmount.signum() <= 0 || totalAmount.signum() <= 0 || paidAmount.compareTo(totalAmount) >= 0) {
+            return PaymentState.PAID.getCode();
+        }
+        if (paidAmount.signum() > 0) {
+            return PaymentState.PARTIAL.getCode();
+        }
+        if (paymentDeadline != null && paymentDeadline.isBefore(LocalDate.now())) {
+            return PaymentState.OVERDUE.getCode();
+        }
+        return PaymentState.UNPAID.getCode();
+    }
+
+    private void ensureSingleFinePerOffense(FineRecord fineRecord) {
+        QueryWrapper<FineRecord> wrapper = new QueryWrapper<>();
+        wrapper.eq("offense_id", fineRecord.getOffenseId());
+        List<FineRecord> existingRecords = fineRecordMapper.selectList(wrapper);
+        for (FineRecord existing : existingRecords) {
+            if (existing == null || Objects.equals(existing.getFineId(), fineRecord.getFineId())) {
+                continue;
+            }
+            throw new IllegalStateException("Only one fine record is allowed for each offense");
+        }
+    }
+
+    private void ensureOffenseIdentityIsStable(FineRecord fineRecord, FineRecord existing) {
+        if (existing.getOffenseId() != null
+                && !Objects.equals(existing.getOffenseId(), fineRecord.getOffenseId())) {
+            throw new IllegalArgumentException("Offense ID cannot be changed for an existing fine record");
         }
     }
 
@@ -344,6 +541,16 @@ public class FineRecordService {
         if (number == null || number.longValue() <= 0) {
             throw new IllegalArgumentException(fieldName + " must be greater than zero");
         }
+    }
+
+    private void requireNonNegative(BigDecimal number, String fieldName) {
+        if (number != null && number.signum() < 0) {
+            throw new IllegalArgumentException(fieldName + " must not be negative");
+        }
+    }
+
+    private BigDecimal normalizeAmount(BigDecimal value) {
+        return value == null ? BigDecimal.ZERO : value.max(BigDecimal.ZERO);
     }
 
     private LocalDate parseDate(String value, String fieldName) {
@@ -368,5 +575,72 @@ public class FineRecordService {
             return null;
         }
         return value.length() <= 500 ? value : value.substring(0, 500);
+    }
+
+    private String resolveOperatorName() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication == null
+                || !authentication.isAuthenticated()
+                || authentication instanceof AnonymousAuthenticationToken
+                || authentication.getName() == null
+                || authentication.getName().isBlank()) {
+            return null;
+        }
+        return authentication.getName();
+    }
+
+    private Long resolveCurrentUserId() {
+        String operator = resolveOperatorName();
+        if (isBlank(operator)) {
+            return null;
+        }
+        SysUser user = sysUserService.findByUsername(operator);
+        return user == null ? null : user.getUserId();
+    }
+
+    private String resolveRequestIp() {
+        RequestAttributes requestAttributes = RequestContextHolder.getRequestAttributes();
+        if (!(requestAttributes instanceof ServletRequestAttributes servletRequestAttributes)) {
+            return null;
+        }
+        HttpServletRequest request = servletRequestAttributes.getRequest();
+        if (request == null) {
+            return null;
+        }
+        String forwardedFor = request.getHeader("X-Forwarded-For");
+        if (!isBlank(forwardedFor)) {
+            return forwardedFor.split(",")[0].trim();
+        }
+        String realIp = request.getHeader("X-Real-IP");
+        if (!isBlank(realIp)) {
+            return realIp.trim();
+        }
+        String remoteAddr = request.getRemoteAddr();
+        return isBlank(remoteAddr) ? null : remoteAddr.trim();
+    }
+
+    private List<Long> normalizePositiveIds(Iterable<Long> ids) {
+        LinkedHashSet<Long> normalized = new LinkedHashSet<>();
+        if (ids != null) {
+            for (Long id : ids) {
+                if (id != null && id > 0) {
+                    normalized.add(id);
+                }
+            }
+        }
+        return new ArrayList<>(normalized);
+    }
+
+    private void runAfterCommitOrNow(Runnable task) {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    task.run();
+                }
+            });
+            return;
+        }
+        task.run();
     }
 }

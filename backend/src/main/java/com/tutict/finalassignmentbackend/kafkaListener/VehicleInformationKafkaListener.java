@@ -2,10 +2,13 @@ package com.tutict.finalassignmentbackend.kafkaListener;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tutict.finalassignmentbackend.entity.VehicleInformation;
-import com.tutict.finalassignmentbackend.mapper.VehicleInformationMapper;
+import com.tutict.finalassignmentbackend.service.VehicleInformationService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.kafka.annotation.EnableKafka;
 import org.springframework.kafka.annotation.KafkaListener;
+import org.springframework.kafka.support.KafkaHeaders;
+import org.springframework.messaging.handler.annotation.Header;
+import org.springframework.messaging.handler.annotation.Payload;
 import org.springframework.stereotype.Service;
 
 import java.util.logging.Level;
@@ -13,64 +16,87 @@ import java.util.logging.Logger;
 
 @Service
 @EnableKafka
-// Kafka 监听器，处理消息
 public class VehicleInformationKafkaListener {
 
     private static final Logger log = Logger.getLogger(VehicleInformationKafkaListener.class.getName());
 
-    private final VehicleInformationMapper vehicleInformationMapper;
+    private final VehicleInformationService vehicleInformationService;
     private final ObjectMapper objectMapper;
 
-    // 构造器注入依赖
     @Autowired
-    public VehicleInformationKafkaListener(VehicleInformationMapper vehicleInformationMapper, ObjectMapper objectMapper) {
-        this.vehicleInformationMapper = vehicleInformationMapper;
+    public VehicleInformationKafkaListener(VehicleInformationService vehicleInformationService,
+                                           ObjectMapper objectMapper) {
+        this.vehicleInformationService = vehicleInformationService;
         this.objectMapper = objectMapper;
     }
 
-    // 监听 Kafka 消息
-    @KafkaListener(topics = "vehicle_information_create", groupId = "vehicleInformationGroup", concurrency = "3")
-    public void onVehicleInformationCreateReceived(String message) {
-        log.log(Level.INFO, "Received Kafka message for create: {0}", message);
-        // 使用虚拟线程异步处理，避免阻塞监听线程
-        Thread.ofVirtual().start(() -> processMessage(message, "create"));
+    @KafkaListener(topics = "vehicle_create", groupId = "vehicleInformationGroup", concurrency = "3")
+    public void onVehicleInformationCreateReceived(@Header(value = KafkaHeaders.RECEIVED_KEY, required = false) byte[] rawKey,
+                                                   @Payload String message) {
+        String idempotencyKey = asKey(rawKey);
+        log.log(Level.INFO, "Received Kafka message for vehicle create, key={0}", idempotencyKey);
+        Thread.ofVirtual().start(() -> processMessage(idempotencyKey, message, "create"));
     }
 
-    // 监听 Kafka 消息
-    @KafkaListener(topics = "vehicle_information_update", groupId = "vehicleInformationGroup", concurrency = "3")
-    public void onVehicleInformationUpdateReceived(String message) {
-        log.log(Level.INFO, "Received Kafka message for update: {0}", message);
-        // 使用虚拟线程异步处理，避免阻塞监听线程
-        Thread.ofVirtual().start(() -> processMessage(message, "update"));
+    @KafkaListener(topics = "vehicle_update", groupId = "vehicleInformationGroup", concurrency = "3")
+    public void onVehicleInformationUpdateReceived(@Header(value = KafkaHeaders.RECEIVED_KEY, required = false) byte[] rawKey,
+                                                   @Payload String message) {
+        String idempotencyKey = asKey(rawKey);
+        log.log(Level.INFO, "Received Kafka message for vehicle update, key={0}", idempotencyKey);
+        Thread.ofVirtual().start(() -> processMessage(idempotencyKey, message, "update"));
     }
 
-    // 统一处理消息并执行业务逻辑
-    private void processMessage(String message, String action) {
+    private void processMessage(String idempotencyKey, String message, String action) {
+        if (isBlank(idempotencyKey)) {
+            log.warning("Received VehicleInformation event without idempotency key, skipping");
+            return;
+        }
+        VehicleInformation payload = deserializeMessage(message);
         try {
-            VehicleInformation entity = deserializeMessage(message);
-            if ("create".equals(action)) {
-                entity.setVehicleId(null);
-                vehicleInformationMapper.insert(entity);
-            } else if ("update".equals(action)) {
-                vehicleInformationMapper.updateById(entity);
-            } else {
-                log.log(Level.WARNING, "Unsupported action: {0}", action);
+            if (payload == null) {
+                log.warning("Received VehicleInformation event with empty payload, skipping");
                 return;
             }
-            log.info(String.format("VehicleInformation %s action processed successfully: %s", action, entity));
-        } catch (Exception e) {
-            log.log(Level.SEVERE, String.format("Error processing %s VehicleInformation message: %s", action, message), e);
-            throw new RuntimeException(String.format("Failed to process %s VehicleInformation message", action), e);
+            if (vehicleInformationService.shouldSkipProcessing(idempotencyKey)) {
+                log.log(Level.INFO, "Skipping duplicate VehicleInformation event (key={0}, action={1})",
+                        new Object[]{idempotencyKey, action});
+                return;
+            }
+            VehicleInformation result;
+            if ("create".equalsIgnoreCase(action)) {
+                payload.setVehicleId(null);
+                result = vehicleInformationService.createVehicleInformation(payload);
+            } else if ("update".equalsIgnoreCase(action)) {
+                result = vehicleInformationService.updateVehicleInformation(payload);
+            } else {
+                log.log(Level.WARNING, "Unsupported VehicleInformation action: {0}", action);
+                return;
+            }
+            vehicleInformationService.markHistorySuccess(idempotencyKey, result.getVehicleId());
+            log.info(String.format("VehicleInformation %s action processed successfully (key=%s)", action, idempotencyKey));
+        } catch (Exception ex) {
+            vehicleInformationService.markHistoryFailure(idempotencyKey, ex.getMessage());
+            log.log(Level.SEVERE,
+                    String.format("Error processing %s VehicleInformation message (key=%s)", action, idempotencyKey),
+                    ex);
+            throw ex;
         }
     }
 
-    // 反序列化消息体
     private VehicleInformation deserializeMessage(String message) {
         try {
             return objectMapper.readValue(message, VehicleInformation.class);
-        } catch (Exception e) {
-            log.log(Level.SEVERE, "Failed to deserialize message: {0}", message);
-            throw new RuntimeException("Failed to deserialize message", e);
+        } catch (Exception ex) {
+            log.log(Level.SEVERE, "Failed to deserialize VehicleInformation message: {0}", message);
+            return null;
         }
+    }
+
+    private String asKey(byte[] rawKey) {
+        return rawKey == null ? null : new String(rawKey);
+    }
+
+    private boolean isBlank(String value) {
+        return value == null || value.trim().isEmpty();
     }
 }

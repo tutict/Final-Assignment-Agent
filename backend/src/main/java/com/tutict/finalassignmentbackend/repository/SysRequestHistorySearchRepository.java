@@ -15,9 +15,9 @@ public interface SysRequestHistorySearchRepository extends ElasticsearchReposito
 
     @Query("""
             {
-              "match_phrase_prefix": {
-                "idempotencyKey": {
-                  "query": "?0"
+              "term": {
+                "idempotencyKey.keyword": {
+                  "value": "?0"
                 }
               }
             }
@@ -120,9 +120,9 @@ public interface SysRequestHistorySearchRepository extends ElasticsearchReposito
 
     @Query("""
             {
-              "match_phrase_prefix": {
-                "requestIp": {
-                  "query": "?0"
+              "term": {
+                "requestIp.keyword": {
+                  "value": "?0"
                 }
               }
             }

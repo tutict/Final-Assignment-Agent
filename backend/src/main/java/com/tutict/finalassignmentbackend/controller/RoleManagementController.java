@@ -27,7 +27,7 @@ import java.util.logging.Logger;
 
 @RestController
 @RequestMapping("/api/roles")
-@Tag(name = "Role Management", description = "系统角色与权限关联管理接口")
+@Tag(name = "Role Management", description = "Role Management endpoints")
 @SecurityRequirement(name = "bearerAuth")
 @RolesAllowed({"SUPER_ADMIN", "ADMIN"})
 public class RoleManagementController {
@@ -44,7 +44,7 @@ public class RoleManagementController {
     }
 
     @PostMapping
-    @Operation(summary = "创建角色")
+    @Operation(summary = "Create Role")
     public ResponseEntity<SysRole> createRole(@RequestBody SysRole request,
                                               @RequestHeader(value = "Idempotency-Key", required = false)
                                               String idempotencyKey) {
@@ -71,7 +71,7 @@ public class RoleManagementController {
     }
 
     @PutMapping("/{roleId}")
-    @Operation(summary = "更新角色")
+    @Operation(summary = "Update Role")
     public ResponseEntity<SysRole> updateRole(@PathVariable Integer roleId,
                                               @RequestBody SysRole request,
                                               @RequestHeader(value = "Idempotency-Key", required = false)
@@ -80,6 +80,9 @@ public class RoleManagementController {
         try {
             request.setRoleId(roleId);
             if (useKey) {
+                if (sysRoleService.shouldSkipProcessing(idempotencyKey)) {
+                    return ResponseEntity.status(HttpStatus.ALREADY_REPORTED).build();
+                }
                 sysRoleService.checkAndInsertIdempotency(idempotencyKey, request, "update");
             }
             SysRole updated = sysRoleService.updateSysRole(request);
@@ -97,7 +100,7 @@ public class RoleManagementController {
     }
 
     @DeleteMapping("/{roleId}")
-    @Operation(summary = "删除角色")
+    @Operation(summary = "Delete Role")
     public ResponseEntity<Void> deleteRole(@PathVariable Integer roleId) {
         try {
             sysRoleService.deleteSysRole(roleId);
@@ -109,7 +112,7 @@ public class RoleManagementController {
     }
 
     @GetMapping("/{roleId}")
-    @Operation(summary = "查询角色详情")
+    @Operation(summary = "Get Role")
     public ResponseEntity<SysRole> getRole(@PathVariable Integer roleId) {
         try {
             SysRole role = sysRoleService.findById(roleId);
@@ -121,10 +124,11 @@ public class RoleManagementController {
     }
 
     @GetMapping
-    @Operation(summary = "查询全部角色")
-    public ResponseEntity<List<SysRole>> listRoles() {
+    @Operation(summary = "List Roles")
+    public ResponseEntity<List<SysRole>> listRoles(@RequestParam(defaultValue = "1") int page,
+                                                   @RequestParam(defaultValue = "20") int size) {
         try {
-            return ResponseEntity.ok(sysRoleService.findAll());
+            return ResponseEntity.ok(sysRoleService.findAll(page, size));
         } catch (Exception ex) {
             LOG.log(Level.WARNING, "List roles failed", ex);
             return ResponseEntity.status(resolveStatus(ex)).build();
@@ -132,7 +136,7 @@ public class RoleManagementController {
     }
 
     @GetMapping("/by-code/{roleCode}")
-    @Operation(summary = "根据角色编码查询")
+    @Operation(summary = "Get By Code")
     public ResponseEntity<SysRole> getByCode(@PathVariable String roleCode) {
         try {
             SysRole role = sysRoleService.findByRoleCode(roleCode);
@@ -144,7 +148,7 @@ public class RoleManagementController {
     }
 
     @GetMapping("/search/code/prefix")
-    @Operation(summary = "Search roles by code prefix")
+    @Operation(summary = "Search By Code Prefix")
     public ResponseEntity<List<SysRole>> searchByCodePrefix(@RequestParam String roleCode,
                                                             @RequestParam(defaultValue = "1") int page,
                                                             @RequestParam(defaultValue = "20") int size) {
@@ -152,7 +156,7 @@ public class RoleManagementController {
     }
 
     @GetMapping("/search/code/fuzzy")
-    @Operation(summary = "Search roles by code fuzzy")
+    @Operation(summary = "Search By Code Fuzzy")
     public ResponseEntity<List<SysRole>> searchByCodeFuzzy(@RequestParam String roleCode,
                                                            @RequestParam(defaultValue = "1") int page,
                                                            @RequestParam(defaultValue = "20") int size) {
@@ -160,7 +164,7 @@ public class RoleManagementController {
     }
 
     @GetMapping("/search/name/prefix")
-    @Operation(summary = "Search roles by name prefix")
+    @Operation(summary = "Search By Name Prefix")
     public ResponseEntity<List<SysRole>> searchByNamePrefix(@RequestParam String roleName,
                                                             @RequestParam(defaultValue = "1") int page,
                                                             @RequestParam(defaultValue = "20") int size) {
@@ -168,7 +172,7 @@ public class RoleManagementController {
     }
 
     @GetMapping("/search/name/fuzzy")
-    @Operation(summary = "Search roles by name fuzzy")
+    @Operation(summary = "Search By Name Fuzzy")
     public ResponseEntity<List<SysRole>> searchByNameFuzzy(@RequestParam String roleName,
                                                            @RequestParam(defaultValue = "1") int page,
                                                            @RequestParam(defaultValue = "20") int size) {
@@ -176,7 +180,7 @@ public class RoleManagementController {
     }
 
     @GetMapping("/search/type")
-    @Operation(summary = "Search roles by role type")
+    @Operation(summary = "Search By Role Type")
     public ResponseEntity<List<SysRole>> searchByRoleType(@RequestParam String roleType,
                                                           @RequestParam(defaultValue = "1") int page,
                                                           @RequestParam(defaultValue = "20") int size) {
@@ -184,7 +188,7 @@ public class RoleManagementController {
     }
 
     @GetMapping("/search/data-scope")
-    @Operation(summary = "Search roles by data scope")
+    @Operation(summary = "Search By Data Scope")
     public ResponseEntity<List<SysRole>> searchByDataScope(@RequestParam String dataScope,
                                                            @RequestParam(defaultValue = "1") int page,
                                                            @RequestParam(defaultValue = "20") int size) {
@@ -192,7 +196,7 @@ public class RoleManagementController {
     }
 
     @GetMapping("/search/status")
-    @Operation(summary = "Search roles by status")
+    @Operation(summary = "Search By Status")
     public ResponseEntity<List<SysRole>> searchByStatus(@RequestParam String status,
                                                         @RequestParam(defaultValue = "1") int page,
                                                         @RequestParam(defaultValue = "20") int size) {
@@ -200,7 +204,7 @@ public class RoleManagementController {
     }
 
     @PostMapping("/{roleId}/permissions")
-    @Operation(summary = "为角色添加权限")
+    @Operation(summary = "Add Permission")
     public ResponseEntity<SysRolePermission> addPermission(@PathVariable Integer roleId,
                                                            @RequestBody SysRolePermission relation,
                                                            @RequestHeader(value = "Idempotency-Key", required = false)
@@ -229,7 +233,7 @@ public class RoleManagementController {
     }
 
     @DeleteMapping("/permissions/{relationId}")
-    @Operation(summary = "删除角色权限关联")
+    @Operation(summary = "Delete Permission")
     public ResponseEntity<Void> deletePermission(@PathVariable Long relationId) {
         try {
             sysRolePermissionService.deleteRelation(relationId);
@@ -241,7 +245,7 @@ public class RoleManagementController {
     }
 
     @GetMapping("/{roleId}/permissions")
-    @Operation(summary = "查询角色拥有的权限")
+    @Operation(summary = "List Permissions")
     public ResponseEntity<List<SysRolePermission>> listPermissions(@PathVariable Integer roleId,
                                                                    @RequestParam(defaultValue = "1") int page,
                                                                    @RequestParam(defaultValue = "50") int size) {
@@ -254,33 +258,16 @@ public class RoleManagementController {
     }
 
     @PutMapping("/permissions/{relationId}")
-    @Operation(summary = "更新角色权限关联")
+    @Operation(summary = "Update Permission")
     public ResponseEntity<SysRolePermission> updatePermission(@PathVariable Long relationId,
                                                               @RequestBody SysRolePermission relation,
                                                               @RequestHeader(value = "Idempotency-Key", required = false)
                                                               String idempotencyKey) {
-        boolean useKey = hasKey(idempotencyKey);
-        try {
-            relation.setId(relationId);
-            if (useKey) {
-                sysRolePermissionService.checkAndInsertIdempotency(idempotencyKey, relation, "update");
-            }
-            SysRolePermission updated = sysRolePermissionService.updateRelation(relation);
-            if (useKey && updated.getId() != null) {
-                sysRolePermissionService.markHistorySuccess(idempotencyKey, updated.getId());
-            }
-            return ResponseEntity.ok(updated);
-        } catch (Exception ex) {
-            if (useKey) {
-                sysRolePermissionService.markHistoryFailure(idempotencyKey, ex.getMessage());
-            }
-            LOG.log(Level.SEVERE, "Update role permission failed", ex);
-            return ResponseEntity.status(resolveStatus(ex)).build();
-        }
+        return ResponseEntity.status(HttpStatus.METHOD_NOT_ALLOWED).build();
     }
 
     @GetMapping("/permissions/{relationId}")
-    @Operation(summary = "查询角色权限关联详情")
+    @Operation(summary = "Get Permission Relation")
     public ResponseEntity<SysRolePermission> getPermissionRelation(@PathVariable Long relationId) {
         try {
             SysRolePermission relation = sysRolePermissionService.findById(relationId);
@@ -292,7 +279,7 @@ public class RoleManagementController {
     }
 
     @GetMapping("/permissions")
-    @Operation(summary = "分页查询全部角色权限关联")
+    @Operation(summary = "List All Relations")
     public ResponseEntity<List<SysRolePermission>> listAllRelations(@RequestParam(defaultValue = "1") int page,
                                                                     @RequestParam(defaultValue = "50") int size) {
         try {
@@ -304,7 +291,7 @@ public class RoleManagementController {
     }
 
     @GetMapping("/permissions/by-permission/{permissionId}")
-    @Operation(summary = "按权限 ID 查询角色关联")
+    @Operation(summary = "List By Permission")
     public ResponseEntity<List<SysRolePermission>> listByPermission(@PathVariable Integer permissionId,
                                                                     @RequestParam(defaultValue = "1") int page,
                                                                     @RequestParam(defaultValue = "50") int size) {
@@ -317,7 +304,7 @@ public class RoleManagementController {
     }
 
     @GetMapping("/permissions/search")
-    @Operation(summary = "Search role-permission bindings by roleId and permissionId")
+    @Operation(summary = "Search Role Permission Bindings")
     public ResponseEntity<List<SysRolePermission>> searchRolePermissionBindings(@RequestParam Integer roleId,
                                                                                 @RequestParam Integer permissionId,
                                                                                 @RequestParam(defaultValue = "1") int page,
