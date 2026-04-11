@@ -7,9 +7,12 @@ import 'package:final_assignment_front/features/dashboard/controllers/admin_dash
 import 'package:final_assignment_front/features/dashboard/controllers/chat_controller.dart';
 import 'package:final_assignment_front/features/dashboard/controllers/user_dashboard_screen_controller.dart';
 import 'package:final_assignment_front/features/dashboard/models/profile.dart';
+import 'package:final_assignment_front/features/dashboard/views/admin/pages/admin_business_processing.dart';
+import 'package:final_assignment_front/features/dashboard/views/admin/pages/admin_setting_page.dart';
 import 'package:final_assignment_front/features/dashboard/views/admin/admin_dashboard_screen.dart';
 import 'package:final_assignment_front/features/dashboard/views/shared/widgets/agent_dashboard_shell.dart';
 import 'package:final_assignment_front/features/dashboard/views/user/user_dashboard.dart';
+import 'package:final_assignment_front/features/dashboard/views/user/pages/main_process/business_progress.dart';
 import 'package:final_assignment_front/features/login_screen/login.dart';
 import 'package:final_assignment_front/i18n/app_translations.dart';
 import 'package:final_assignment_front/i18n/locale_controller.dart';
@@ -198,6 +201,62 @@ void main() {
 
           expect(find.byType(AdminDashboardScreen), findsOneWidget);
           expect(find.byType(_SelectedViewportPage), findsOneWidget);
+          _expectNoFlutterErrors(tester);
+        },
+      );
+
+      testWidgets(
+        'BusinessProgressPage renders without layout errors on ${viewport.label}',
+        (tester) async {
+          await _setViewport(tester, viewport.size);
+          Get.put<UserDashboardController>(
+            _FakeUserDashboardController(transparentAvatar),
+          );
+
+          await tester.pumpWidget(_buildHarness(const BusinessProgressPage()));
+          await tester.pumpAndSettle(const Duration(milliseconds: 800));
+
+          expect(find.byType(BusinessProgressPage), findsOneWidget);
+          _expectNoFlutterErrors(tester);
+        },
+      );
+
+      testWidgets(
+        'AdminBusinessProcessing renders without layout errors on ${viewport.label}',
+        (tester) async {
+          await _setViewport(tester, viewport.size);
+          SharedPreferences.setMockInitialValues({
+            'app.languageCode': 'zh',
+            'app.countryCode': 'CN',
+            'isDarkMode': false,
+            'userRoles': ['ADMIN'],
+          });
+          Get.put<DashboardController>(
+            _FakeAdminDashboardController(transparentAvatar),
+          );
+
+          await tester.pumpWidget(
+            _buildHarness(const AdminBusinessProcessing()),
+          );
+          await tester.pumpAndSettle(const Duration(milliseconds: 800));
+
+          expect(find.byType(AdminBusinessProcessing), findsOneWidget);
+          _expectNoFlutterErrors(tester);
+        },
+      );
+
+      testWidgets(
+        'AdminSettingPage renders without layout errors on ${viewport.label}',
+        (tester) async {
+          await _setViewport(tester, viewport.size);
+          Get.put<DashboardController>(
+            _FakeAdminDashboardController(transparentAvatar),
+          );
+
+          await tester.pumpWidget(_buildHarness(const AdminSettingPage()));
+          await tester.pumpAndSettle(const Duration(milliseconds: 800));
+
+          expect(find.byType(AdminSettingPage), findsOneWidget);
           _expectNoFlutterErrors(tester);
         },
       );
