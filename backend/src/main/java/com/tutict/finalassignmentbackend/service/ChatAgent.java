@@ -1,8 +1,8 @@
 package com.tutict.finalassignmentbackend.service;
 
 import com.tutict.finalassignmentbackend.config.websocket.WsAction;
-import com.tutict.finalassignmentbackend.model.ai.AgentEvent;
 import com.tutict.finalassignmentbackend.model.ai.AgentContextInfo;
+import com.tutict.finalassignmentbackend.model.ai.AgentEvent;
 import com.tutict.finalassignmentbackend.model.ai.AgentSkillInfo;
 import com.tutict.finalassignmentbackend.model.ai.ChatAction;
 import com.tutict.finalassignmentbackend.model.ai.ChatActionResponse;
@@ -79,7 +79,7 @@ public class ChatAgent {
 
     private void streamConversation(AgentSkillContext context, FluxSink<AgentEvent> sink) {
         try {
-            sink.next(AgentEvent.status("正在分析问题并规划技能执行"));
+            sink.next(AgentEvent.status("正在分析问题并规划技能执行。"));
 
             AgentConversation conversation = executeConversation(context);
 
@@ -176,21 +176,21 @@ public class ChatAgent {
         StringBuilder builder = new StringBuilder("已按交通违法处理场景整理出可执行建议。");
 
         if (!summaries.isEmpty()) {
-            builder.append("\n\n核心判断：");
+            builder.append("\n\n核心判断:");
             for (String summary : summaries) {
                 builder.append("\n- ").append(summary);
             }
         }
 
         if (!highlights.isEmpty()) {
-            builder.append("\n\n建议步骤：");
+            builder.append("\n\n建议步骤:");
             for (int i = 0; i < highlights.size(); i++) {
                 builder.append("\n").append(i + 1).append(". ").append(highlights.get(i));
             }
         }
 
         if (!searchResults.isEmpty()) {
-            builder.append("\n\n联网检索补充：");
+            builder.append("\n\n联网检索补充:");
             for (int i = 0; i < Math.min(searchResults.size(), 3); i++) {
                 builder.append("\n").append(i + 1).append(". ").append(searchResults.get(i));
             }
@@ -235,7 +235,7 @@ public class ChatAgent {
             logger.warn("Parameter 'massage' is deprecated. Please use 'message' instead.");
             return massage.trim();
         }
-        throw new IllegalArgumentException("缺少请求参数：message 或 massage 至少提供一个。");
+        throw new IllegalArgumentException("缺少请求参数，message 或 massage 至少提供一个。");
     }
 
     private String safe(String value) {

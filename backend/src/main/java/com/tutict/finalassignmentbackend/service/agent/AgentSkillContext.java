@@ -74,7 +74,7 @@ public record AgentSkillContext(
 
     public String accessScopeLabel() {
         if (!isAuthenticated()) {
-            return "未登录，不能核验真实业务数据。";
+            return "未登录，不能校验真实业务数据。";
         }
         if (isPrivilegedOperator()) {
             return "当前具备管理权限，可按业务条件查询全局案件。";

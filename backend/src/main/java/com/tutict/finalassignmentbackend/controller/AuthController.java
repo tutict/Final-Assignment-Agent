@@ -14,8 +14,8 @@ import jakarta.annotation.security.PermitAll;
 import jakarta.annotation.security.RolesAllowed;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.scheduling.annotation.Async;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -25,8 +25,6 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -36,7 +34,6 @@ import java.util.logging.Logger;
 public class AuthController {
 
     private static final Logger LOG = Logger.getLogger(AuthController.class.getName());
-    private static final ExecutorService VIRTUAL_THREAD_EXECUTOR = Executors.newVirtualThreadPerTaskExecutor();
 
     private final AuthWsService authWsService;
 
@@ -46,7 +43,6 @@ public class AuthController {
 
     @PostMapping("/login")
     @PermitAll
-    @Async
     @Operation(
             summary = "User login",
             description = "Authenticates a user with username and password and returns a JWT payload."
@@ -75,25 +71,33 @@ public class AuthController {
             @RequestBody
             @Parameter(description = "Login request payload containing username and password", required = true)
             AuthWsService.LoginRequest loginRequest) {
-        if (loginRequest == null || loginRequest.getUsername() == null || loginRequest.getPassword() == null) {
+        String username = safeUsername(loginRequest == null ? null : loginRequest.getUsername());
+        if (loginRequest == null
+                || !StringUtils.hasText(loginRequest.getUsername())
+                || !StringUtils.hasText(loginRequest.getPassword())) {
             LOG.log(Level.WARNING, "Login request missing username or password");
             return CompletableFuture.completedFuture(
                     ResponseEntity.status(HttpStatus.BAD_REQUEST)
                             .body(Map.of("error", "Username and password are required")));
         }
 
-        return CompletableFuture.supplyAsync(() -> {
-            try {
-                Map<String, Object> result = authWsService.login(loginRequest);
-                LOG.log(Level.INFO, "Login succeeded for username: {0}", loginRequest.getUsername());
-                return ResponseEntity.ok(result);
-            } catch (Exception ex) {
-                LOG.log(Level.SEVERE, "Login failed for username: {0}, error: {1}",
-                        new Object[]{loginRequest.getUsername(), ex.getMessage()});
-                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                        .body(Map.of("error", ex.getMessage()));
-            }
-        }, VIRTUAL_THREAD_EXECUTOR);
+        try {
+            Map<String, Object> result = authWsService.login(loginRequest);
+            LOG.log(Level.INFO, "Login succeeded for username: {0}", username);
+            return CompletableFuture.completedFuture(ResponseEntity.ok(result));
+        } catch (IllegalArgumentException ex) {
+            LOG.log(Level.WARNING, "Login rejected for username: {0}, error: {1}",
+                    new Object[]{username, ex.getMessage()});
+            return CompletableFuture.completedFuture(
+                    ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                            .body(Map.of("error", ex.getMessage())));
+        } catch (Exception ex) {
+            LOG.log(Level.SEVERE, "Login failed for username: {0}, error: {1}",
+                    new Object[]{username, ex.getMessage()});
+            return CompletableFuture.completedFuture(
+                    ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                            .body(Map.of("error", ex.getMessage())));
+        }
     }
 
     @PostMapping("/refresh")
@@ -116,7 +120,6 @@ public class AuthController {
 
     @PostMapping("/register")
     @PermitAll
-    @Async
     @Transactional
     @Operation(
             summary = "User registration",
@@ -146,25 +149,35 @@ public class AuthController {
             @Parameter(description = "Registration request payload containing username, password, role, and idempotency key",
                     required = true)
             AuthWsService.RegisterRequest registerRequest) {
-        return CompletableFuture.supplyAsync(() -> {
-                    try {
-                        String status = authWsService.registerUser(registerRequest);
-                        LOG.log(Level.INFO, "Register succeeded for username: {0}", registerRequest.getUsername());
-                        return ResponseEntity.status(HttpStatus.CREATED)
-                                .body(Map.of("status", status));
-                    } catch (Exception ex) {
-                        LOG.log(Level.WARNING, "Register failed for username: {0}, error: {1}",
-                                new Object[]{registerRequest.getUsername(), ex.getMessage()});
-                        return ResponseEntity.status(HttpStatus.CONFLICT)
-                                .body(Map.of("error", ex.getMessage()));
-                    }
-                }, VIRTUAL_THREAD_EXECUTOR)
-                .exceptionally(throwable -> {
-                    LOG.log(Level.SEVERE, "Unexpected error in registerUser for username: {0}, error: {1}",
-                            new Object[]{registerRequest.getUsername(), throwable.getMessage()});
-                    return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                            .body(Map.of("error", "Internal server error"));
-                });
+        String username = safeUsername(registerRequest == null ? null : registerRequest.getUsername());
+        if (registerRequest == null
+                || !StringUtils.hasText(registerRequest.getUsername())
+                || !StringUtils.hasText(registerRequest.getPassword())) {
+            LOG.log(Level.WARNING, "Register request missing username or password");
+            return CompletableFuture.completedFuture(
+                    ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                            .body(Map.of("error", "Username and password are required")));
+        }
+
+        try {
+            String status = authWsService.registerUser(registerRequest);
+            LOG.log(Level.INFO, "Register succeeded for username: {0}", username);
+            return CompletableFuture.completedFuture(
+                    ResponseEntity.status(HttpStatus.CREATED)
+                            .body(Map.of("status", status)));
+        } catch (IllegalArgumentException ex) {
+            LOG.log(Level.WARNING, "Register rejected for username: {0}, error: {1}",
+                    new Object[]{username, ex.getMessage()});
+            return CompletableFuture.completedFuture(
+                    ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                            .body(Map.of("error", ex.getMessage())));
+        } catch (Exception ex) {
+            LOG.log(Level.WARNING, "Register failed for username: {0}, error: {1}",
+                    new Object[]{username, ex.getMessage()});
+            return CompletableFuture.completedFuture(
+                    ResponseEntity.status(HttpStatus.CONFLICT)
+                            .body(Map.of("error", ex.getMessage())));
+        }
     }
 
     @GetMapping("/users")
@@ -196,5 +209,9 @@ public class AuthController {
             LOG.log(Level.SEVERE, "GetAllUsers failed: {0}", ex.getMessage());
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(List.of());
         }
+    }
+
+    private String safeUsername(String username) {
+        return StringUtils.hasText(username) ? username.trim() : "<unknown>";
     }
 }

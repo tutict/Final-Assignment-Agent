@@ -11,8 +11,8 @@ import org.mockito.Mockito;
 import java.time.Duration;
 import java.util.List;
 
-import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
@@ -56,7 +56,7 @@ class ChatAgentTest {
                 return new AgentSkillResult(
                         id(),
                         "captured-user=" + skillContext.username(),
-                        List.of(),
+                        List.of("先核对违法时间与地点"),
                         List.of(),
                         List.of(),
                         false
@@ -81,11 +81,21 @@ class ChatAgentTest {
         assertTrue(contextEvent.agentContext().operatorLabel().contains("Test User(user01)"));
         assertTrue(contextEvent.agentContext().accessScopeLabel().contains("本人名下"));
 
+        AgentEvent firstStatus = events.stream()
+                .filter(event -> "status".equals(event.type()))
+                .findFirst()
+                .orElse(null);
+        assertNotNull(firstStatus);
+        assertTrue(firstStatus.content().contains("正在分析问题并规划技能执行"));
+
         String combinedMessages = events.stream()
                 .filter(event -> "message".equals(event.type()))
                 .map(AgentEvent::content)
                 .reduce("", String::concat);
 
+        assertTrue(combinedMessages.contains("核心判断"));
+        assertTrue(combinedMessages.contains("建议步骤"));
         assertTrue(combinedMessages.contains("captured-user=user01"));
+        assertTrue(combinedMessages.contains("先核对违法时间与地点"));
     }
 }
