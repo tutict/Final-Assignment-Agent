@@ -18,6 +18,7 @@ import 'package:final_assignment_front/i18n/progress_localizers.dart';
 import 'package:final_assignment_front/i18n/status_localizers.dart';
 import 'package:final_assignment_front/utils/helpers/role_utils.dart';
 import 'package:final_assignment_front/utils/services/api_client.dart';
+import 'package:final_assignment_front/utils/services/auth_token_store.dart';
 import 'package:get/get.dart';
 import 'package:final_assignment_front/features/dashboard/controllers/user_dashboard_screen_controller.dart';
 import 'package:final_assignment_front/features/dashboard/views/shared/widgets/dashboard_page_template.dart';
@@ -79,7 +80,7 @@ class _UserAppealPageState extends State<UserAppealPage> {
     setState(() => _isLoading = true);
     try {
       final prefs = await SharedPreferences.getInstance();
-      final jwtToken = prefs.getString('jwtToken');
+      final jwtToken = await AuthTokenStore.instance.getJwtToken();
       if (jwtToken == null) {
         throw Exception('appeal.error.notLoggedIn'.tr);
       }

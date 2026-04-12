@@ -6,6 +6,7 @@ import 'package:final_assignment_front/features/dashboard/views/shared/widgets/d
 import 'package:final_assignment_front/features/model/driver_information.dart';
 import 'package:final_assignment_front/i18n/driver_localizers.dart';
 import 'package:final_assignment_front/utils/helpers/role_utils.dart';
+import 'package:final_assignment_front/utils/services/auth_token_store.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
@@ -39,7 +40,7 @@ Future<List<String>> _resolveDriverManagementRoles() async {
   }
 
   final fallbackRole = prefs.getString('userRole');
-  final jwtToken = prefs.getString('jwtToken');
+  final jwtToken = await AuthTokenStore.instance.getJwtToken();
   final jwtRoles = jwtToken == null
       ? const []
       : normalizeRoleCodes(JwtDecoder.decode(jwtToken)['roles']);

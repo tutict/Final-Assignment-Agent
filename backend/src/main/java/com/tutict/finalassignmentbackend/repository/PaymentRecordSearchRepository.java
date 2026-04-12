@@ -45,6 +45,34 @@ public interface PaymentRecordSearchRepository extends ElasticsearchRepository<P
 
     @Query("""
     {
+      "bool": {
+        "must": [
+          {
+            "term": {
+              "fineId": {
+                "value": ?0
+              }
+            }
+          },
+          {
+            "term": {
+              "payerIdCard.keyword": {
+                "value": "?1"
+              }
+            }
+          }
+        ]
+      }
+    }
+    """)
+    SearchHits<PaymentRecordDocument> findByFineIdAndPayerIdCard(Long fineId, String payerIdCard, Pageable pageable);
+
+    default SearchHits<PaymentRecordDocument> findByFineIdAndPayerIdCard(Long fineId, String payerIdCard) {
+        return findByFineIdAndPayerIdCard(fineId, payerIdCard, PageRequest.of(0, DEFAULT_PAGE_SIZE));
+    }
+
+    @Query("""
+    {
       "match_phrase_prefix": {
         "paymentStatus": {
           "query": "?0"

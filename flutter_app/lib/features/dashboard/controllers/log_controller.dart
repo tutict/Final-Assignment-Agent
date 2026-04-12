@@ -14,7 +14,6 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:http/http.dart' as http;
 import 'package:jwt_decoder/jwt_decoder.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:final_assignment_front/utils/services/auth_token_store.dart';
 
 class LogController extends GetxController with WidgetsBindingObserver {
@@ -292,10 +291,9 @@ class LogController extends GetxController with WidgetsBindingObserver {
   }
 
   Future<bool> _validateJwtToken() async {
-    final prefs = await SharedPreferences.getInstance();
-    String? jwtToken = prefs.getString('jwtToken');
+    String? jwtToken = await AuthTokenStore.instance.getJwtToken();
     if (jwtToken == null || jwtToken.isEmpty) {
-      developer.log('No JWT token found in SharedPreferences');
+      developer.log('No JWT token found');
       _currentUsername = 'Unknown';
       return false;
     }
@@ -312,14 +310,14 @@ class LogController extends GetxController with WidgetsBindingObserver {
         if (jwtToken == null) {
           developer.log('Failed to refresh JWT token');
           _currentUsername = 'Unknown';
-          await _clearTokens(prefs);
+          await _clearTokens();
           return false;
         }
         await AuthTokenStore.instance.setJwtToken(jwtToken);
         if (JwtDecoder.isExpired(jwtToken)) {
           developer.log('New JWT token is expired');
           _currentUsername = 'Unknown';
-          await _clearTokens(prefs);
+          await _clearTokens();
           return false;
         }
         decodedToken = JwtDecoder.decode(jwtToken);
@@ -334,20 +332,18 @@ class LogController extends GetxController with WidgetsBindingObserver {
     } catch (e) {
       developer.log('Invalid JWT token: $e', stackTrace: StackTrace.current);
       _currentUsername = 'Unknown';
-      await _clearTokens(prefs);
+      await _clearTokens();
       return false;
     }
   }
 
-  Future<void> _clearTokens(SharedPreferences prefs) async {
-    await AuthTokenStore.instance.clearJwtToken();
-    await prefs.remove('refreshToken');
+  Future<void> _clearTokens() async {
+    await AuthTokenStore.instance.clearAllTokens();
     developer.log('Cleared invalid tokens');
   }
 
   Future<String?> _refreshJwtToken() async {
-    final prefs = await SharedPreferences.getInstance();
-    final refreshToken = prefs.getString('refreshToken');
+    final refreshToken = await AuthTokenStore.instance.getRefreshToken();
     if (refreshToken == null) {
       developer.log('No refresh token found');
       return null;
@@ -366,7 +362,7 @@ class LogController extends GetxController with WidgetsBindingObserver {
         final newRefreshToken = payload['refreshToken'];
         await AuthTokenStore.instance.setJwtToken(newJwt);
         if (newRefreshToken is String && newRefreshToken.isNotEmpty) {
-          await prefs.setString('refreshToken', newRefreshToken);
+          await AuthTokenStore.instance.setRefreshToken(newRefreshToken);
         }
         developer.log('JWT token refreshed successfully');
         return newJwt;

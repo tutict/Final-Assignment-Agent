@@ -4,7 +4,6 @@ import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
-import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.filter.OncePerRequestFilter;
 
@@ -14,17 +13,17 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 
 import java.io.IOException;
-import java.util.List;
-import java.util.stream.Collectors;
-
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private static final Logger logger = LoggerFactory.getLogger(JwtAuthenticationFilter.class);
 
     private final TokenProvider tokenProvider;
+    private final AuthenticationSnapshotService authenticationSnapshotService;
 
-    public JwtAuthenticationFilter(TokenProvider tokenProvider) {
+    public JwtAuthenticationFilter(TokenProvider tokenProvider,
+                                   AuthenticationSnapshotService authenticationSnapshotService) {
         this.tokenProvider = tokenProvider;
+        this.authenticationSnapshotService = authenticationSnapshotService;
     }
 
     @Override
@@ -32,18 +31,19 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             throws ServletException, IOException {
         String jwt = getJwtFromRequest(request);
 
-        if (jwt != null && tokenProvider.validateToken(jwt)) {
+        if (jwt != null && tokenProvider.validateToken(jwt) && tokenProvider.isAccessToken(jwt)) {
             String username = tokenProvider.getUsernameFromToken(jwt);
-            List<String> roles = tokenProvider.extractRoles(jwt);
-
-            List<SimpleGrantedAuthority> authorities = roles.stream()
-                    .map(SimpleGrantedAuthority::new)
-                    .collect(Collectors.toList());
-
-            UsernamePasswordAuthenticationToken authentication =
-                    new UsernamePasswordAuthenticationToken(username, null, authorities);
-            SecurityContextHolder.getContext().setAuthentication(authentication);
-        } else {
+            AuthenticationSnapshot snapshot = authenticationSnapshotService.findActiveSnapshotByUsername(username);
+            if (snapshot != null) {
+                UsernamePasswordAuthenticationToken authentication =
+                        new UsernamePasswordAuthenticationToken(snapshot.username(), null, snapshot.grantedAuthorities());
+                SecurityContextHolder.getContext().setAuthentication(authentication);
+            } else {
+                SecurityContextHolder.clearContext();
+                logger.warn("Rejected JWT for missing or inactive user: {}", username);
+            }
+        } else if (jwt != null) {
+            SecurityContextHolder.clearContext();
             logger.warn("Invalid or missing JWT in request: {}", request.getRequestURI());
         }
 

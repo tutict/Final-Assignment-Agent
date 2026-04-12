@@ -49,6 +49,7 @@ public class AppealReviewService {
 
     private static final Logger log = Logger.getLogger(AppealReviewService.class.getName());
     private static final String CACHE_NAME = "appealReviewCache";
+    private static final int FULL_LOAD_BATCH_SIZE = 500;
 
     private final AppealReviewMapper appealReviewMapper;
     private final SysRequestHistoryMapper sysRequestHistoryMapper;
@@ -152,7 +153,6 @@ public class AppealReviewService {
                 });
     }
 
-    @Cacheable(cacheNames = CACHE_NAME, key = "'all'", unless = "#result == null || #result.isEmpty()")
     public List<AppealReview> findAll() {
         List<AppealReview> fromIndex = StreamSupport.stream(appealReviewSearchRepository.findAll().spliterator(), false)
                 .map(AppealReviewDocument::toEntity)
@@ -160,9 +160,7 @@ public class AppealReviewService {
         if (!fromIndex.isEmpty()) {
             return fromIndex;
         }
-        List<AppealReview> fromDb = appealReviewMapper.selectList(null);
-        syncBatchToIndexAfterCommit(fromDb);
-        return fromDb;
+        return loadAllFromDatabase();
     }
 
     @Cacheable(
@@ -401,6 +399,28 @@ public class AppealReviewService {
         List<AppealReview> records = mpPage.getRecords();
         syncBatchToIndexAfterCommit(records);
         return records;
+    }
+
+    private List<AppealReview> loadAllFromDatabase() {
+        List<AppealReview> allRecords = new java.util.ArrayList<>();
+        long currentPage = 1L;
+        while (true) {
+            QueryWrapper<AppealReview> wrapper = new QueryWrapper<>();
+            wrapper.orderByAsc("review_id");
+            Page<AppealReview> mpPage = new Page<>(currentPage, FULL_LOAD_BATCH_SIZE);
+            appealReviewMapper.selectPage(mpPage, wrapper);
+            List<AppealReview> records = mpPage.getRecords();
+            if (records == null || records.isEmpty()) {
+                break;
+            }
+            allRecords.addAll(records);
+            syncBatchToIndexAfterCommit(records);
+            if (records.size() < FULL_LOAD_BATCH_SIZE) {
+                break;
+            }
+            currentPage++;
+        }
+        return allRecords;
     }
 
     private List<AppealReview> mapHits(org.springframework.data.elasticsearch.core.SearchHits<AppealReviewDocument> hits) {

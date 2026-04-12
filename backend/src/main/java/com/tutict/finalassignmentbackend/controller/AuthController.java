@@ -20,6 +20,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
@@ -190,9 +191,10 @@ public class AuthController {
                     content = @Content(mediaType = "application/json",
                             schema = @Schema(type = "object", example = "{\"error\":\"Access denied\"}")))
     })
-    public ResponseEntity<List<SysUser>> getAllUsers() {
+    public ResponseEntity<List<SysUser>> getAllUsers(@RequestParam(defaultValue = "1") int page,
+                                                     @RequestParam(defaultValue = "100") int size) {
         try {
-            List<SysUser> users = authWsService.getAllUsers();
+            List<SysUser> users = authWsService.getUsers(page, size);
             LOG.log(Level.INFO, "Fetched {0} users", users.size());
             return ResponseEntity.ok(users);
         } catch (Exception ex) {

@@ -33,6 +33,7 @@ import java.util.regex.Pattern;
 @Service
 public class CurrentUserTrafficSupportService {
 
+    private static final int DEFAULT_CURRENT_USER_LIST_PAGE_SIZE = 100;
     private static final int PAYMENT_SCAN_SIZE = 200;
     private static final Duration SELF_SERVICE_PAYMENT_CONFIRM_WINDOW = Duration.ofMinutes(15);
     private static final Pattern EMAIL_PATTERN =
@@ -88,11 +89,11 @@ public class CurrentUserTrafficSupportService {
     }
 
     public DriverInformation getCurrentDriver() {
-        return resolveCurrentDriver();
+        return resolveCurrentUserScope().driver();
     }
 
     public String getCurrentUserIdCardNumber() {
-        return requireCurrentUserIdCardNumber();
+        return requireCurrentUserIdCardNumber(resolveCurrentUserScope());
     }
 
     @Transactional
@@ -174,19 +175,29 @@ public class CurrentUserTrafficSupportService {
     }
 
     public List<OffenseRecord> listCurrentUserOffenses(int page, int size) {
-        return offenseRecordService.findByDriverIds(new ArrayList<>(resolveCandidateDriverIds()), page, size);
+        DriverInformation driver = resolveCurrentDriver(requireCurrentUser());
+        return offenseRecordService.findByDriverIds(new ArrayList<>(resolveCandidateDriverIds(driver)), page, size);
     }
 
     public List<FineRecord> listCurrentUserFines(int page, int size) {
-        List<Long> offenseIds = resolveCurrentUserOffenseIds();
+        List<Long> offenseIds = resolveCurrentUserOffenseIds(resolveCurrentUserScope());
         if (offenseIds.isEmpty()) {
             return List.of();
         }
         return fineRecordService.findByOffenseIds(offenseIds, page, size);
     }
 
+    public List<Long> listCurrentUserFineIds() {
+        CurrentUserScope scope = resolveCurrentUserScope();
+        List<Long> offenseIds = resolveCurrentUserOffenseIds(scope);
+        if (offenseIds.isEmpty()) {
+            return List.of();
+        }
+        return fineRecordService.findIdsByOffenseIds(offenseIds);
+    }
+
     public List<AppealRecord> listCurrentUserAppeals(int page, int size) {
-        List<Long> offenseIds = resolveCurrentUserOffenseIds();
+        List<Long> offenseIds = resolveCurrentUserOffenseIds(resolveCurrentUserScope());
         if (offenseIds.isEmpty()) {
             return List.of();
         }
@@ -194,52 +205,48 @@ public class CurrentUserTrafficSupportService {
     }
 
     public List<PaymentRecord> listCurrentUserPayments(int page, int size) {
-        return paymentRecordService.searchByPayerIdCard(requireCurrentUserIdCardNumber(), page, size);
+        CurrentUserScope scope = resolveCurrentUserScope();
+        return paymentRecordService.searchByPayerIdCard(requireCurrentUserIdCardNumber(scope), page, size);
     }
 
     public List<PaymentRecord> listCurrentUserPaymentsByFineId(Long fineId, int page, int size) {
+        CurrentUserScope scope = resolveCurrentUserScope();
+        String currentUserIdCardNumber = requireCurrentUserIdCardNumber(scope);
         if (fineId == null) {
-            return listCurrentUserPayments(page, size);
+            return paymentRecordService.searchByPayerIdCard(currentUserIdCardNumber, page, size);
         }
-        requireCurrentUserFine(fineId);
-        String currentUserIdCardNumber = requireCurrentUserIdCardNumber();
-        List<PaymentRecord> paymentRecords = paymentRecordService.findByFineId(fineId, page, size);
-        List<PaymentRecord> result = new ArrayList<>();
-        for (PaymentRecord paymentRecord : paymentRecords) {
-            if (Objects.equals(trimToNull(paymentRecord.getPayerIdCard()), trimToNull(currentUserIdCardNumber))) {
-                result.add(paymentRecord);
-            }
-        }
-        return result;
+        requireCurrentUserFine(fineId, scope);
+        return paymentRecordService.findByFineIdAndPayerIdCard(fineId, currentUserIdCardNumber, page, size);
     }
 
     public List<DeductionRecord> listCurrentUserDeductions(int page, int size) {
-        return deductionRecordService.findByDriverIds(new ArrayList<>(resolveCandidateDriverIds()), page, size);
+        return deductionRecordService.findByDriverIds(
+                new ArrayList<>(resolveCurrentUserScope().candidateDriverIds()),
+                page,
+                size);
+    }
+
+    public List<Long> listCurrentUserDeductionIds() {
+        return deductionRecordService.findIdsByDriverIds(resolveCurrentUserScope().candidateDriverIds());
     }
 
     @Transactional
     public PaymentRecord createPaymentForCurrentUser(PaymentRecord draft) {
         Objects.requireNonNull(draft, "Payment record cannot be null");
-        SysUser user = requireCurrentUser();
-        DriverInformation driver = resolveCurrentDriver();
+        CurrentUserScope scope = resolveCurrentUserScope();
+        SysUser user = scope.user();
+        DriverInformation driver = scope.driver();
         Long fineId = draft.getFineId();
         if (fineId == null || fineId <= 0) {
             throw new IllegalArgumentException("Fine ID must be greater than zero");
         }
-        FineRecord fineRecord = fineRecordService.findById(fineId);
-        if (fineRecord == null) {
-            throw new IllegalStateException("Fine record not found");
-        }
-        OffenseRecord offense = offenseRecordService.findById(fineRecord.getOffenseId());
-        if (offense == null || !resolveCandidateDriverIds().contains(offense.getDriverId())) {
-            throw new IllegalStateException("Fine does not belong to current user");
-        }
+        FineRecord fineRecord = requireCurrentUserFineContext(fineId, scope).fineRecord();
 
         draft.setPayerName(firstNonBlank(
                 driver == null ? null : driver.getName(),
                 user.getRealName(),
                 user.getUsername()));
-        draft.setPayerIdCard(requireCurrentUserIdCardNumber(user, driver));
+        draft.setPayerIdCard(requireCurrentUserIdCardNumber(scope));
         ensureNoPendingSelfServicePayment(fineId, draft.getPayerIdCard());
         draft.setPayerContact(firstNonBlank(
                 driver == null ? null : driver.getContactNumber(),
@@ -256,10 +263,11 @@ public class CurrentUserTrafficSupportService {
     @Transactional
     public PaymentRecord confirmCurrentUserPayment(Long paymentId, PaymentRecord confirmationDraft) {
         Objects.requireNonNull(confirmationDraft, "Payment confirmation cannot be null");
-        PaymentRecord paymentRecord = requireCurrentUserPayment(paymentId);
+        CurrentUserPaymentContext paymentContext = requireCurrentUserPaymentContext(paymentId);
+        PaymentRecord paymentRecord = paymentContext.paymentRecord();
         ensureCurrentUserCanConfirmPayment(paymentRecord);
 
-        FineRecord fineRecord = requireCurrentUserFine(paymentRecord.getFineId());
+        FineRecord fineRecord = paymentContext.fineRecord();
         BigDecimal remainingPayableAmount = resolveRemainingPayableAmount(fineRecord);
         if (remainingPayableAmount.signum() <= 0) {
             throw new IllegalStateException("Fine is already fully paid");
@@ -273,37 +281,51 @@ public class CurrentUserTrafficSupportService {
             throw new IllegalStateException("Payment amount exceeds current remaining payable amount");
         }
 
-        paymentRecord = paymentRecordService.updateSelfServicePaymentConfirmationDetails(
-                paymentId,
-                confirmationDraft.getTransactionId(),
-                confirmationDraft.getReceiptUrl());
         PaymentState targetState = paymentAmount.compareTo(remainingPayableAmount) == 0
                 ? PaymentState.PAID
                 : PaymentState.PARTIAL;
-        return paymentRecordService.transitionPaymentStatus(paymentId, targetState);
+        return paymentRecordService.confirmSelfServicePayment(
+                paymentId,
+                confirmationDraft.getTransactionId(),
+                confirmationDraft.getReceiptUrl(),
+                targetState);
     }
 
     @Transactional
     public PaymentRecord updateCurrentUserPaymentProof(Long paymentId, PaymentRecord proofDraft) {
         Objects.requireNonNull(proofDraft, "Payment proof update cannot be null");
-        PaymentRecord paymentRecord = requireCurrentUserPayment(paymentId);
-        FineRecord fineRecord = requireCurrentUserFine(paymentRecord.getFineId());
+        CurrentUserPaymentContext paymentContext = requireCurrentUserPaymentContext(paymentId);
+        FineRecord fineRecord = paymentContext.fineRecord();
         if (Objects.equals(trimToNull(fineRecord.getPaymentStatus()), PaymentState.WAIVED.getCode())) {
             throw new IllegalStateException("Waived fines do not require payment proof updates");
         }
-        return paymentRecordService.updateSelfServicePaymentReceiptProof(paymentId, proofDraft.getReceiptUrl());
+        return paymentRecordService.updateSelfServicePaymentReceiptProof(
+                paymentContext.paymentRecord(),
+                proofDraft.getReceiptUrl());
     }
 
     public List<VehicleInformation> listCurrentUserVehicles() {
-        return vehicleInformationService.getVehicleInformationByIdCardNumber(requireCurrentUserIdCardNumber());
+        return listCurrentUserVehicles(1, DEFAULT_CURRENT_USER_LIST_PAGE_SIZE);
+    }
+
+    public List<VehicleInformation> listCurrentUserVehicles(int page, int size) {
+        return vehicleInformationService.searchByOwnerIdCard(
+                requireCurrentUserIdCardNumber(),
+                page,
+                size);
+    }
+
+    public List<Long> listCurrentUserVehicleIds() {
+        return vehicleInformationService.findIdsByOwnerIdCard(requireCurrentUserIdCardNumber());
     }
 
     @Transactional
     public VehicleInformation createVehicleForCurrentUser(VehicleInformation draft) {
         Objects.requireNonNull(draft, "Vehicle information cannot be null");
-        SysUser user = requireCurrentUser();
-        DriverInformation driver = resolveCurrentDriver();
-        String ownerIdCardNumber = requireCurrentUserIdCardNumber(user, driver);
+        CurrentUserScope scope = resolveCurrentUserScope();
+        SysUser user = scope.user();
+        DriverInformation driver = scope.driver();
+        String ownerIdCardNumber = requireCurrentUserIdCardNumber(scope);
 
         ensureCurrentUserOwnsVehicleDraft(draft.getOwnerIdCard(), ownerIdCardNumber);
         draft.setOwnerIdCard(ownerIdCardNumber);
@@ -316,11 +338,12 @@ public class CurrentUserTrafficSupportService {
     @Transactional
     public VehicleInformation updateVehicleForCurrentUser(Long vehicleId, VehicleInformation draft) {
         Objects.requireNonNull(draft, "Vehicle information cannot be null");
-        SysUser user = requireCurrentUser();
-        DriverInformation driver = resolveCurrentDriver();
-        VehicleInformation existingVehicle = requireCurrentUserVehicle(vehicleId);
+        CurrentUserScope scope = resolveCurrentUserScope();
+        SysUser user = scope.user();
+        DriverInformation driver = scope.driver();
+        VehicleInformation existingVehicle = requireCurrentUserVehicle(vehicleId, scope);
         String ownerIdCardNumber = firstNonBlank(trimToNull(existingVehicle.getOwnerIdCard()),
-                requireCurrentUserIdCardNumber(user, driver));
+                requireCurrentUserIdCardNumber(scope));
 
         ensureCurrentUserOwnsVehicleDraft(draft.getOwnerIdCard(), ownerIdCardNumber);
         draft.setVehicleId(vehicleId);
@@ -349,7 +372,9 @@ public class CurrentUserTrafficSupportService {
 
     public AppealRecord createAppealForCurrentUser(AppealRecord appealRecord) {
         Objects.requireNonNull(appealRecord, "Appeal record cannot be null");
-        SysUser user = requireCurrentUser();
+        CurrentUserScope scope = resolveCurrentUserScope();
+        SysUser user = scope.user();
+        DriverInformation driver = scope.driver();
         if (appealRecord.getOffenseId() == null) {
             throw new IllegalArgumentException("Offense ID must not be empty");
         }
@@ -357,11 +382,10 @@ public class CurrentUserTrafficSupportService {
         if (offense == null) {
             throw new IllegalStateException("Offense not found");
         }
-        if (!resolveCandidateDriverIds().contains(offense.getDriverId())) {
+        if (!scope.candidateDriverIds().contains(offense.getDriverId())) {
             throw new IllegalStateException("Offense does not belong to current user");
         }
 
-        DriverInformation driver = resolveCurrentDriver();
         String appellantName = firstNonBlank(
                 driver == null ? null : driver.getName(),
                 user.getRealName(),
@@ -400,7 +424,7 @@ public class CurrentUserTrafficSupportService {
             throw new IllegalArgumentException("Appeal acceptance event must not be empty");
         }
         ensureCurrentUserCanTriggerAcceptanceEvent(event);
-        AppealRecord appeal = requireCurrentUserAppeal(appealId);
+        AppealRecord appeal = requireCurrentUserAppeal(appealId, resolveCurrentUserScope());
         ensureCurrentUserEventMatchesAppealState(appeal, event);
         if (hasSupplementPayload(supplementDraft)) {
             appeal = appealRecordService.updateSupplementFieldsSystemManaged(appealId, supplementDraft);
@@ -426,7 +450,7 @@ public class CurrentUserTrafficSupportService {
             throw new IllegalArgumentException("Current user can only withdraw appeals");
         }
 
-        AppealRecord appeal = requireCurrentUserAppeal(appealId);
+        AppealRecord appeal = requireCurrentUserAppeal(appealId, resolveCurrentUserScope());
         AppealProcessState currentState = resolveAppealProcessState(appeal.getProcessStatus());
         AppealProcessState newState = stateMachineService.processAppealState(appealId, currentState, event);
         if (newState == currentState) {
@@ -436,10 +460,18 @@ public class CurrentUserTrafficSupportService {
     }
 
     private DriverInformation resolveCurrentDriver() {
-        return driverInformationService.findLinkedDriverForUser(requireCurrentUser());
+        return resolveCurrentDriver(requireCurrentUser());
+    }
+
+    private DriverInformation resolveCurrentDriver(SysUser user) {
+        return driverInformationService.findLinkedDriverForUser(user);
     }
 
     private AppealRecord requireCurrentUserAppeal(Long appealId) {
+        return requireCurrentUserAppeal(appealId, resolveCurrentUserScope());
+    }
+
+    private AppealRecord requireCurrentUserAppeal(Long appealId, CurrentUserScope scope) {
         AppealRecord appeal = appealRecordService.getAppealById(appealId);
         if (appeal == null) {
             throw new IllegalStateException("Appeal not found");
@@ -447,8 +479,8 @@ public class CurrentUserTrafficSupportService {
         if (appeal.getOffenseId() == null) {
             throw new IllegalStateException("Appeal offense does not belong to current user");
         }
-        Long offenseId = appeal.getOffenseId();
-        if (!resolveCurrentUserOffenseIds().contains(offenseId)) {
+        OffenseRecord offense = offenseRecordService.findById(appeal.getOffenseId());
+        if (offense == null || !scope.candidateDriverIds().contains(offense.getDriverId())) {
             throw new IllegalStateException("Appeal does not belong to current user");
         }
         return appeal;
@@ -506,6 +538,10 @@ public class CurrentUserTrafficSupportService {
     }
 
     private VehicleInformation requireCurrentUserVehicle(Long vehicleId) {
+        return requireCurrentUserVehicle(vehicleId, resolveCurrentUserScope());
+    }
+
+    private VehicleInformation requireCurrentUserVehicle(Long vehicleId, CurrentUserScope scope) {
         if (vehicleId == null || vehicleId <= 0) {
             throw new IllegalArgumentException("Vehicle ID must be greater than zero");
         }
@@ -514,13 +550,29 @@ public class CurrentUserTrafficSupportService {
             throw new IllegalStateException("Vehicle not found");
         }
         String ownerIdCardNumber = trimToNull(vehicle.getOwnerIdCard());
-        if (!Objects.equals(ownerIdCardNumber, requireCurrentUserIdCardNumber())) {
+        if (!Objects.equals(ownerIdCardNumber, requireCurrentUserIdCardNumber(scope))) {
             throw new IllegalStateException("Vehicle does not belong to current user");
         }
         return vehicle;
     }
 
     private FineRecord requireCurrentUserFine(Long fineId) {
+        return requireCurrentUserFineContext(fineId, resolveCurrentUserScope()).fineRecord();
+    }
+
+    private FineRecord requireCurrentUserFine(Long fineId, CurrentUserScope scope) {
+        return requireCurrentUserFineContext(fineId, scope).fineRecord();
+    }
+
+    private FineRecord requireCurrentUserFine(Long fineId, Set<Long> candidateDriverIds) {
+        return requireCurrentUserFineContext(fineId, candidateDriverIds).fineRecord();
+    }
+
+    private CurrentUserFineContext requireCurrentUserFineContext(Long fineId, CurrentUserScope scope) {
+        return requireCurrentUserFineContext(fineId, scope.candidateDriverIds());
+    }
+
+    private CurrentUserFineContext requireCurrentUserFineContext(Long fineId, Set<Long> candidateDriverIds) {
         if (fineId == null || fineId <= 0) {
             throw new IllegalArgumentException("Fine ID must be greater than zero");
         }
@@ -529,13 +581,21 @@ public class CurrentUserTrafficSupportService {
             throw new IllegalStateException("Fine record not found");
         }
         OffenseRecord offense = offenseRecordService.findById(fineRecord.getOffenseId());
-        if (offense == null || !resolveCandidateDriverIds().contains(offense.getDriverId())) {
+        if (offense == null || !candidateDriverIds.contains(offense.getDriverId())) {
             throw new IllegalStateException("Fine does not belong to current user");
         }
-        return fineRecord;
+        return new CurrentUserFineContext(fineRecord, offense);
     }
 
     private PaymentRecord requireCurrentUserPayment(Long paymentId) {
+        return requireCurrentUserPaymentContext(paymentId, resolveCurrentUserScope()).paymentRecord();
+    }
+
+    private CurrentUserPaymentContext requireCurrentUserPaymentContext(Long paymentId) {
+        return requireCurrentUserPaymentContext(paymentId, resolveCurrentUserScope());
+    }
+
+    private CurrentUserPaymentContext requireCurrentUserPaymentContext(Long paymentId, CurrentUserScope scope) {
         if (paymentId == null || paymentId <= 0) {
             throw new IllegalArgumentException("Payment ID must be greater than zero");
         }
@@ -543,18 +603,22 @@ public class CurrentUserTrafficSupportService {
         if (paymentRecord == null) {
             throw new IllegalStateException("Payment record not found");
         }
-        if (!Objects.equals(trimToNull(paymentRecord.getPayerIdCard()), trimToNull(requireCurrentUserIdCardNumber()))) {
+        if (!Objects.equals(trimToNull(paymentRecord.getPayerIdCard()), trimToNull(requireCurrentUserIdCardNumber(scope)))) {
             throw new IllegalStateException("Payment record does not belong to current user");
         }
         if (paymentRecord.getFineId() == null) {
             throw new IllegalStateException("Payment record is missing the linked fine");
         }
-        requireCurrentUserFine(paymentRecord.getFineId());
-        return paymentRecord;
+        FineRecord fineRecord = requireCurrentUserFineContext(paymentRecord.getFineId(), scope).fineRecord();
+        return new CurrentUserPaymentContext(paymentRecord, fineRecord);
     }
 
     private void ensureNoPendingSelfServicePayment(Long fineId, String payerIdCard) {
-        List<PaymentRecord> paymentRecords = paymentRecordService.findByFineId(fineId, 1, PAYMENT_SCAN_SIZE);
+        List<PaymentRecord> paymentRecords = paymentRecordService.findByFineIdAndPayerIdCard(
+                fineId,
+                payerIdCard,
+                1,
+                PAYMENT_SCAN_SIZE);
         for (PaymentRecord paymentRecord : paymentRecords) {
             if (isActivePendingSelfServicePayment(paymentRecord, payerIdCard)) {
                 throw new IllegalStateException(
@@ -626,8 +690,11 @@ public class CurrentUserTrafficSupportService {
     }
 
     private Set<Long> resolveCandidateDriverIds() {
+        return resolveCandidateDriverIds(resolveCurrentDriver());
+    }
+
+    private Set<Long> resolveCandidateDriverIds(DriverInformation driver) {
         Set<Long> candidateIds = new LinkedHashSet<>();
-        DriverInformation driver = resolveCurrentDriver();
         if (driver != null && driver.getDriverId() != null) {
             candidateIds.add(driver.getDriverId());
         }
@@ -635,7 +702,15 @@ public class CurrentUserTrafficSupportService {
     }
 
     private List<Long> resolveCurrentUserOffenseIds() {
-        return offenseRecordService.findIdsByDriverIds(new ArrayList<>(resolveCandidateDriverIds()));
+        return resolveCurrentUserOffenseIds(resolveCurrentUserScope());
+    }
+
+    private List<Long> resolveCurrentUserOffenseIds(CurrentUserScope scope) {
+        return offenseRecordService.findIdsByDriverIds(new ArrayList<>(scope.candidateDriverIds()));
+    }
+
+    public List<Long> listCurrentUserOffenseIds() {
+        return resolveCurrentUserOffenseIds(resolveCurrentUserScope());
     }
 
     private String firstNonBlank(String... candidates) {
@@ -664,7 +739,11 @@ public class CurrentUserTrafficSupportService {
     }
 
     private String requireCurrentUserIdCardNumber() {
-        return requireCurrentUserIdCardNumber(requireCurrentUser(), resolveCurrentDriver());
+        return requireCurrentUserIdCardNumber(resolveCurrentUserScope());
+    }
+
+    private String requireCurrentUserIdCardNumber(CurrentUserScope scope) {
+        return requireCurrentUserIdCardNumber(scope == null ? null : scope.user(), scope == null ? null : scope.driver());
     }
 
     private String requireCurrentUserIdCardNumber(SysUser user, DriverInformation driver) {
@@ -675,6 +754,21 @@ public class CurrentUserTrafficSupportService {
             throw new IllegalStateException("Current user profile has no ID card number");
         }
         return idCardNumber;
+    }
+
+    private CurrentUserScope resolveCurrentUserScope() {
+        return resolveCurrentUserScope(requireCurrentUser());
+    }
+
+    private CurrentUserScope resolveCurrentUserScope(SysUser user) {
+        DriverInformation driver = resolveCurrentDriver(user);
+        return new CurrentUserScope(
+                user,
+                driver,
+                firstNonBlank(
+                        trimToNull(driver == null ? null : driver.getIdCardNumber()),
+                        trimToNull(user == null ? null : user.getIdCardNumber())),
+                Set.copyOf(resolveCandidateDriverIds(driver)));
     }
 
     private void ensureCurrentUserOwnsVehicleDraft(String ownerIdCardNumber, String currentUserIdCardNumber) {
@@ -824,5 +918,19 @@ public class CurrentUserTrafficSupportService {
         if (existingDriver != null && !Objects.equals(existingDriver.getDriverId(), driver.getDriverId())) {
             throw new IllegalArgumentException("Driver license number already exists.");
         }
+    }
+
+    private record CurrentUserScope(SysUser user,
+                                    DriverInformation driver,
+                                    String idCardNumber,
+                                    Set<Long> candidateDriverIds) {
+    }
+
+    private record CurrentUserFineContext(FineRecord fineRecord,
+                                          OffenseRecord offenseRecord) {
+    }
+
+    private record CurrentUserPaymentContext(PaymentRecord paymentRecord,
+                                             FineRecord fineRecord) {
     }
 }

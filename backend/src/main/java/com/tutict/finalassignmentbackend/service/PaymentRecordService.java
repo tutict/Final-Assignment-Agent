@@ -52,7 +52,12 @@ public class PaymentRecordService {
 
     private static final Logger log = Logger.getLogger(PaymentRecordService.class.getName());
     private static final String CACHE_NAME = "paymentRecordCache";
+    private static final int FULL_LOAD_BATCH_SIZE = 500;
     private static final Set<String> SELF_SERVICE_PAYMENT_CHANNELS = Set.of("APP", "USER_SELF_SERVICE");
+    private static final Set<String> EFFECTIVE_PAYMENT_STATUSES = Set.of(
+            PaymentState.PAID.getCode(),
+            PaymentState.PARTIAL.getCode(),
+            "Success");
     private static final String FINANCE_REVIEW_PREFIX = "[FINANCE_REVIEW]|";
     private static final Set<String> FINANCE_REVIEW_RESULTS = Set.of("APPROVED", "NEED_PROOF");
 
@@ -125,49 +130,20 @@ public class PaymentRecordService {
     }
 
     @Transactional
+    @CacheEvict(cacheNames = CACHE_NAME, allEntries = true)
     public PaymentRecord updatePaymentStatus(Long paymentId, PaymentState newState) {
         requirePositive(paymentId, "Payment ID");
-        PaymentRecord existing = paymentRecordMapper.selectById(paymentId);
-        if (existing == null) {
-            throw new IllegalStateException("PaymentRecord not found for id=" + paymentId);
-        }
-        validatePaymentStateConsistency(existing, newState);
-        existing.setPaymentStatus(newState != null ? newState.getCode() : existing.getPaymentStatus());
-        existing.setUpdatedAt(LocalDateTime.now());
-        paymentRecordMapper.updateById(existing);
-        syncFinePaymentSummary(existing.getFineId());
-        syncToIndexAfterCommit(existing);
-        return existing;
+        return persistPaymentStatusUpdate(requireExistingPaymentRecord(paymentId), newState, LocalDateTime.now());
     }
 
     @Transactional
+    @CacheEvict(cacheNames = CACHE_NAME, allEntries = true)
     public PaymentRecord transitionPaymentStatus(Long paymentId, PaymentState targetState) {
         requirePositive(paymentId, "Payment ID");
         Objects.requireNonNull(targetState, "Target payment state must not be null");
-        if (targetState == PaymentState.WAIVED) {
-            throw new IllegalStateException(
-                    "Manual payment waivers are not supported; use the fine waiver/refund workflow instead");
-        }
-        PaymentRecord existing = paymentRecordMapper.selectById(paymentId);
-        if (existing == null) {
-            throw new IllegalStateException("PaymentRecord not found for id=" + paymentId);
-        }
-        PaymentState currentState = resolvePaymentState(existing.getPaymentStatus());
-        if (currentState == targetState) {
-            validatePaymentStateConsistency(existing, targetState);
-            return existing;
-        }
-
-        PaymentEvent event = resolveTransitionEvent(currentState, targetState);
-        if (event == null || !stateMachineService.canTransitionPaymentState(currentState, event)) {
-            throw new IllegalStateException("Payment state transition is not allowed");
-        }
-
-        PaymentState newState = stateMachineService.processPaymentState(paymentId, currentState, event);
-        if (newState != targetState) {
-            throw new IllegalStateException("Payment state did not transition to the expected target state");
-        }
-        return updatePaymentStatus(paymentId, newState);
+        PaymentRecord existing = requireExistingPaymentRecord(paymentId);
+        PaymentState newState = resolveTransitionedPaymentState(paymentId, existing, targetState);
+        return persistPaymentStatusUpdate(existing, newState, LocalDateTime.now());
     }
 
     @Transactional
@@ -180,16 +156,8 @@ public class PaymentRecordService {
         if (normalizedTransactionId == null) {
             throw new IllegalArgumentException("Transaction ID must not be blank");
         }
-        PaymentRecord existing = paymentRecordMapper.selectById(paymentId);
-        if (existing == null) {
-            throw new IllegalStateException("PaymentRecord not found for id=" + paymentId);
-        }
-        if (!shouldCreateAsPendingSelfServicePayment(existing)) {
-            throw new IllegalStateException("Only self-service payment orders can accept confirmation details");
-        }
-        if (!Objects.equals(resolvePaymentState(existing.getPaymentStatus()), PaymentState.UNPAID)) {
-            throw new IllegalStateException("Only pending self-service payment orders can accept confirmation details");
-        }
+        PaymentRecord existing = requireExistingPaymentRecord(paymentId);
+        ensurePendingSelfServicePaymentForConfirmation(existing);
         ensureUniqueTransactionId(normalizedTransactionId, paymentId);
 
         LocalDateTime confirmationTime = LocalDateTime.now();
@@ -201,6 +169,35 @@ public class PaymentRecordService {
         paymentRecordMapper.updateById(existing);
         syncToIndexAfterCommit(existing);
         return existing;
+    }
+
+    @Transactional
+    @CacheEvict(cacheNames = CACHE_NAME, allEntries = true)
+    public PaymentRecord confirmSelfServicePayment(Long paymentId,
+                                                   String transactionId,
+                                                   String receiptUrl,
+                                                   PaymentState targetState) {
+        requirePositive(paymentId, "Payment ID");
+        Objects.requireNonNull(targetState, "Target payment state must not be null");
+        if (targetState != PaymentState.PAID && targetState != PaymentState.PARTIAL) {
+            throw new IllegalStateException("Self-service payment confirmation can only target paid states");
+        }
+        String normalizedTransactionId = trimToNull(transactionId);
+        if (normalizedTransactionId == null) {
+            throw new IllegalArgumentException("Transaction ID must not be blank");
+        }
+
+        PaymentRecord existing = requireExistingPaymentRecord(paymentId);
+        ensurePendingSelfServicePaymentForConfirmation(existing);
+        ensureUniqueTransactionId(normalizedTransactionId, paymentId);
+
+        PaymentState newState = resolveTransitionedPaymentState(paymentId, existing, targetState);
+        LocalDateTime confirmationTime = LocalDateTime.now();
+        existing.setTransactionId(normalizedTransactionId);
+        existing.setReceiptUrl(trimToNull(receiptUrl));
+        existing.setReceiptNumber(defaultIfBlank(existing.getReceiptNumber(), generateReferenceNumber("RCT")));
+        existing.setPaymentTime(confirmationTime);
+        return persistPaymentStatusUpdate(existing, newState, confirmationTime);
     }
 
     @Transactional
@@ -242,14 +239,13 @@ public class PaymentRecordService {
     @CacheEvict(cacheNames = CACHE_NAME, allEntries = true)
     public PaymentRecord updateSelfServicePaymentReceiptProof(Long paymentId, String receiptUrl) {
         requirePositive(paymentId, "Payment ID");
+        return updateSelfServicePaymentReceiptProof(requireExistingPaymentRecord(paymentId), receiptUrl);
+    }
+
+    PaymentRecord updateSelfServicePaymentReceiptProof(PaymentRecord existing, String receiptUrl) {
         String normalizedReceiptUrl = trimToNull(receiptUrl);
         if (normalizedReceiptUrl == null) {
             throw new IllegalArgumentException("Receipt URL must not be blank");
-        }
-
-        PaymentRecord existing = paymentRecordMapper.selectById(paymentId);
-        if (existing == null) {
-            throw new IllegalStateException("PaymentRecord not found for id=" + paymentId);
         }
         if (!shouldCreateAsPendingSelfServicePayment(existing)) {
             throw new IllegalStateException("Only self-service payment records can update proof in this flow");
@@ -281,7 +277,7 @@ public class PaymentRecordService {
                 return;
             }
             BigDecimal remaining = refundAmount;
-            List<PaymentRecord> paymentRecords = findByFineId(fineId, 1, 500);
+            List<PaymentRecord> paymentRecords = loadRefundCandidatePayments(fineId);
             LocalDateTime refundTime = LocalDateTime.now();
             for (PaymentRecord record : paymentRecords) {
                 if (record == null || !isEffectivePaymentStatus(record.getPaymentStatus())) {
@@ -319,27 +315,37 @@ public class PaymentRecordService {
     public void waiveAndRefundPaymentsByFineId(Long fineId, String reason) {
         try {
             requirePositive(fineId, "Fine ID");
-            List<PaymentRecord> paymentRecords = findByFineId(fineId, 1, 500);
             LocalDateTime now = LocalDateTime.now();
-            for (PaymentRecord record : paymentRecords) {
-                if (record == null) {
-                    continue;
+            long pageNumber = 1L;
+            while (true) {
+                List<PaymentRecord> paymentRecords = loadFinePaymentBatch(fineId, pageNumber, FULL_LOAD_BATCH_SIZE);
+                if (paymentRecords == null || paymentRecords.isEmpty()) {
+                    break;
                 }
-                BigDecimal paidAmount = normalizeAmount(record.getPaymentAmount());
-                BigDecimal refundedAmount = normalizeAmount(record.getRefundAmount());
-                if (paidAmount.signum() > 0 && refundedAmount.compareTo(paidAmount) < 0) {
-                    record.setRefundAmount(paidAmount);
-                    record.setRefundTime(now);
+                for (PaymentRecord record : paymentRecords) {
+                    if (record == null) {
+                        continue;
+                    }
+                    BigDecimal paidAmount = normalizeAmount(record.getPaymentAmount());
+                    BigDecimal refundedAmount = normalizeAmount(record.getRefundAmount());
+                    if (paidAmount.signum() > 0 && refundedAmount.compareTo(paidAmount) < 0) {
+                        record.setRefundAmount(paidAmount);
+                        record.setRefundTime(now);
+                    }
+                    record.setPaymentStatus(PaymentState.WAIVED.getCode());
+                    record.setRemarks(appendRemark(record.getRemarks(), reason));
+                    record.setUpdatedAt(now);
+                    paymentRecordMapper.updateById(record);
+                    BigDecimal refundedDelta = paidAmount.subtract(refundedAmount);
+                    if (refundedDelta.signum() > 0) {
+                        recordRefundAudit(record, refundedDelta, reason, "WAIVE_AND_REFUND");
+                    }
+                    syncToIndexAfterCommit(record);
                 }
-                record.setPaymentStatus(PaymentState.WAIVED.getCode());
-                record.setRemarks(appendRemark(record.getRemarks(), reason));
-                record.setUpdatedAt(now);
-                paymentRecordMapper.updateById(record);
-                BigDecimal refundedDelta = paidAmount.subtract(refundedAmount);
-                if (refundedDelta.signum() > 0) {
-                    recordRefundAudit(record, refundedDelta, reason, "WAIVE_AND_REFUND");
+                if (paymentRecords.size() < FULL_LOAD_BATCH_SIZE) {
+                    break;
                 }
-                syncToIndexAfterCommit(record);
+                pageNumber++;
             }
             syncFinePaymentSummary(fineId);
         } catch (Exception ex) {
@@ -371,7 +377,6 @@ public class PaymentRecordService {
     }
 
     @Transactional(readOnly = true)
-    @Cacheable(cacheNames = CACHE_NAME, key = "'all'", unless = "#result == null || #result.isEmpty()")
     public List<PaymentRecord> findAll() {
         List<PaymentRecord> fromIndex = StreamSupport.stream(paymentRecordSearchRepository.findAll().spliterator(), false)
                 .map(PaymentRecordDocument::toEntity)
@@ -379,12 +384,7 @@ public class PaymentRecordService {
         if (!fromIndex.isEmpty()) {
             return fromIndex;
         }
-        List<PaymentRecord> fromDb = paymentRecordMapper.selectList(null);
-        fromDb.stream()
-                .map(PaymentRecordDocument::fromEntity)
-                .filter(Objects::nonNull)
-                .forEach(paymentRecordSearchRepository::save);
-        return fromDb;
+        return loadAllFromDatabase();
     }
 
     @Transactional(readOnly = true)
@@ -408,6 +408,27 @@ public class PaymentRecordService {
         }
         QueryWrapper<PaymentRecord> wrapper = new QueryWrapper<>();
         wrapper.eq("fine_id", fineId)
+                .orderByDesc("payment_time");
+        return fetchFromDatabase(wrapper, page, size);
+    }
+
+    @Cacheable(cacheNames = CACHE_NAME, key = "'finePayer:' + #fineId + ':' + #payerIdCard + ':' + #page + ':' + #size",
+            unless = "#result == null || #result.isEmpty()")
+    public List<PaymentRecord> findByFineIdAndPayerIdCard(Long fineId, String payerIdCard, int page, int size) {
+        requirePositive(fineId, "Fine ID");
+        if (isBlank(payerIdCard)) {
+            return List.of();
+        }
+        validatePagination(page, size);
+        String normalizedIdCard = payerIdCard.trim();
+        List<PaymentRecord> index = mapHits(
+                paymentRecordSearchRepository.findByFineIdAndPayerIdCard(fineId, normalizedIdCard, pageable(page, size)));
+        if (!index.isEmpty()) {
+            return index;
+        }
+        QueryWrapper<PaymentRecord> wrapper = new QueryWrapper<>();
+        wrapper.eq("fine_id", fineId)
+                .eq("payer_id_card", normalizedIdCard)
                 .orderByDesc("payment_time");
         return fetchFromDatabase(wrapper, page, size);
     }
@@ -528,41 +549,63 @@ public class PaymentRecordService {
     }
 
     @Transactional(readOnly = true)
+    public List<Long> findIdsByPayerIdCardAndFineIds(String payerIdCard, Iterable<Long> fineIds) {
+        if (isBlank(payerIdCard)) {
+            return List.of();
+        }
+        List<Long> normalizedFineIds = normalizePositiveIds(fineIds);
+        if (normalizedFineIds.isEmpty()) {
+            return List.of();
+        }
+        QueryWrapper<PaymentRecord> wrapper = new QueryWrapper<>();
+        wrapper.select("payment_id")
+                .eq("payer_id_card", payerIdCard.trim())
+                .in("fine_id", normalizedFineIds)
+                .orderByDesc("payment_time");
+        return paymentRecordMapper.selectObjs(wrapper).stream()
+                .filter(Objects::nonNull)
+                .map(this::toLong)
+                .filter(Objects::nonNull)
+                .distinct()
+                .collect(Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
     public List<PaymentRecord> listFinanceReviewTasks(int page, int size) {
         validatePagination(page, size);
         int startIndex = (page - 1) * size;
         int endExclusive = startIndex + size;
         int candidatePage = 1;
         int candidateBatchSize = Math.max(size * 3, 50);
-        List<PaymentRecord> matched = new java.util.ArrayList<>();
+        List<Long> matchedPaymentIds = new java.util.ArrayList<>();
 
-        while (matched.size() < endExclusive) {
-            QueryWrapper<PaymentRecord> wrapper = new QueryWrapper<>();
-            wrapper.in("payment_channel", SELF_SERVICE_PAYMENT_CHANNELS)
-                    .in("payment_status", PaymentState.PAID.getCode(), PaymentState.PARTIAL.getCode())
-                    .orderByDesc("updated_at")
-                    .orderByDesc("payment_time")
-                    .orderByDesc("payment_id");
-            Page<PaymentRecord> candidatePageResult = paymentRecordMapper.selectPage(
-                    new Page<>(candidatePage, candidateBatchSize),
-                    wrapper);
-            List<PaymentRecord> records = candidatePageResult.getRecords();
+        while (matchedPaymentIds.size() < endExclusive) {
+            List<PaymentRecord> records = loadFinanceReviewTaskCandidateBatch(candidatePage, candidateBatchSize);
             if (records == null || records.isEmpty()) {
                 break;
             }
-            records.stream()
-                    .filter(this::requiresFinanceReviewTask)
-                    .forEach(matched::add);
+            for (PaymentRecord record : records) {
+                if (!requiresFinanceReviewTask(record)) {
+                    continue;
+                }
+                if (record.getPaymentId() != null) {
+                    matchedPaymentIds.add(record.getPaymentId());
+                }
+                if (matchedPaymentIds.size() >= endExclusive) {
+                    break;
+                }
+            }
             if (records.size() < candidateBatchSize) {
                 break;
             }
             candidatePage++;
         }
 
-        if (matched.size() <= startIndex) {
+        if (matchedPaymentIds.size() <= startIndex) {
             return List.of();
         }
-        return matched.subList(startIndex, Math.min(endExclusive, matched.size()));
+        List<Long> pagePaymentIds = matchedPaymentIds.subList(startIndex, Math.min(endExclusive, matchedPaymentIds.size()));
+        return loadPaymentRecordsByIds(pagePaymentIds);
     }
 
     @Cacheable(cacheNames = CACHE_NAME, key = "'timeRange:' + #startTime + ':' + #endTime + ':' + #page + ':' + #size", unless = "#result == null || #result.isEmpty()")
@@ -756,11 +799,7 @@ public class PaymentRecordService {
             throw new IllegalStateException("Fine record not found for id=" + fineId);
         }
 
-        QueryWrapper<PaymentRecord> wrapper = new QueryWrapper<>();
-        wrapper.eq("fine_id", fineId)
-                .orderByDesc("payment_time")
-                .orderByDesc("payment_id");
-        List<PaymentRecord> paymentRecords = paymentRecordMapper.selectList(wrapper);
+        List<PaymentRecord> paymentRecords = loadPaymentSummaryRecords(fineId);
 
         BigDecimal totalAmount = normalizeAmount(resolveFineTotalAmount(fineRecord));
         BigDecimal paidAmount = BigDecimal.ZERO;
@@ -825,9 +864,7 @@ public class PaymentRecordService {
             return false;
         }
         String normalized = status.trim();
-        return PaymentState.PAID.getCode().equalsIgnoreCase(normalized)
-                || PaymentState.PARTIAL.getCode().equalsIgnoreCase(normalized)
-                || "Success".equalsIgnoreCase(normalized);
+        return EFFECTIVE_PAYMENT_STATUSES.stream().anyMatch(candidate -> candidate.equalsIgnoreCase(normalized));
     }
 
     private boolean isWaivedStatus(String status) {
@@ -989,6 +1026,63 @@ public class PaymentRecordService {
         return state != null ? state : PaymentState.UNPAID;
     }
 
+    private PaymentRecord requireExistingPaymentRecord(Long paymentId) {
+        PaymentRecord existing = paymentRecordMapper.selectById(paymentId);
+        if (existing == null) {
+            throw new IllegalStateException("PaymentRecord not found for id=" + paymentId);
+        }
+        return existing;
+    }
+
+    private void ensurePendingSelfServicePaymentForConfirmation(PaymentRecord existing) {
+        if (!shouldCreateAsPendingSelfServicePayment(existing)) {
+            throw new IllegalStateException("Only self-service payment orders can accept confirmation details");
+        }
+        if (!Objects.equals(resolvePaymentState(existing.getPaymentStatus()), PaymentState.UNPAID)) {
+            throw new IllegalStateException("Only pending self-service payment orders can accept confirmation details");
+        }
+    }
+
+    private PaymentState resolveTransitionedPaymentState(Long paymentId,
+                                                         PaymentRecord existing,
+                                                         PaymentState targetState) {
+        if (targetState == PaymentState.WAIVED) {
+            throw new IllegalStateException(
+                    "Manual payment waivers are not supported; use the fine waiver/refund workflow instead");
+        }
+        PaymentState currentState = resolvePaymentState(existing == null ? null : existing.getPaymentStatus());
+        if (currentState == targetState) {
+            validatePaymentStateConsistency(existing, targetState);
+            return targetState;
+        }
+
+        PaymentEvent event = resolveTransitionEvent(currentState, targetState);
+        if (event == null || !stateMachineService.canTransitionPaymentState(currentState, event)) {
+            throw new IllegalStateException("Payment state transition is not allowed");
+        }
+
+        PaymentState newState = stateMachineService.processPaymentState(paymentId, currentState, event);
+        if (newState != targetState) {
+            throw new IllegalStateException("Payment state did not transition to the expected target state");
+        }
+        return newState;
+    }
+
+    private PaymentRecord persistPaymentStatusUpdate(PaymentRecord existing,
+                                                     PaymentState newState,
+                                                     LocalDateTime updateTime) {
+        PaymentState effectiveState = newState != null ? newState : resolvePaymentState(existing == null
+                ? null
+                : existing.getPaymentStatus());
+        validatePaymentStateConsistency(existing, effectiveState);
+        existing.setPaymentStatus(effectiveState.getCode());
+        existing.setUpdatedAt(updateTime == null ? LocalDateTime.now() : updateTime);
+        paymentRecordMapper.updateById(existing);
+        syncFinePaymentSummary(existing.getFineId());
+        syncToIndexAfterCommit(existing);
+        return existing;
+    }
+
     private FineRecord requireFineRecord(Long fineId) {
         requirePositive(fineId, "Fine ID");
         FineRecord fineRecord = fineRecordService.findById(fineId);
@@ -1075,6 +1169,30 @@ public class PaymentRecordService {
         if (page < 1 || size < 1) {
             throw new IllegalArgumentException("Page must be >= 1 and size must be >= 1");
         }
+    }
+
+    private List<Long> normalizePositiveIds(Iterable<Long> ids) {
+        return ids == null
+                ? List.of()
+                : StreamSupport.stream(ids.spliterator(), false)
+                .filter(Objects::nonNull)
+                .filter(id -> id > 0)
+                .distinct()
+                .collect(Collectors.toList());
+    }
+
+    private Long toLong(Object value) {
+        if (value instanceof Number number) {
+            return number.longValue();
+        }
+        if (value instanceof String text) {
+            try {
+                return Long.parseLong(text.trim());
+            } catch (NumberFormatException ignored) {
+                return null;
+            }
+        }
+        return null;
     }
 
     private void requirePositive(Number number, String fieldName) {
@@ -1196,6 +1314,74 @@ public class PaymentRecordService {
             return result == null ? null : result.toUpperCase();
         }
         return null;
+    }
+
+    private List<PaymentRecord> loadFinanceReviewTaskCandidateBatch(int page, int size) {
+        QueryWrapper<PaymentRecord> wrapper = new QueryWrapper<>();
+        wrapper.select("payment_id", "payment_channel", "payment_status", "remarks", "updated_at", "payment_time")
+                .in("payment_channel", SELF_SERVICE_PAYMENT_CHANNELS)
+                .in("payment_status", PaymentState.PAID.getCode(), PaymentState.PARTIAL.getCode())
+                // Exclude records that have already been approved and never requested more proof.
+                // Rows with mixed finance-review history still flow through the exact in-memory check.
+                .and(candidate -> candidate.isNull("remarks")
+                        .or()
+                        .eq("remarks", "")
+                        .or()
+                        .notLike("remarks", FINANCE_REVIEW_PREFIX + "APPROVED|")
+                        .or()
+                        .like("remarks", FINANCE_REVIEW_PREFIX + "NEED_PROOF|"))
+                .orderByDesc("updated_at")
+                .orderByDesc("payment_time")
+                .orderByDesc("payment_id");
+        Page<PaymentRecord> candidatePageResult = paymentRecordMapper.selectPage(
+                new Page<>(Math.max(page, 1), Math.max(size, 1)),
+                wrapper);
+        return candidatePageResult.getRecords();
+    }
+
+    private List<PaymentRecord> loadPaymentRecordsByIds(List<Long> paymentIds) {
+        if (paymentIds == null || paymentIds.isEmpty()) {
+            return List.of();
+        }
+        List<PaymentRecord> records = paymentRecordMapper.selectBatchIds(paymentIds);
+        if (records == null || records.isEmpty()) {
+            return List.of();
+        }
+        java.util.Map<Long, PaymentRecord> indexedRecords = records.stream()
+                .filter(Objects::nonNull)
+                .filter(record -> record.getPaymentId() != null)
+                .collect(Collectors.toMap(PaymentRecord::getPaymentId, record -> record, (left, right) -> left));
+        return paymentIds.stream()
+                .map(indexedRecords::get)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toList());
+    }
+
+    private List<PaymentRecord> loadRefundCandidatePayments(Long fineId) {
+        QueryWrapper<PaymentRecord> wrapper = new QueryWrapper<>();
+        wrapper.eq("fine_id", fineId)
+                .in("payment_status", EFFECTIVE_PAYMENT_STATUSES)
+                .orderByDesc("payment_time")
+                .orderByDesc("payment_id");
+        return paymentRecordMapper.selectList(wrapper);
+    }
+
+    private List<PaymentRecord> loadFinePaymentBatch(Long fineId, long pageNumber, int batchSize) {
+        QueryWrapper<PaymentRecord> wrapper = new QueryWrapper<>();
+        wrapper.eq("fine_id", fineId)
+                .orderByAsc("payment_id");
+        Page<PaymentRecord> batchPage = new Page<>(Math.max(pageNumber, 1L), Math.max(batchSize, 1));
+        paymentRecordMapper.selectPage(batchPage, wrapper);
+        return batchPage.getRecords();
+    }
+
+    private List<PaymentRecord> loadPaymentSummaryRecords(Long fineId) {
+        QueryWrapper<PaymentRecord> wrapper = new QueryWrapper<>();
+        wrapper.select("payment_id", "payment_status", "payment_amount", "refund_amount")
+                .eq("fine_id", fineId)
+                .orderByDesc("payment_time")
+                .orderByDesc("payment_id");
+        return paymentRecordMapper.selectList(wrapper);
     }
 
     private String buildUserProofUploadRemark(LocalDateTime updateTime, String receiptUrl) {
@@ -1369,5 +1555,28 @@ public class PaymentRecordService {
 
     private org.springframework.data.domain.Pageable pageable(int page, int size) {
         return org.springframework.data.domain.PageRequest.of(Math.max(page - 1, 0), Math.max(size, 1));
+    }
+
+    private List<PaymentRecord> loadAllFromDatabase() {
+        QueryWrapper<PaymentRecord> wrapper = new QueryWrapper<>();
+        wrapper.orderByAsc("payment_id");
+
+        List<PaymentRecord> allRecords = new java.util.ArrayList<>();
+        long pageNumber = 1L;
+        while (true) {
+            Page<PaymentRecord> batchPage = new Page<>(pageNumber, FULL_LOAD_BATCH_SIZE);
+            paymentRecordMapper.selectPage(batchPage, wrapper);
+            List<PaymentRecord> records = batchPage.getRecords();
+            if (records == null || records.isEmpty()) {
+                break;
+            }
+            allRecords.addAll(records);
+            syncBatchToIndexAfterCommit(records);
+            if (records.size() < FULL_LOAD_BATCH_SIZE) {
+                break;
+            }
+            pageNumber++;
+        }
+        return allRecords;
     }
 }

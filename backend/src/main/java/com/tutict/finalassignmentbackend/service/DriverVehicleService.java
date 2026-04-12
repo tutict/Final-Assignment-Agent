@@ -45,6 +45,7 @@ public class DriverVehicleService {
 
     private static final Logger log = Logger.getLogger(DriverVehicleService.class.getName());
     private static final String CACHE_NAME = "driverVehicleCache";
+    private static final int FULL_LOAD_BATCH_SIZE = 500;
 
     private final DriverVehicleMapper driverVehicleMapper;
     private final DriverInformationMapper driverInformationMapper;
@@ -139,7 +140,6 @@ public class DriverVehicleService {
     }
 
     @Transactional(readOnly = true)
-    @Cacheable(cacheNames = CACHE_NAME, key = "'all'", unless = "#result == null || #result.isEmpty()")
     public List<DriverVehicle> findAll() {
         List<DriverVehicle> fromIndex = StreamSupport.stream(driverVehicleSearchRepository.findAll().spliterator(), false)
                 .map(DriverVehicleDocument::toEntity)
@@ -147,9 +147,7 @@ public class DriverVehicleService {
         if (!fromIndex.isEmpty()) {
             return fromIndex;
         }
-        List<DriverVehicle> fromDb = driverVehicleMapper.selectList(null);
-        syncBatchToIndexAfterCommit(fromDb);
-        return fromDb;
+        return loadAllFromDatabase();
     }
 
     @Transactional(readOnly = true)
@@ -374,6 +372,28 @@ public class DriverVehicleService {
         List<DriverVehicle> records = mpPage.getRecords();
         syncBatchToIndexAfterCommit(records);
         return records;
+    }
+
+    private List<DriverVehicle> loadAllFromDatabase() {
+        List<DriverVehicle> allRecords = new java.util.ArrayList<>();
+        long currentPage = 1L;
+        while (true) {
+            QueryWrapper<DriverVehicle> wrapper = new QueryWrapper<>();
+            wrapper.orderByAsc("id");
+            Page<DriverVehicle> mpPage = new Page<>(currentPage, FULL_LOAD_BATCH_SIZE);
+            driverVehicleMapper.selectPage(mpPage, wrapper);
+            List<DriverVehicle> records = mpPage.getRecords();
+            if (records == null || records.isEmpty()) {
+                break;
+            }
+            allRecords.addAll(records);
+            syncBatchToIndexAfterCommit(records);
+            if (records.size() < FULL_LOAD_BATCH_SIZE) {
+                break;
+            }
+            currentPage++;
+        }
+        return allRecords;
     }
 
     private List<DriverVehicle> mapHits(SearchHits<DriverVehicleDocument> hits) {

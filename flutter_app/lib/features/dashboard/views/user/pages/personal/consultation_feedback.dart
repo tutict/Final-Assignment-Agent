@@ -6,6 +6,7 @@ import 'package:final_assignment_front/features/dashboard/controllers/user_dashb
 import 'package:final_assignment_front/features/dashboard/views/user/widgets/user_page_app_bar.dart';
 import 'package:final_assignment_front/i18n/api_error_localizers.dart';
 import 'package:final_assignment_front/i18n/status_localizers.dart';
+import 'package:final_assignment_front/utils/services/auth_token_store.dart';
 import 'package:final_assignment_front/utils/ui/ui_utils.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
@@ -81,7 +82,7 @@ class _ConsultationFeedbackState extends State<ConsultationFeedback> {
 
     try {
       final prefs = await SharedPreferences.getInstance();
-      final jwtToken = prefs.getString('jwtToken');
+      final jwtToken = await AuthTokenStore.instance.getJwtToken();
       final username = prefs.getString('userName');
       if (jwtToken == null || username == null) {
         throw Exception('feedback.error.notLoggedIn'.tr);
@@ -230,8 +231,7 @@ class _FeedbackApprovalPageState extends State<FeedbackApprovalPage> {
     });
 
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final jwtToken = prefs.getString('jwtToken');
+      final jwtToken = await AuthTokenStore.instance.getJwtToken();
       if (jwtToken == null) {
         throw Exception('feedback.error.notLoggedIn'.tr);
       }
@@ -274,8 +274,7 @@ class _FeedbackApprovalPageState extends State<FeedbackApprovalPage> {
   Future<void> _updateFeedbackRequest(int feedbackId, String status) async {
     setState(() => _isLoading = true);
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final jwtToken = prefs.getString('jwtToken');
+      final jwtToken = await AuthTokenStore.instance.getJwtToken();
       if (jwtToken == null) {
         throw Exception('feedback.error.notLoggedIn'.tr);
       }

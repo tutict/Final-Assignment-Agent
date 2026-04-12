@@ -3,7 +3,6 @@ import 'package:final_assignment_front/features/model/offense_information.dart';
 import 'package:final_assignment_front/i18n/api_error_localizers.dart';
 import 'package:final_assignment_front/utils/helpers/api_exception.dart';
 import 'package:final_assignment_front/utils/services/api_client.dart';
-import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:http/http.dart' as http;
 import 'package:final_assignment_front/utils/services/auth_token_store.dart';
@@ -24,8 +23,6 @@ class TrafficViolationControllerApi {
       throw Exception('api.error.notAuthenticated'.tr);
     }
     apiClient.setJwtToken(jwtToken);
-    debugPrint(
-        'Initialized TrafficViolationControllerApi with token: $jwtToken');
   }
 
   // Decode body

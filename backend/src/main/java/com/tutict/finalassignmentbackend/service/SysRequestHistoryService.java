@@ -32,6 +32,7 @@ public class SysRequestHistoryService {
 
     private static final Logger log = Logger.getLogger(SysRequestHistoryService.class.getName());
     private static final String CACHE_NAME = "sysRequestHistoryCache";
+    private static final int FULL_LOAD_BATCH_SIZE = 500;
     private static final List<String> REFUND_BUSINESS_TYPES = List.of(
             "PARTIAL_REFUND",
             "WAIVE_AND_REFUND",
@@ -109,7 +110,6 @@ public class SysRequestHistoryService {
     }
 
     @Transactional(readOnly = true)
-    @Cacheable(cacheNames = CACHE_NAME, key = "'all'", unless = "#result == null || #result.isEmpty()")
     public List<SysRequestHistory> findAll() {
         List<SysRequestHistory> fromIndex = StreamSupport.stream(sysRequestHistorySearchRepository.findAll().spliterator(), false)
                 .map(SysRequestHistoryDocument::toEntity)
@@ -117,9 +117,7 @@ public class SysRequestHistoryService {
         if (!fromIndex.isEmpty()) {
             return fromIndex;
         }
-        List<SysRequestHistory> fromDb = sysRequestHistoryMapper.selectList(null);
-        syncBatchToIndexAfterCommit(fromDb);
-        return fromDb;
+        return loadAllFromDatabase();
     }
 
     @Transactional(readOnly = true)
@@ -505,6 +503,29 @@ public class SysRequestHistoryService {
         List<SysRequestHistory> records = mpPage.getRecords();
         syncBatchToIndexAfterCommit(records);
         return records;
+    }
+
+    private List<SysRequestHistory> loadAllFromDatabase() {
+        QueryWrapper<SysRequestHistory> wrapper = new QueryWrapper<>();
+        wrapper.orderByAsc("id");
+
+        List<SysRequestHistory> allRecords = new java.util.ArrayList<>();
+        long pageNumber = 1L;
+        while (true) {
+            Page<SysRequestHistory> batchPage = new Page<>(pageNumber, FULL_LOAD_BATCH_SIZE);
+            sysRequestHistoryMapper.selectPage(batchPage, wrapper);
+            List<SysRequestHistory> records = batchPage.getRecords();
+            if (records == null || records.isEmpty()) {
+                break;
+            }
+            allRecords.addAll(records);
+            syncBatchToIndexAfterCommit(records);
+            if (records.size() < FULL_LOAD_BATCH_SIZE) {
+                break;
+            }
+            pageNumber++;
+        }
+        return allRecords;
     }
 
     private List<SysRequestHistory> mapHits(org.springframework.data.elasticsearch.core.SearchHits<SysRequestHistoryDocument> hits) {

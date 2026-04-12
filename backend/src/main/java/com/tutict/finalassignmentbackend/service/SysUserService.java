@@ -2,6 +2,7 @@ package com.tutict.finalassignmentbackend.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.tutict.finalassignmentbackend.config.login.jwt.AuthenticationSnapshotService;
 import com.tutict.finalassignmentbackend.config.websocket.WsAction;
 import com.tutict.finalassignmentbackend.entity.SysRequestHistory;
 import com.tutict.finalassignmentbackend.entity.SysUser;
@@ -42,24 +43,36 @@ public class SysUserService {
     private static final Logger LOG = Logger.getLogger(SysUserService.class.getName());
     private static final String CACHE_NAME = "sysUserCache";
     private static final Pattern BCRYPT_PATTERN = Pattern.compile("^\\$2[aby]?\\$.{56}$");
+    private static final int FULL_LOAD_BATCH_SIZE = 500;
 
     private final SysUserMapper sysUserMapper;
     private final SysRequestHistoryMapper sysRequestHistoryMapper;
     private final SysUserSearchRepository sysUserSearchRepository;
     private final PasswordEncoder passwordEncoder;
     private final CacheManager cacheManager;
+    private final AuthenticationSnapshotService authenticationSnapshotService;
 
     @Autowired
     public SysUserService(SysUserMapper sysUserMapper,
                           SysRequestHistoryMapper sysRequestHistoryMapper,
                           SysUserSearchRepository sysUserSearchRepository,
                           PasswordEncoder passwordEncoder,
-                          CacheManager cacheManager) {
+                          CacheManager cacheManager,
+                          AuthenticationSnapshotService authenticationSnapshotService) {
         this.sysUserMapper = sysUserMapper;
         this.sysRequestHistoryMapper = sysRequestHistoryMapper;
         this.sysUserSearchRepository = sysUserSearchRepository;
         this.passwordEncoder = passwordEncoder;
         this.cacheManager = cacheManager;
+        this.authenticationSnapshotService = authenticationSnapshotService;
+    }
+
+    public SysUserService(SysUserMapper sysUserMapper,
+                          SysRequestHistoryMapper sysRequestHistoryMapper,
+                          SysUserSearchRepository sysUserSearchRepository,
+                          PasswordEncoder passwordEncoder,
+                          CacheManager cacheManager) {
+        this(sysUserMapper, sysRequestHistoryMapper, sysUserSearchRepository, passwordEncoder, cacheManager, null);
     }
 
     @Transactional
@@ -83,6 +96,7 @@ public class SysUserService {
         validateSysUser(sysUser);
         preparePasswordForPersistence(sysUser);
         sysUserMapper.insert(sysUser);
+        evictAuthenticationSnapshots();
         syncToIndexAfterCommit(sysUser);
         return sysUser;
     }
@@ -132,6 +146,42 @@ public class SysUserService {
     }
 
     @Transactional
+    public void recordLoginFailure(SysUser sysUser) {
+        if (sysUser == null || sysUser.getUserId() == null) {
+            return;
+        }
+        Integer currentFailures = sysUser.getLoginFailures();
+        sysUser.setLoginFailures(currentFailures == null ? 1 : currentFailures + 1);
+        sysUser.setUpdatedAt(LocalDateTime.now());
+        persistExistingUser(sysUser);
+        evictUserCache();
+    }
+
+    @Transactional
+    public void resetLoginFailures(SysUser sysUser) {
+        if (sysUser == null || sysUser.getUserId() == null) {
+            return;
+        }
+        sysUser.setLoginFailures(0);
+        sysUser.setUpdatedAt(LocalDateTime.now());
+        persistExistingUser(sysUser);
+        evictUserCache();
+    }
+
+    @Transactional
+    public void recordSuccessfulLogin(SysUser sysUser, String loginIp) {
+        if (sysUser == null || sysUser.getUserId() == null) {
+            return;
+        }
+        sysUser.setLoginFailures(0);
+        sysUser.setLastLoginTime(LocalDateTime.now());
+        sysUser.setLastLoginIp(isBlank(loginIp) ? "127.0.0.1" : loginIp.trim());
+        sysUser.setUpdatedAt(LocalDateTime.now());
+        persistExistingUser(sysUser);
+        evictUserCache();
+    }
+
+    @Transactional
     @CacheEvict(cacheNames = CACHE_NAME, allEntries = true)
     public void deleteSysUser(Long userId) {
         requirePositive(userId);
@@ -139,6 +189,7 @@ public class SysUserService {
         if (rows == 0) {
             throw new IllegalStateException("SysUser not found for id=" + userId);
         }
+        evictAuthenticationSnapshots();
         runAfterCommitOrNow(() -> sysUserSearchRepository.deleteById(userId));
     }
 
@@ -158,7 +209,6 @@ public class SysUserService {
     }
 
     @Transactional(readOnly = true)
-    @Cacheable(cacheNames = CACHE_NAME, key = "'all'", unless = "#result == null || #result.isEmpty()")
     public List<SysUser> findAll() {
         List<SysUser> fromIndex = StreamSupport.stream(
                         sysUserSearchRepository.findAll().spliterator(), false)
@@ -167,9 +217,7 @@ public class SysUserService {
         if (!fromIndex.isEmpty()) {
             return fromIndex;
         }
-        List<SysUser> fromDb = sysUserMapper.selectList(null);
-        syncBatchToIndexAfterCommit(fromDb);
-        return fromDb;
+        return loadAllFromDatabase();
     }
 
     @Transactional(readOnly = true)
@@ -689,6 +737,7 @@ public class SysUserService {
         if (rows == 0) {
             throw new IllegalStateException("SysUser not found for id=" + sysUser.getUserId());
         }
+        evictAuthenticationSnapshots();
         syncToIndexAfterCommit(sysUser);
         return sysUser;
     }
@@ -705,6 +754,28 @@ public class SysUserService {
         List<SysUser> records = mpPage.getRecords();
         syncBatchToIndexAfterCommit(records);
         return records;
+    }
+
+    private List<SysUser> loadAllFromDatabase() {
+        List<SysUser> allRecords = new java.util.ArrayList<>();
+        long currentPage = 1L;
+        while (true) {
+            QueryWrapper<SysUser> wrapper = new QueryWrapper<>();
+            wrapper.orderByAsc("user_id");
+            Page<SysUser> mpPage = new Page<>(currentPage, FULL_LOAD_BATCH_SIZE);
+            sysUserMapper.selectPage(mpPage, wrapper);
+            List<SysUser> records = mpPage.getRecords();
+            if (records == null || records.isEmpty()) {
+                break;
+            }
+            allRecords.addAll(records);
+            syncBatchToIndexAfterCommit(records);
+            if (records.size() < FULL_LOAD_BATCH_SIZE) {
+                break;
+            }
+            currentPage++;
+        }
+        return allRecords;
     }
 
     private List<SysUser> mapHits(org.springframework.data.elasticsearch.core.SearchHits<SysUserDocument> hits) {
@@ -751,6 +822,12 @@ public class SysUserService {
         Cache cache = cacheManager.getCache(CACHE_NAME);
         if (cache != null) {
             cache.clear();
+        }
+    }
+
+    private void evictAuthenticationSnapshots() {
+        if (authenticationSnapshotService != null) {
+            authenticationSnapshotService.evictAll();
         }
     }
 

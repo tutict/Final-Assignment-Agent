@@ -13,6 +13,7 @@ import org.springframework.stereotype.Service;
 
 import javax.crypto.SecretKey;
 import java.util.Arrays;
+import java.util.Base64;
 import java.util.Collections;
 import java.util.Date;
 import java.util.LinkedHashMap;
@@ -21,7 +22,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.Base64;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.stream.Collectors;
@@ -59,7 +59,19 @@ public class TokenProvider {
 
     @PostConstruct
     public void init() {
-        byte[] keyBytes = Base64.getDecoder().decode(base64Secret);
+        String normalizedSecret = base64Secret == null ? "" : base64Secret.trim();
+        if (normalizedSecret.isEmpty()) {
+            throw new IllegalStateException("Property jwt.secret.key must be configured via APP_JWT_SECRET_KEY");
+        }
+        byte[] keyBytes;
+        try {
+            keyBytes = Base64.getDecoder().decode(normalizedSecret);
+        } catch (IllegalArgumentException ex) {
+            throw new IllegalStateException("Property jwt.secret.key must be a valid Base64-encoded key", ex);
+        }
+        if (keyBytes.length < 32) {
+            throw new IllegalStateException("Property jwt.secret.key must decode to at least 32 bytes");
+        }
         this.secretKey = Keys.hmacShaKeyFor(keyBytes);
         LOG.info("TokenProvider initialized with HS256 secret key");
     }
@@ -103,10 +115,18 @@ public class TokenProvider {
     }
 
     public boolean isRefreshToken(String token) {
+        return hasTokenType(token, TOKEN_TYPE_REFRESH);
+    }
+
+    public boolean isAccessToken(String token) {
+        return hasTokenType(token, TOKEN_TYPE_ACCESS);
+    }
+
+    private boolean hasTokenType(String token, String expectedType) {
         try {
-            return TOKEN_TYPE_REFRESH.equalsIgnoreCase(parseClaims(token).get(CLAIM_TOKEN_TYPE, String.class));
+            return expectedType.equalsIgnoreCase(parseClaims(token).get(CLAIM_TOKEN_TYPE, String.class));
         } catch (JwtException e) {
-            LOG.log(Level.WARNING, "Failed to inspect refresh token: " + e.getMessage(), e);
+            LOG.log(Level.WARNING, "Failed to inspect token type: " + e.getMessage(), e);
             return false;
         }
     }

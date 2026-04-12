@@ -965,6 +965,46 @@ class BusinessFlowConsistencyTest {
     }
 
     @Test
+    void searchPaymentByFineIdAndPayerIdCardShouldUseExactMatchInDatabaseFallback() {
+        PaymentRecordMapper paymentRecordMapper = Mockito.mock(PaymentRecordMapper.class);
+        SysRequestHistoryMapper requestHistoryMapper = Mockito.mock(SysRequestHistoryMapper.class);
+        PaymentRecordSearchRepository searchRepository = Mockito.mock(PaymentRecordSearchRepository.class);
+        FineRecordService fineRecordService = Mockito.mock(FineRecordService.class);
+        SysUserService sysUserService = Mockito.mock(SysUserService.class);
+        @SuppressWarnings("unchecked")
+        KafkaTemplate<String, String> kafkaTemplate = Mockito.mock(KafkaTemplate.class);
+        PlatformTransactionManager transactionManager = Mockito.mock(PlatformTransactionManager.class);
+        StateMachineService stateMachineService = Mockito.mock(StateMachineService.class);
+
+        PaymentRecordService service = new PaymentRecordService(
+                paymentRecordMapper,
+                requestHistoryMapper,
+                searchRepository,
+                fineRecordService,
+                sysUserService,
+                kafkaTemplate,
+                new ObjectMapper(),
+                transactionManager,
+                stateMachineService);
+
+        when(searchRepository.findByFineIdAndPayerIdCard(
+                801L,
+                "110101199001010091",
+                org.springframework.data.domain.PageRequest.of(0, 20)))
+                .thenReturn(null);
+
+        service.findByFineIdAndPayerIdCard(801L, "110101199001010091", 1, 20);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<QueryWrapper<PaymentRecord>> wrapperCaptor = ArgumentCaptor.forClass(QueryWrapper.class);
+        verify(paymentRecordMapper).selectPage(any(), wrapperCaptor.capture());
+        String sqlSegment = wrapperCaptor.getValue().getSqlSegment();
+        assertFalse(sqlSegment.toUpperCase().contains("LIKE"));
+        assertTrue(sqlSegment.contains("fine_id"));
+        assertTrue(sqlSegment.contains("payer_id_card"));
+    }
+
+    @Test
     void searchPaymentByTransactionIdShouldUseExactMatchInDatabaseFallback() {
         PaymentRecordMapper paymentRecordMapper = Mockito.mock(PaymentRecordMapper.class);
         SysRequestHistoryMapper requestHistoryMapper = Mockito.mock(SysRequestHistoryMapper.class);
@@ -1371,14 +1411,33 @@ class BusinessFlowConsistencyTest {
                 approvedReview,
                 nonSelfService));
         when(paymentRecordMapper.selectPage(any(Page.class), any(QueryWrapper.class))).thenReturn(resultPage);
+        when(paymentRecordMapper.selectBatchIds(List.of(901L, 902L))).thenReturn(List.of(
+                buildFinanceReviewTaskRecord(902L, "USER_SELF_SERVICE", PaymentState.PARTIAL.getCode(), "full-proof-902"),
+                buildFinanceReviewTaskRecord(901L, "APP", PaymentState.PAID.getCode(), "full-proof-901")));
 
         List<PaymentRecord> tasks = service.listFinanceReviewTasks(1, 20);
 
         assertEquals(2, tasks.size());
-        assertTrue(tasks.stream().anyMatch(task -> Objects.equals(task.getPaymentId(), 901L)));
-        assertTrue(tasks.stream().anyMatch(task -> Objects.equals(task.getPaymentId(), 902L)));
+        assertEquals(List.of(901L, 902L), tasks.stream().map(PaymentRecord::getPaymentId).toList());
+        assertEquals("full-proof-901", tasks.get(0).getReceiptUrl());
+        assertEquals("full-proof-902", tasks.get(1).getReceiptUrl());
         assertFalse(tasks.stream().anyMatch(task -> Objects.equals(task.getPaymentId(), 903L)));
         assertFalse(tasks.stream().anyMatch(task -> Objects.equals(task.getPaymentId(), 904L)));
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<QueryWrapper<PaymentRecord>> wrapperCaptor = ArgumentCaptor.forClass(QueryWrapper.class);
+        verify(paymentRecordMapper).selectPage(any(Page.class), wrapperCaptor.capture());
+        assertEquals("payment_id,payment_channel,payment_status,remarks,updated_at,payment_time",
+                wrapperCaptor.getValue().getSqlSelect());
+        String sqlSegment = wrapperCaptor.getValue().getSqlSegment();
+        assertTrue(sqlSegment.contains("remarks"));
+        assertTrue(sqlSegment.toUpperCase().contains("NOT LIKE"));
+        java.util.Collection<Object> sqlParams = wrapperCaptor.getValue().getParamNameValuePairs().values();
+        assertTrue(sqlParams.stream().anyMatch(value ->
+                Objects.toString(value, "").contains("[FINANCE_REVIEW]|APPROVED|")));
+        assertTrue(sqlParams.stream().anyMatch(value ->
+                Objects.toString(value, "").contains("[FINANCE_REVIEW]|NEED_PROOF|")));
+        verify(paymentRecordMapper).selectBatchIds(List.of(901L, 902L));
     }
 
     @Test
@@ -1399,19 +1458,13 @@ class BusinessFlowConsistencyTest {
         when(currentUserTrafficSupportService.getCurrentUserIdCardNumber()).thenReturn("110101199001010100");
         when(sysRequestHistoryService.findByUserId(100L, 1, 100)).thenReturn(List.of());
         when(currentUserTrafficSupportService.listCurrentUserAppeals(1, 100)).thenReturn(List.of());
-        when(currentUserTrafficSupportService.listCurrentUserOffenses(1, 100)).thenReturn(List.of());
-        when(currentUserTrafficSupportService.listCurrentUserDeductions(1, 100)).thenReturn(List.of());
-        when(currentUserTrafficSupportService.listCurrentUserVehicles()).thenReturn(List.of());
-
-        FineRecord fine = new FineRecord();
-        fine.setFineId(200L);
-        when(currentUserTrafficSupportService.listCurrentUserFines(1, 100)).thenReturn(List.of(fine));
+        when(currentUserTrafficSupportService.listCurrentUserOffenseIds()).thenReturn(List.of());
+        when(currentUserTrafficSupportService.listCurrentUserDeductionIds()).thenReturn(List.of());
+        when(currentUserTrafficSupportService.listCurrentUserVehicleIds()).thenReturn(List.of());
+        when(currentUserTrafficSupportService.listCurrentUserFineIds()).thenReturn(List.of(200L));
         when(sysRequestHistoryService.findRefundAudits(null, 200L, null, 1, 100)).thenReturn(List.of());
-
-        PaymentRecord payment = new PaymentRecord();
-        payment.setPaymentId(300L);
-        payment.setFineId(200L);
-        when(paymentRecordService.searchByPayerIdCard("110101199001010100", 1, 100)).thenReturn(List.of(payment));
+        when(paymentRecordService.findIdsByPayerIdCardAndFineIds(eq("110101199001010100"), any()))
+                .thenReturn(List.of(300L));
 
         SysRequestHistory paymentHistory = new SysRequestHistory();
         paymentHistory.setId(2L);
@@ -1515,19 +1568,22 @@ class BusinessFlowConsistencyTest {
         secondOffense.setFineAmount(BigDecimal.valueOf(100));
         secondOffense.setDeductedPoints(2);
 
-        when(offenseRecordService.findAll()).thenReturn(List.of(firstOffense, secondOffense));
+        when(offenseRecordService.listOffenses(1, 200)).thenReturn(List.of(firstOffense, secondOffense));
+        when(offenseRecordService.listOffenses(2, 200)).thenReturn(List.of());
 
         AppealRecord appeal = new AppealRecord();
         appeal.setAppealId(11L);
         appeal.setOffenseId(1L);
         appeal.setAppealReason("Insufficient evidence");
-        when(appealRecordService.findByOffenseIds(List.of(1L, 2L))).thenReturn(List.of(appeal));
+        when(appealRecordService.findByOffenseIds(List.of(1L, 2L), 1, 200)).thenReturn(List.of(appeal));
+        when(appealRecordService.findByOffenseIds(List.of(1L, 2L), 2, 200)).thenReturn(List.of());
 
         FineRecord fine = new FineRecord();
         fine.setFineId(21L);
         fine.setOffenseId(1L);
         fine.setPaymentStatus("Paid");
-        when(fineRecordService.findAll()).thenReturn(List.of(fine));
+        when(fineRecordService.listFines(1, 200)).thenReturn(List.of(fine));
+        when(fineRecordService.listFines(2, 200)).thenReturn(List.of());
 
         OffenseTypeDict speeding = new OffenseTypeDict();
         speeding.setOffenseCode("SPD001");
@@ -1535,7 +1591,8 @@ class BusinessFlowConsistencyTest {
         OffenseTypeDict redLight = new OffenseTypeDict();
         redLight.setOffenseCode("RED001");
         redLight.setOffenseName("Red-light running");
-        when(offenseTypeDictService.findAll()).thenReturn(List.of(speeding, redLight));
+        when(offenseTypeDictService.findAll(1, 200)).thenReturn(List.of(speeding, redLight));
+        when(offenseTypeDictService.findAll(2, 200)).thenReturn(List.of());
 
         ResponseEntity<Map<String, Object>> response = controller.dashboardSummary();
 
@@ -1569,6 +1626,60 @@ class BusinessFlowConsistencyTest {
                 .orElseThrow();
         assertEquals(300.0, ((Number) yesterdayPoint.get("value1")).doubleValue());
         assertEquals(5, ((Number) yesterdayPoint.get("value2")).intValue());
+        verify(offenseRecordService, never()).findAll();
+        verify(fineRecordService, never()).findAll();
+        verify(offenseTypeDictService, never()).findAll();
+        verify(appealRecordService, never()).findByOffenseIds(List.of(1L, 2L));
+    }
+
+    @Test
+    void vehicleSearchByTypeShouldUsePagedServiceSearch() {
+        VehicleInformationService vehicleInformationService = Mockito.mock(VehicleInformationService.class);
+        DriverVehicleService driverVehicleService = Mockito.mock(DriverVehicleService.class);
+        CurrentUserTrafficSupportService currentUserTrafficSupportService =
+                Mockito.mock(CurrentUserTrafficSupportService.class);
+
+        VehicleInformationController controller = new VehicleInformationController(
+                vehicleInformationService,
+                driverVehicleService,
+                currentUserTrafficSupportService);
+
+        VehicleInformation vehicle = new VehicleInformation();
+        vehicle.setVehicleId(701L);
+        vehicle.setVehicleType("SUV");
+        when(vehicleInformationService.searchByVehicleType("SUV", 2, 25)).thenReturn(List.of(vehicle));
+
+        ResponseEntity<List<VehicleInformation>> response = controller.searchByType("SUV", 2, 25);
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        assertEquals(1, response.getBody().size());
+        assertEquals(701L, response.getBody().get(0).getVehicleId());
+        verify(vehicleInformationService).searchByVehicleType("SUV", 2, 25);
+        verify(vehicleInformationService, never()).getVehicleInformationByType(any());
+    }
+
+    @Test
+    void listCurrentUserVehiclesShouldUsePagedCurrentUserServiceSearch() {
+        VehicleInformationService vehicleInformationService = Mockito.mock(VehicleInformationService.class);
+        DriverVehicleService driverVehicleService = Mockito.mock(DriverVehicleService.class);
+        CurrentUserTrafficSupportService currentUserTrafficSupportService =
+                Mockito.mock(CurrentUserTrafficSupportService.class);
+
+        VehicleInformationController controller = new VehicleInformationController(
+                vehicleInformationService,
+                driverVehicleService,
+                currentUserTrafficSupportService);
+
+        VehicleInformation vehicle = new VehicleInformation();
+        vehicle.setVehicleId(702L);
+        when(currentUserTrafficSupportService.listCurrentUserVehicles(3, 40)).thenReturn(List.of(vehicle));
+
+        ResponseEntity<List<VehicleInformation>> response = controller.listCurrentUserVehicles(3, 40);
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        assertEquals(1, response.getBody().size());
+        assertEquals(702L, response.getBody().get(0).getVehicleId());
+        verify(currentUserTrafficSupportService).listCurrentUserVehicles(3, 40);
     }
 
     @Test
@@ -1635,14 +1746,11 @@ class BusinessFlowConsistencyTest {
         when(currentUserTrafficSupportService.getCurrentUserIdCardNumber()).thenReturn("110101199001010101");
         when(sysRequestHistoryService.findByUserId(101L, 1, 100)).thenReturn(List.of());
         when(currentUserTrafficSupportService.listCurrentUserAppeals(1, 100)).thenReturn(List.of());
-        when(currentUserTrafficSupportService.listCurrentUserOffenses(1, 100)).thenReturn(List.of());
-        when(currentUserTrafficSupportService.listCurrentUserFines(1, 100)).thenReturn(List.of());
-        when(currentUserTrafficSupportService.listCurrentUserVehicles()).thenReturn(List.of());
-        when(paymentRecordService.searchByPayerIdCard("110101199001010101", 1, 100)).thenReturn(List.of());
-
-        DeductionRecord deduction = new DeductionRecord();
-        deduction.setDeductionId(400L);
-        when(currentUserTrafficSupportService.listCurrentUserDeductions(1, 100)).thenReturn(List.of(deduction));
+        when(currentUserTrafficSupportService.listCurrentUserOffenseIds()).thenReturn(List.of());
+        when(currentUserTrafficSupportService.listCurrentUserFineIds()).thenReturn(List.of());
+        when(currentUserTrafficSupportService.listCurrentUserVehicleIds()).thenReturn(List.of());
+        when(paymentRecordService.findIdsByPayerIdCardAndFineIds(eq("110101199001010101"), any())).thenReturn(List.of());
+        when(currentUserTrafficSupportService.listCurrentUserDeductionIds()).thenReturn(List.of(400L));
 
         SysRequestHistory deductionHistory = new SysRequestHistory();
         deductionHistory.setId(3L);
@@ -1683,15 +1791,12 @@ class BusinessFlowConsistencyTest {
         when(currentUserTrafficSupportService.getCurrentUserIdCardNumber()).thenReturn("110101199001010103");
         when(sysRequestHistoryService.findByUserId(103L, 1, 100)).thenReturn(List.of());
         when(currentUserTrafficSupportService.listCurrentUserAppeals(1, 100)).thenReturn(List.of());
-        when(currentUserTrafficSupportService.listCurrentUserOffenses(1, 100)).thenReturn(List.of());
-        when(currentUserTrafficSupportService.listCurrentUserDeductions(1, 100)).thenReturn(List.of());
-        when(currentUserTrafficSupportService.listCurrentUserVehicles()).thenReturn(List.of());
+        when(currentUserTrafficSupportService.listCurrentUserOffenseIds()).thenReturn(List.of());
+        when(currentUserTrafficSupportService.listCurrentUserDeductionIds()).thenReturn(List.of());
+        when(currentUserTrafficSupportService.listCurrentUserVehicleIds()).thenReturn(List.of());
         when(sysRequestHistoryService.findByBusinessIds(any(), eq(1), eq(200))).thenReturn(List.of());
-
-        FineRecord fine = new FineRecord();
-        fine.setFineId(201L);
-        when(currentUserTrafficSupportService.listCurrentUserFines(1, 100)).thenReturn(List.of(fine));
-        when(paymentRecordService.searchByPayerIdCard("110101199001010103", 1, 100)).thenReturn(List.of());
+        when(currentUserTrafficSupportService.listCurrentUserFineIds()).thenReturn(List.of(201L));
+        when(paymentRecordService.findIdsByPayerIdCardAndFineIds(eq("110101199001010103"), any())).thenReturn(List.of());
 
         SysRequestHistory refundAudit = new SysRequestHistory();
         refundAudit.setId(6L);
@@ -1728,15 +1833,12 @@ class BusinessFlowConsistencyTest {
         when(currentUserTrafficSupportService.getCurrentUserIdCardNumber()).thenReturn("110101199001010102");
         when(sysRequestHistoryService.findByUserId(102L, 1, 100)).thenReturn(List.of());
         when(currentUserTrafficSupportService.listCurrentUserAppeals(1, 100)).thenReturn(List.of());
-        when(currentUserTrafficSupportService.listCurrentUserOffenses(1, 100)).thenReturn(List.of());
-        when(currentUserTrafficSupportService.listCurrentUserDeductions(1, 100)).thenReturn(List.of());
-        when(currentUserTrafficSupportService.listCurrentUserVehicles()).thenReturn(List.of());
+        when(currentUserTrafficSupportService.listCurrentUserOffenseIds()).thenReturn(List.of());
+        when(currentUserTrafficSupportService.listCurrentUserDeductionIds()).thenReturn(List.of());
+        when(currentUserTrafficSupportService.listCurrentUserVehicleIds()).thenReturn(List.of());
         when(paymentRecordService.findByFineId(500L, 1, 100)).thenReturn(List.of());
-
-        FineRecord fine = new FineRecord();
-        fine.setFineId(500L);
-        when(currentUserTrafficSupportService.listCurrentUserFines(1, 100)).thenReturn(List.of(fine));
-        when(paymentRecordService.searchByPayerIdCard("110101199001010102", 1, 100)).thenReturn(List.of());
+        when(currentUserTrafficSupportService.listCurrentUserFineIds()).thenReturn(List.of(500L));
+        when(paymentRecordService.findIdsByPayerIdCardAndFineIds(eq("110101199001010102"), any())).thenReturn(List.of());
         when(sysRequestHistoryService.findRefundAudits(null, 500L, null, 1, 100)).thenReturn(List.of());
 
         SysRequestHistory fineHistory = new SysRequestHistory();
@@ -1780,19 +1882,12 @@ class BusinessFlowConsistencyTest {
         when(currentUserTrafficSupportService.getCurrentUserIdCardNumber()).thenReturn("110101199001010104");
         when(sysRequestHistoryService.findByUserId(104L, 1, 100)).thenReturn(List.of());
         when(currentUserTrafficSupportService.listCurrentUserAppeals(1, 100)).thenReturn(List.of());
-        when(currentUserTrafficSupportService.listCurrentUserOffenses(1, 100)).thenReturn(List.of());
-        when(currentUserTrafficSupportService.listCurrentUserDeductions(1, 100)).thenReturn(List.of());
-        when(currentUserTrafficSupportService.listCurrentUserVehicles()).thenReturn(List.of());
-
-        FineRecord fine = new FineRecord();
-        fine.setFineId(202L);
-        when(currentUserTrafficSupportService.listCurrentUserFines(1, 100)).thenReturn(List.of(fine));
-
-        PaymentRecord otherPayerPayment = new PaymentRecord();
-        otherPayerPayment.setPaymentId(302L);
-        otherPayerPayment.setFineId(999L);
-        when(paymentRecordService.searchByPayerIdCard("110101199001010104", 1, 100))
-                .thenReturn(List.of(otherPayerPayment));
+        when(currentUserTrafficSupportService.listCurrentUserOffenseIds()).thenReturn(List.of());
+        when(currentUserTrafficSupportService.listCurrentUserDeductionIds()).thenReturn(List.of());
+        when(currentUserTrafficSupportService.listCurrentUserVehicleIds()).thenReturn(List.of());
+        when(currentUserTrafficSupportService.listCurrentUserFineIds()).thenReturn(List.of(202L));
+        when(paymentRecordService.findIdsByPayerIdCardAndFineIds(eq("110101199001010104"), any()))
+                .thenReturn(List.of());
 
         SysRequestHistory leakedPaymentHistory = new SysRequestHistory();
         leakedPaymentHistory.setId(7L);
@@ -2023,7 +2118,7 @@ class BusinessFlowConsistencyTest {
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<QueryWrapper<DriverInformation>> wrapperCaptor = ArgumentCaptor.forClass(QueryWrapper.class);
-        verify(driverInformationMapper).selectList(wrapperCaptor.capture());
+        verify(driverInformationMapper).selectPage(any(), wrapperCaptor.capture());
         verify(searchRepository, never()).searchByIdCardNumberFuzzy(any(), any());
         String sqlSegment = wrapperCaptor.getValue().getSqlSegment();
         assertFalse(sqlSegment.toUpperCase().contains("LIKE"));
@@ -2057,10 +2152,57 @@ class BusinessFlowConsistencyTest {
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<QueryWrapper<DriverInformation>> wrapperCaptor = ArgumentCaptor.forClass(QueryWrapper.class);
-        verify(driverInformationMapper).selectList(wrapperCaptor.capture());
+        verify(driverInformationMapper).selectPage(any(), wrapperCaptor.capture());
         verify(searchRepository, never()).searchByDriverLicenseNumberFuzzy(any(), any());
         String sqlSegment = wrapperCaptor.getValue().getSqlSegment();
         assertFalse(sqlSegment.toUpperCase().contains("LIKE"));
+    }
+
+    @Test
+    void searchDriversShouldCapCandidateFetchSizeForDeepPages() {
+        DriverInformationMapper driverInformationMapper = Mockito.mock(DriverInformationMapper.class);
+        DriverVehicleMapper driverVehicleMapper = Mockito.mock(DriverVehicleMapper.class);
+        OffenseRecordMapper offenseRecordMapper = Mockito.mock(OffenseRecordMapper.class);
+        DeductionRecordMapper deductionRecordMapper = Mockito.mock(DeductionRecordMapper.class);
+        SysRequestHistoryMapper requestHistoryMapper = Mockito.mock(SysRequestHistoryMapper.class);
+        @SuppressWarnings("unchecked")
+        KafkaTemplate<String, String> kafkaTemplate = Mockito.mock(KafkaTemplate.class);
+        DriverInformationSearchRepository searchRepository = Mockito.mock(DriverInformationSearchRepository.class);
+
+        DriverInformationService service = new DriverInformationService(
+                driverInformationMapper,
+                driverVehicleMapper,
+                offenseRecordMapper,
+                deductionRecordMapper,
+                requestHistoryMapper,
+                kafkaTemplate,
+                searchRepository,
+                new ObjectMapper());
+
+        when(searchRepository.searchByContactNumber("alice", org.springframework.data.domain.PageRequest.of(0, 500)))
+                .thenReturn(null);
+        when(searchRepository.searchByIdCardNumber("alice", org.springframework.data.domain.PageRequest.of(0, 500)))
+                .thenReturn(null);
+        when(searchRepository.searchByDriverLicenseNumber("alice", org.springframework.data.domain.PageRequest.of(0, 500)))
+                .thenReturn(null);
+        when(searchRepository.searchByNamePrefix("alice", org.springframework.data.domain.PageRequest.of(0, 500)))
+                .thenReturn(null);
+        when(searchRepository.searchByNameFuzzy("alice", org.springframework.data.domain.PageRequest.of(0, 500)))
+                .thenReturn(null);
+
+        when(driverInformationMapper.selectPage(any(), any())).thenAnswer(invocation -> {
+            @SuppressWarnings("unchecked")
+            Page<DriverInformation> page = invocation.getArgument(0);
+            page.setRecords(List.of());
+            return page;
+        });
+
+        service.searchDrivers("alice", 100, 20);
+
+        verify(searchRepository).searchByContactNumber("alice", org.springframework.data.domain.PageRequest.of(0, 500));
+        verify(searchRepository).searchByIdCardNumber("alice", org.springframework.data.domain.PageRequest.of(0, 500));
+        verify(searchRepository).searchByDriverLicenseNumber("alice", org.springframework.data.domain.PageRequest.of(0, 500));
+        verify(searchRepository).searchByNamePrefix("alice", org.springframework.data.domain.PageRequest.of(0, 500));
     }
 
     @Test
@@ -2478,9 +2620,7 @@ class BusinessFlowConsistencyTest {
                 kafkaTemplate,
                 new ObjectMapper());
 
-        OffenseRecord offense = new OffenseRecord();
-        offense.setOffenseId(70L);
-        when(offenseRecordService.findById(70L)).thenReturn(offense);
+        when(offenseRecordService.existsById(70L)).thenReturn(true);
 
         FineRecord existing = new FineRecord();
         existing.setFineId(60L);
@@ -2492,7 +2632,7 @@ class BusinessFlowConsistencyTest {
         existing.setUnpaidAmount(BigDecimal.valueOf(70));
         existing.setPaymentStatus(PaymentState.PARTIAL.getCode());
         when(fineRecordMapper.selectById(60L)).thenReturn(existing);
-        when(fineRecordMapper.selectList(any())).thenReturn(List.of(existing));
+        when(fineRecordMapper.selectCount(any())).thenReturn(0L);
         when(fineRecordMapper.updateById(any(FineRecord.class))).thenReturn(1);
 
         FineRecord request = new FineRecord();
@@ -2508,6 +2648,8 @@ class BusinessFlowConsistencyTest {
 
         ArgumentCaptor<FineRecord> captor = ArgumentCaptor.forClass(FineRecord.class);
         verify(fineRecordMapper).updateById(captor.capture());
+        verify(offenseRecordService).existsById(70L);
+        verify(offenseRecordService, never()).findById(any());
         assertEquals(BigDecimal.valueOf(130), captor.getValue().getTotalAmount());
         assertEquals(BigDecimal.valueOf(30), captor.getValue().getPaidAmount());
         assertEquals(BigDecimal.valueOf(100), captor.getValue().getUnpaidAmount());
@@ -2588,20 +2730,55 @@ class BusinessFlowConsistencyTest {
                 kafkaTemplate,
                 new ObjectMapper());
 
-        OffenseRecord offense = new OffenseRecord();
-        offense.setOffenseId(80L);
-        when(offenseRecordService.findById(80L)).thenReturn(offense);
+        when(offenseRecordService.existsById(80L)).thenReturn(true);
 
         FineRecord duplicate = new FineRecord();
         duplicate.setFineId(801L);
         duplicate.setOffenseId(80L);
-        when(fineRecordMapper.selectList(any())).thenReturn(List.of(duplicate));
+        when(fineRecordMapper.selectCount(any())).thenReturn(1L);
 
         FineRecord request = new FineRecord();
         request.setOffenseId(80L);
         request.setFineAmount(BigDecimal.valueOf(200));
 
         assertThrows(IllegalStateException.class, () -> service.createFineRecord(request));
+        verify(offenseRecordService).existsById(80L);
+        verify(offenseRecordService, never()).findById(any());
+        verify(fineRecordMapper, never()).insert(any(FineRecord.class));
+    }
+
+    @Test
+    void createFineShouldRejectMissingOffenseViaExistenceCheck() {
+        FineRecordMapper fineRecordMapper = Mockito.mock(FineRecordMapper.class);
+        PaymentRecordMapper paymentRecordMapper = Mockito.mock(PaymentRecordMapper.class);
+        SysRequestHistoryMapper requestHistoryMapper = Mockito.mock(SysRequestHistoryMapper.class);
+        FineRecordSearchRepository searchRepository = Mockito.mock(FineRecordSearchRepository.class);
+        OffenseRecordService offenseRecordService = Mockito.mock(OffenseRecordService.class);
+        SysUserService sysUserService = Mockito.mock(SysUserService.class);
+        @SuppressWarnings("unchecked")
+        KafkaTemplate<String, String> kafkaTemplate = Mockito.mock(KafkaTemplate.class);
+
+        FineRecordService service = new FineRecordService(
+                fineRecordMapper,
+                paymentRecordMapper,
+                requestHistoryMapper,
+                searchRepository,
+                offenseRecordService,
+                sysUserService,
+                kafkaTemplate,
+                new ObjectMapper());
+
+        when(offenseRecordService.existsById(81L)).thenReturn(false);
+
+        FineRecord request = new FineRecord();
+        request.setOffenseId(81L);
+        request.setFineAmount(BigDecimal.valueOf(200));
+
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class, () -> service.createFineRecord(request));
+
+        assertEquals("Offense record does not exist", ex.getMessage());
+        verify(offenseRecordService).existsById(81L);
+        verify(offenseRecordService, never()).findById(any());
         verify(fineRecordMapper, never()).insert(any(FineRecord.class));
     }
 
@@ -2927,6 +3104,78 @@ class BusinessFlowConsistencyTest {
         verify(vehicleInformationMapper).selectPage(any(), wrapperCaptor.capture());
         String sqlSegment = wrapperCaptor.getValue().getSqlSegment();
         assertFalse(sqlSegment.toUpperCase().contains("LIKE"));
+    }
+
+    @Test
+    void getVehicleInformationByOwnerNameShouldUsePagedDatabaseLoad() {
+        VehicleInformationMapper vehicleInformationMapper = Mockito.mock(VehicleInformationMapper.class);
+        DriverVehicleMapper driverVehicleMapper = Mockito.mock(DriverVehicleMapper.class);
+        OffenseRecordMapper offenseRecordMapper = Mockito.mock(OffenseRecordMapper.class);
+        SysRequestHistoryMapper requestHistoryMapper = Mockito.mock(SysRequestHistoryMapper.class);
+        VehicleInformationSearchRepository searchRepository = Mockito.mock(VehicleInformationSearchRepository.class);
+        @SuppressWarnings("unchecked")
+        KafkaTemplate<String, VehicleInformation> kafkaTemplate = Mockito.mock(KafkaTemplate.class);
+
+        VehicleInformationService service = new VehicleInformationService(
+                vehicleInformationMapper,
+                driverVehicleMapper,
+                offenseRecordMapper,
+                requestHistoryMapper,
+                kafkaTemplate,
+                searchRepository);
+
+        VehicleInformation first = new VehicleInformation();
+        first.setVehicleId(1L);
+        VehicleInformation second = new VehicleInformation();
+        second.setVehicleId(2L);
+        when(vehicleInformationMapper.selectPage(any(), any())).thenAnswer(invocation -> {
+            @SuppressWarnings("unchecked")
+            Page<VehicleInformation> page = invocation.getArgument(0);
+            page.setRecords(page.getCurrent() == 1L ? List.of(first, second) : List.of());
+            return page;
+        });
+
+        List<VehicleInformation> result = service.getVehicleInformationByOwnerName("Carol Driver");
+
+        assertEquals(2, result.size());
+        verify(vehicleInformationMapper, never()).selectList(any());
+        verify(vehicleInformationMapper).selectPage(any(), any());
+        verify(searchRepository).saveAll(any());
+    }
+
+    @Test
+    void getVehicleInformationByIdCardNumberShouldUsePagedDatabaseLoad() {
+        VehicleInformationMapper vehicleInformationMapper = Mockito.mock(VehicleInformationMapper.class);
+        DriverVehicleMapper driverVehicleMapper = Mockito.mock(DriverVehicleMapper.class);
+        OffenseRecordMapper offenseRecordMapper = Mockito.mock(OffenseRecordMapper.class);
+        SysRequestHistoryMapper requestHistoryMapper = Mockito.mock(SysRequestHistoryMapper.class);
+        VehicleInformationSearchRepository searchRepository = Mockito.mock(VehicleInformationSearchRepository.class);
+        @SuppressWarnings("unchecked")
+        KafkaTemplate<String, VehicleInformation> kafkaTemplate = Mockito.mock(KafkaTemplate.class);
+
+        VehicleInformationService service = new VehicleInformationService(
+                vehicleInformationMapper,
+                driverVehicleMapper,
+                offenseRecordMapper,
+                requestHistoryMapper,
+                kafkaTemplate,
+                searchRepository);
+
+        VehicleInformation first = new VehicleInformation();
+        first.setVehicleId(3L);
+        when(vehicleInformationMapper.selectPage(any(), any())).thenAnswer(invocation -> {
+            @SuppressWarnings("unchecked")
+            Page<VehicleInformation> page = invocation.getArgument(0);
+            page.setRecords(page.getCurrent() == 1L ? List.of(first) : List.of());
+            return page;
+        });
+
+        List<VehicleInformation> result = service.getVehicleInformationByIdCardNumber("110101199001010033");
+
+        assertEquals(1, result.size());
+        verify(vehicleInformationMapper, never()).selectList(any());
+        verify(vehicleInformationMapper).selectPage(any(), any());
+        verify(searchRepository).saveAll(any());
     }
 
     @Test
@@ -3304,13 +3553,16 @@ class BusinessFlowConsistencyTest {
         DriverInformation driver = new DriverInformation();
         driver.setDriverId(200L);
         when(driverInformationService.findLinkedDriverForUser(any())).thenReturn(driver);
-        when(offenseRecordService.findIdsByDriverIds(List.of(200L))).thenReturn(List.of(500L));
 
         AppealRecord existing = new AppealRecord();
         existing.setAppealId(501L);
         existing.setOffenseId(500L);
         existing.setAcceptanceStatus(AppealAcceptanceState.REJECTED.getCode());
         when(appealRecordService.getAppealById(501L)).thenReturn(existing);
+        OffenseRecord offense = new OffenseRecord();
+        offense.setOffenseId(500L);
+        offense.setDriverId(200L);
+        when(offenseRecordService.findById(500L)).thenReturn(offense);
 
         AppealRecord updated = new AppealRecord();
         updated.setAppealId(501L);
@@ -3325,6 +3577,8 @@ class BusinessFlowConsistencyTest {
         AppealRecord result = service.triggerCurrentUserAppealAcceptanceEvent(501L, AppealAcceptanceEvent.RESUBMIT);
 
         assertEquals(AppealAcceptanceState.PENDING.getCode(), result.getAcceptanceStatus());
+        verify(offenseRecordService).findById(500L);
+        verify(offenseRecordService, never()).findIdsByDriverIds(any());
         verify(appealRecordService).updateAcceptanceStatus(501L, AppealAcceptanceState.PENDING);
     }
 
@@ -3390,13 +3644,16 @@ class BusinessFlowConsistencyTest {
         DriverInformation driver = new DriverInformation();
         driver.setDriverId(200L);
         when(driverInformationService.findLinkedDriverForUser(any())).thenReturn(driver);
-        when(offenseRecordService.findIdsByDriverIds(List.of(200L))).thenReturn(List.of(500L));
 
         AppealRecord existing = new AppealRecord();
         existing.setAppealId(501L);
         existing.setOffenseId(500L);
         existing.setAcceptanceStatus(AppealAcceptanceState.NEED_SUPPLEMENT.getCode());
         when(appealRecordService.getAppealById(501L)).thenReturn(existing);
+        OffenseRecord offense = new OffenseRecord();
+        offense.setOffenseId(500L);
+        offense.setDriverId(200L);
+        when(offenseRecordService.findById(500L)).thenReturn(offense);
 
         AppealRecord supplementDraft = new AppealRecord();
         supplementDraft.setAppealReason("Updated supplement reason");
@@ -3426,6 +3683,8 @@ class BusinessFlowConsistencyTest {
                 supplementDraft);
 
         assertEquals(AppealAcceptanceState.PENDING.getCode(), result.getAcceptanceStatus());
+        verify(offenseRecordService).findById(500L);
+        verify(offenseRecordService, never()).findIdsByDriverIds(any());
         verify(appealRecordService).updateSupplementFieldsSystemManaged(501L, supplementDraft);
         verify(appealRecordService).updateAcceptanceStatus(501L, AppealAcceptanceState.PENDING);
     }
@@ -3464,19 +3723,24 @@ class BusinessFlowConsistencyTest {
         DriverInformation driver = new DriverInformation();
         driver.setDriverId(200L);
         when(driverInformationService.findLinkedDriverForUser(any())).thenReturn(driver);
-        when(offenseRecordService.findIdsByDriverIds(List.of(200L))).thenReturn(List.of(500L));
 
         AppealRecord existing = new AppealRecord();
         existing.setAppealId(501L);
         existing.setOffenseId(500L);
         existing.setAcceptanceStatus(AppealAcceptanceState.ACCEPTED.getCode());
         when(appealRecordService.getAppealById(501L)).thenReturn(existing);
+        OffenseRecord offense = new OffenseRecord();
+        offense.setOffenseId(500L);
+        offense.setDriverId(200L);
+        when(offenseRecordService.findById(500L)).thenReturn(offense);
 
         assertThrows(IllegalStateException.class,
                 () -> service.triggerCurrentUserAppealAcceptanceEvent(
                         501L,
                         AppealAcceptanceEvent.SUPPLEMENT_COMPLETE,
                         new AppealRecord()));
+        verify(offenseRecordService).findById(500L);
+        verify(offenseRecordService, never()).findIdsByDriverIds(any());
         verify(appealRecordService, never()).updateSupplementFieldsSystemManaged(any(), any());
         verify(stateMachineService, never()).processAppealAcceptanceState(any(), any(), any());
     }
@@ -3549,6 +3813,8 @@ class BusinessFlowConsistencyTest {
         assertEquals("13700000000", created.getPayerContact());
         assertEquals("WeChat", created.getPaymentMethod());
         assertEquals("USER_SELF_SERVICE", created.getPaymentChannel());
+        verify(fineRecordService, Mockito.times(1)).findById(701L);
+        verify(offenseRecordService, Mockito.times(1)).findById(702L);
     }
 
     @Test
@@ -3603,12 +3869,8 @@ class BusinessFlowConsistencyTest {
         ownPayment.setFineId(701L);
         ownPayment.setPayerIdCard("110101199001010033");
 
-        PaymentRecord otherPayment = new PaymentRecord();
-        otherPayment.setPaymentId(802L);
-        otherPayment.setFineId(701L);
-        otherPayment.setPayerIdCard("110101199001010099");
-
-        when(paymentRecordService.findByFineId(701L, 1, 20)).thenReturn(List.of(ownPayment, otherPayment));
+        when(paymentRecordService.findByFineIdAndPayerIdCard(701L, "110101199001010033", 1, 20))
+                .thenReturn(List.of(ownPayment));
 
         List<PaymentRecord> result = service.listCurrentUserPaymentsByFineId(701L, 1, 20);
 
@@ -3656,7 +3918,10 @@ class BusinessFlowConsistencyTest {
         appeal.setOffenseId(702L);
         appeal.setProcessStatus(AppealProcessState.UNPROCESSED.getCode());
         when(appealRecordService.getAppealById(501L)).thenReturn(appeal);
-        when(offenseRecordService.findIdsByDriverIds(any())).thenReturn(List.of(702L));
+        OffenseRecord offense = new OffenseRecord();
+        offense.setOffenseId(702L);
+        offense.setDriverId(200L);
+        when(offenseRecordService.findById(702L)).thenReturn(offense);
         when(stateMachineService.processAppealState(
                 501L,
                 AppealProcessState.UNPROCESSED,
@@ -3670,6 +3935,8 @@ class BusinessFlowConsistencyTest {
         AppealRecord result = service.triggerCurrentUserAppealProcessEvent(501L, AppealProcessEvent.WITHDRAW);
 
         assertEquals(AppealProcessState.WITHDRAWN.getCode(), result.getProcessStatus());
+        verify(offenseRecordService).findById(702L);
+        verify(offenseRecordService, never()).findIdsByDriverIds(any());
         verify(appealRecordService).updateProcessStatus(501L, AppealProcessState.WITHDRAWN);
     }
 
@@ -5041,9 +5308,9 @@ class BusinessFlowConsistencyTest {
         when(currentUserTrafficSupportService.getCurrentUserIdCardNumber())
                 .thenThrow(new IllegalStateException("Current user profile has no ID card number"));
         when(currentUserTrafficSupportService.listCurrentUserAppeals(1, 100)).thenReturn(List.of());
-        when(currentUserTrafficSupportService.listCurrentUserFines(1, 100)).thenReturn(List.of());
-        when(currentUserTrafficSupportService.listCurrentUserOffenses(1, 100)).thenReturn(List.of());
-        when(currentUserTrafficSupportService.listCurrentUserDeductions(1, 100)).thenReturn(List.of());
+        when(currentUserTrafficSupportService.listCurrentUserFineIds()).thenReturn(List.of());
+        when(currentUserTrafficSupportService.listCurrentUserOffenseIds()).thenReturn(List.of());
+        when(currentUserTrafficSupportService.listCurrentUserDeductionIds()).thenReturn(List.of());
 
         SysRequestHistory history = new SysRequestHistory();
         history.setId(501L);
@@ -5054,8 +5321,8 @@ class BusinessFlowConsistencyTest {
 
         assertEquals(HttpStatus.OK, response.getStatusCode());
         assertEquals(List.of(history), response.getBody());
-        verify(paymentRecordService, never()).searchByPayerIdCard(any(), anyInt(), anyInt());
-        verify(currentUserTrafficSupportService, never()).listCurrentUserVehicles();
+        verify(paymentRecordService, never()).findIdsByPayerIdCardAndFineIds(any(), any());
+        verify(currentUserTrafficSupportService, never()).listCurrentUserVehicleIds();
     }
 
     @Test
@@ -5079,9 +5346,9 @@ class BusinessFlowConsistencyTest {
         appealRecord.setAppealId(501L);
         when(currentUserTrafficSupportService.listCurrentUserAppeals(1, 100)).thenReturn(List.of(appealRecord));
         when(currentUserTrafficSupportService.listCurrentUserAppeals(2, 100)).thenReturn(List.of());
-        when(currentUserTrafficSupportService.listCurrentUserFines(1, 100)).thenReturn(List.of());
-        when(currentUserTrafficSupportService.listCurrentUserOffenses(1, 100)).thenReturn(List.of());
-        when(currentUserTrafficSupportService.listCurrentUserDeductions(1, 100)).thenReturn(List.of());
+        when(currentUserTrafficSupportService.listCurrentUserFineIds()).thenReturn(List.of());
+        when(currentUserTrafficSupportService.listCurrentUserOffenseIds()).thenReturn(List.of());
+        when(currentUserTrafficSupportService.listCurrentUserDeductionIds()).thenReturn(List.of());
 
         when(sysRequestHistoryService.findByUserId(42L, 1, 100)).thenReturn(List.of());
         when(sysRequestHistoryService.findByBusinessIds(any(), eq(1), eq(200))).thenReturn(List.of());
@@ -5167,10 +5434,11 @@ class BusinessFlowConsistencyTest {
         assertEquals(HttpStatus.OK, response.getStatusCode());
         assertEquals(List.of(reviewHistory, managerHistory, targetAppealHistory), response.getBody());
         verify(currentUserTrafficSupportService, never()).getCurrentUserIdCardNumber();
-        verify(currentUserTrafficSupportService, never()).listCurrentUserFines(anyInt(), anyInt());
-        verify(currentUserTrafficSupportService, never()).listCurrentUserOffenses(anyInt(), anyInt());
-        verify(currentUserTrafficSupportService, never()).listCurrentUserDeductions(anyInt(), anyInt());
-        verify(paymentRecordService, never()).searchByPayerIdCard(any(), anyInt(), anyInt());
+        verify(currentUserTrafficSupportService, never()).listCurrentUserFineIds();
+        verify(currentUserTrafficSupportService, never()).listCurrentUserOffenseIds();
+        verify(currentUserTrafficSupportService, never()).listCurrentUserDeductionIds();
+        verify(currentUserTrafficSupportService, never()).listCurrentUserVehicleIds();
+        verify(paymentRecordService, never()).findIdsByPayerIdCardAndFineIds(any(), any());
     }
 
     @Test
@@ -5391,6 +5659,66 @@ class BusinessFlowConsistencyTest {
     }
 
     @Test
+    void confirmSelfServicePaymentShouldPersistConfirmationAndFinalStatusInSinglePaymentLoad() {
+        PaymentRecordMapper paymentRecordMapper = Mockito.mock(PaymentRecordMapper.class);
+        SysRequestHistoryMapper requestHistoryMapper = Mockito.mock(SysRequestHistoryMapper.class);
+        PaymentRecordSearchRepository searchRepository = Mockito.mock(PaymentRecordSearchRepository.class);
+        FineRecordService fineRecordService = Mockito.mock(FineRecordService.class);
+        SysUserService sysUserService = Mockito.mock(SysUserService.class);
+        @SuppressWarnings("unchecked")
+        KafkaTemplate<String, String> kafkaTemplate = Mockito.mock(KafkaTemplate.class);
+        PlatformTransactionManager transactionManager = Mockito.mock(PlatformTransactionManager.class);
+        StateMachineService stateMachineService = Mockito.mock(StateMachineService.class);
+
+        PaymentRecordService service = new PaymentRecordService(
+                paymentRecordMapper,
+                requestHistoryMapper,
+                searchRepository,
+                fineRecordService,
+                sysUserService,
+                kafkaTemplate,
+                new ObjectMapper(),
+                transactionManager,
+                stateMachineService);
+
+        PaymentRecord existing = new PaymentRecord();
+        existing.setPaymentId(902L);
+        existing.setFineId(901L);
+        existing.setPaymentAmount(BigDecimal.valueOf(100));
+        existing.setRefundAmount(BigDecimal.ZERO);
+        existing.setPaymentChannel("APP");
+        existing.setPaymentStatus(PaymentState.UNPAID.getCode());
+        when(paymentRecordMapper.selectById(902L)).thenReturn(existing);
+        when(paymentRecordMapper.selectCount(any(QueryWrapper.class))).thenReturn(0L);
+        when(paymentRecordMapper.updateById(any(PaymentRecord.class))).thenReturn(1);
+        when(paymentRecordMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of(existing));
+
+        FineRecord fineRecord = new FineRecord();
+        fineRecord.setFineId(901L);
+        fineRecord.setTotalAmount(BigDecimal.valueOf(100));
+        fineRecord.setPaidAmount(BigDecimal.ZERO);
+        when(fineRecordService.findById(901L)).thenReturn(fineRecord);
+
+        when(stateMachineService.canTransitionPaymentState(any(), any())).thenReturn(true);
+        when(stateMachineService.processPaymentState(902L, PaymentState.UNPAID, PaymentEvent.COMPLETE_PAYMENT))
+                .thenReturn(PaymentState.PAID);
+
+        PaymentRecord updated = service.confirmSelfServicePayment(
+                902L,
+                "WX-20260410-0001",
+                "https://example.com/proof/902",
+                PaymentState.PAID);
+
+        assertEquals(PaymentState.PAID.getCode(), updated.getPaymentStatus());
+        assertEquals("WX-20260410-0001", updated.getTransactionId());
+        assertEquals("https://example.com/proof/902", updated.getReceiptUrl());
+        verify(paymentRecordMapper, Mockito.times(1)).selectById(902L);
+        verify(paymentRecordMapper, Mockito.times(1)).updateById(existing);
+        verify(fineRecordService, Mockito.times(1)).findById(901L);
+        verify(fineRecordService).updateFineRecordSystemManaged(any(FineRecord.class));
+    }
+
+    @Test
     void recordFinanceReviewShouldAppendStructuredAuditRemark() {
         PaymentRecordMapper paymentRecordMapper = Mockito.mock(PaymentRecordMapper.class);
         SysRequestHistoryMapper requestHistoryMapper = Mockito.mock(SysRequestHistoryMapper.class);
@@ -5519,6 +5847,80 @@ class BusinessFlowConsistencyTest {
     }
 
     @Test
+    void waiveAndRefundPaymentsByFineIdShouldProcessAllDatabaseBatches() {
+        PaymentRecordMapper paymentRecordMapper = Mockito.mock(PaymentRecordMapper.class);
+        SysRequestHistoryMapper requestHistoryMapper = Mockito.mock(SysRequestHistoryMapper.class);
+        PaymentRecordSearchRepository searchRepository = Mockito.mock(PaymentRecordSearchRepository.class);
+        FineRecordService fineRecordService = Mockito.mock(FineRecordService.class);
+        SysUserService sysUserService = Mockito.mock(SysUserService.class);
+        @SuppressWarnings("unchecked")
+        KafkaTemplate<String, String> kafkaTemplate = Mockito.mock(KafkaTemplate.class);
+        PlatformTransactionManager transactionManager = Mockito.mock(PlatformTransactionManager.class);
+        StateMachineService stateMachineService = Mockito.mock(StateMachineService.class);
+
+        PaymentRecordService service = new PaymentRecordService(
+                paymentRecordMapper,
+                requestHistoryMapper,
+                searchRepository,
+                fineRecordService,
+                sysUserService,
+                kafkaTemplate,
+                new ObjectMapper(),
+                transactionManager,
+                stateMachineService);
+
+        FineRecord fineRecord = new FineRecord();
+        fineRecord.setFineId(901L);
+        fineRecord.setTotalAmount(BigDecimal.valueOf(501));
+        fineRecord.setPaidAmount(BigDecimal.valueOf(501));
+        fineRecord.setUnpaidAmount(BigDecimal.ZERO);
+        fineRecord.setPaymentStatus(PaymentState.PAID.getCode());
+        when(fineRecordService.findById(901L)).thenReturn(fineRecord);
+        when(fineRecordService.updateFineRecordSystemManaged(any(FineRecord.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        when(paymentRecordMapper.updateById(any(PaymentRecord.class))).thenReturn(1);
+
+        java.util.List<PaymentRecord> firstBatch = new java.util.ArrayList<>();
+        for (long paymentId = 1L; paymentId <= 500L; paymentId++) {
+            firstBatch.add(buildPaidPaymentRecord(paymentId, 901L, BigDecimal.ONE));
+        }
+        PaymentRecord secondBatchRecord = buildPaidPaymentRecord(501L, 901L, BigDecimal.ONE);
+
+        when(paymentRecordMapper.selectPage(any(Page.class), any(QueryWrapper.class))).thenAnswer(invocation -> {
+            Page<PaymentRecord> page = invocation.getArgument(0);
+            if (page.getCurrent() == 1L) {
+                page.setRecords(firstBatch);
+            } else if (page.getCurrent() == 2L) {
+                page.setRecords(List.of(secondBatchRecord));
+            } else {
+                page.setRecords(List.of());
+            }
+            return page;
+        });
+        when(paymentRecordMapper.selectList(any(QueryWrapper.class))).thenAnswer(invocation -> {
+            java.util.List<PaymentRecord> summaryRecords = new java.util.ArrayList<>(firstBatch);
+            summaryRecords.add(secondBatchRecord);
+            return summaryRecords;
+        });
+
+        service.waiveAndRefundPaymentsByFineId(901L, "Batch waive");
+
+        verify(paymentRecordMapper, Mockito.times(2)).selectPage(any(Page.class), any(QueryWrapper.class));
+        verify(paymentRecordMapper, Mockito.times(501)).updateById(any(PaymentRecord.class));
+        verify(searchRepository, Mockito.never()).findByFineId(eq(901L), any());
+        assertEquals(PaymentState.WAIVED.getCode(), firstBatch.get(0).getPaymentStatus());
+        assertEquals(BigDecimal.ONE, firstBatch.get(0).getRefundAmount());
+        assertEquals(PaymentState.WAIVED.getCode(), secondBatchRecord.getPaymentStatus());
+        assertEquals(BigDecimal.ONE, secondBatchRecord.getRefundAmount());
+
+        ArgumentCaptor<FineRecord> fineCaptor = ArgumentCaptor.forClass(FineRecord.class);
+        verify(fineRecordService).updateFineRecordSystemManaged(fineCaptor.capture());
+        assertEquals(PaymentState.WAIVED.getCode(), fineCaptor.getValue().getPaymentStatus());
+        assertEquals(BigDecimal.ZERO, fineCaptor.getValue().getPaidAmount());
+        assertEquals(BigDecimal.ZERO, fineCaptor.getValue().getUnpaidAmount());
+    }
+
+    @Test
     void createPaymentForCurrentUserShouldRejectWhenPendingSelfServicePaymentExists() {
         SysUserService sysUserService = Mockito.mock(SysUserService.class);
         DriverInformationService driverInformationService = Mockito.mock(DriverInformationService.class);
@@ -5579,7 +5981,8 @@ class BusinessFlowConsistencyTest {
         pendingRecord.setPayerIdCard("110101199001010033");
         pendingRecord.setPaymentChannel("APP");
         pendingRecord.setPaymentStatus(PaymentState.UNPAID.getCode());
-        when(paymentRecordService.findByFineId(901L, 1, 200)).thenReturn(List.of(pendingRecord));
+        when(paymentRecordService.findByFineIdAndPayerIdCard(901L, "110101199001010033", 1, 200))
+                .thenReturn(List.of(pendingRecord));
 
         PaymentRecord draft = new PaymentRecord();
         draft.setFineId(901L);
@@ -5651,7 +6054,8 @@ class BusinessFlowConsistencyTest {
         expiredPendingRecord.setPaymentChannel("APP");
         expiredPendingRecord.setPaymentStatus(PaymentState.UNPAID.getCode());
         expiredPendingRecord.setCreatedAt(LocalDateTime.now().minusMinutes(20));
-        when(paymentRecordService.findByFineId(901L, 1, 200)).thenReturn(List.of(expiredPendingRecord));
+        when(paymentRecordService.findByFineIdAndPayerIdCard(901L, "110101199001010033", 1, 200))
+                .thenReturn(List.of(expiredPendingRecord));
 
         PaymentRecord draft = new PaymentRecord();
         draft.setFineId(901L);
@@ -5728,22 +6132,14 @@ class BusinessFlowConsistencyTest {
         pendingRecord.setPaymentStatus(PaymentState.UNPAID.getCode());
         when(paymentRecordService.findById(902L)).thenReturn(pendingRecord);
 
-        PaymentRecord enrichedRecord = new PaymentRecord();
-        enrichedRecord.setPaymentId(902L);
-        enrichedRecord.setFineId(901L);
-        enrichedRecord.setPaymentAmount(BigDecimal.valueOf(100));
-        enrichedRecord.setPayerIdCard("110101199001010033");
-        enrichedRecord.setPaymentChannel("APP");
-        enrichedRecord.setPaymentStatus(PaymentState.UNPAID.getCode());
-        when(paymentRecordService.updateSelfServicePaymentConfirmationDetails(
-                902L,
-                "WX-20260410-0001",
-                "https://example.com/proof/902")).thenReturn(enrichedRecord);
-
         PaymentRecord confirmedRecord = new PaymentRecord();
         confirmedRecord.setPaymentId(902L);
         confirmedRecord.setPaymentStatus(PaymentState.PAID.getCode());
-        when(paymentRecordService.transitionPaymentStatus(902L, PaymentState.PAID)).thenReturn(confirmedRecord);
+        when(paymentRecordService.confirmSelfServicePayment(
+                902L,
+                "WX-20260410-0001",
+                "https://example.com/proof/902",
+                PaymentState.PAID)).thenReturn(confirmedRecord);
 
         PaymentRecord confirmationDraft = new PaymentRecord();
         confirmationDraft.setTransactionId("WX-20260410-0001");
@@ -5752,11 +6148,12 @@ class BusinessFlowConsistencyTest {
         PaymentRecord confirmed = service.confirmCurrentUserPayment(902L, confirmationDraft);
 
         assertEquals(PaymentState.PAID.getCode(), confirmed.getPaymentStatus());
-        verify(paymentRecordService).updateSelfServicePaymentConfirmationDetails(
+        verify(fineRecordService, Mockito.times(1)).findById(901L);
+        verify(paymentRecordService).confirmSelfServicePayment(
                 902L,
                 "WX-20260410-0001",
-                "https://example.com/proof/902");
-        verify(paymentRecordService).transitionPaymentStatus(902L, PaymentState.PAID);
+                "https://example.com/proof/902",
+                PaymentState.PAID);
     }
 
     @Test
@@ -5825,8 +6222,81 @@ class BusinessFlowConsistencyTest {
                 () -> service.confirmCurrentUserPayment(902L, new PaymentRecord()));
 
         assertEquals("Pending self-service payment order has expired", ex.getMessage());
-        verify(paymentRecordService, never()).updateSelfServicePaymentConfirmationDetails(any(), any(), any());
-        verify(paymentRecordService, never()).transitionPaymentStatus(any(), any());
+        verify(paymentRecordService, never()).confirmSelfServicePayment(any(), any(), any(), any());
+    }
+
+    @Test
+    void updateCurrentUserPaymentProofShouldReuseOwnedFineValidationLoad() {
+        SysUserService sysUserService = Mockito.mock(SysUserService.class);
+        DriverInformationService driverInformationService = Mockito.mock(DriverInformationService.class);
+        OffenseRecordService offenseRecordService = Mockito.mock(OffenseRecordService.class);
+        FineRecordService fineRecordService = Mockito.mock(FineRecordService.class);
+        DeductionRecordService deductionRecordService = Mockito.mock(DeductionRecordService.class);
+        VehicleInformationService vehicleInformationService = Mockito.mock(VehicleInformationService.class);
+        AppealRecordService appealRecordService = Mockito.mock(AppealRecordService.class);
+        PaymentRecordService paymentRecordService = Mockito.mock(PaymentRecordService.class);
+        StateMachineService stateMachineService = Mockito.mock(StateMachineService.class);
+
+        CurrentUserTrafficSupportService service = new CurrentUserTrafficSupportService(
+                sysUserService,
+                driverInformationService,
+                offenseRecordService,
+                fineRecordService,
+                deductionRecordService,
+                vehicleInformationService,
+                appealRecordService,
+                paymentRecordService,
+                stateMachineService);
+
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken("driver", "n/a", Collections.emptyList()));
+
+        SysUser currentUser = new SysUser();
+        currentUser.setUserId(42L);
+        currentUser.setUsername("driver");
+        currentUser.setIdCardNumber("110101199001010033");
+        when(sysUserService.findByUsername("driver")).thenReturn(currentUser);
+
+        DriverInformation driver = new DriverInformation();
+        driver.setDriverId(101L);
+        driver.setIdCardNumber("110101199001010033");
+        when(driverInformationService.findLinkedDriverForUser(currentUser)).thenReturn(driver);
+
+        FineRecord fineRecord = new FineRecord();
+        fineRecord.setFineId(901L);
+        fineRecord.setOffenseId(701L);
+        fineRecord.setPaymentStatus(PaymentState.PARTIAL.getCode());
+        when(fineRecordService.findById(901L)).thenReturn(fineRecord);
+
+        OffenseRecord offenseRecord = new OffenseRecord();
+        offenseRecord.setOffenseId(701L);
+        offenseRecord.setDriverId(101L);
+        when(offenseRecordService.findById(701L)).thenReturn(offenseRecord);
+
+        PaymentRecord pendingRecord = new PaymentRecord();
+        pendingRecord.setPaymentId(902L);
+        pendingRecord.setFineId(901L);
+        pendingRecord.setPayerIdCard("110101199001010033");
+        pendingRecord.setPaymentChannel("APP");
+        pendingRecord.setPaymentStatus(PaymentState.PAID.getCode());
+        when(paymentRecordService.findById(902L)).thenReturn(pendingRecord);
+
+        PaymentRecord updatedRecord = new PaymentRecord();
+        updatedRecord.setPaymentId(902L);
+        updatedRecord.setReceiptUrl("https://example.com/proof/new-902");
+        when(paymentRecordService.updateSelfServicePaymentReceiptProof(pendingRecord, "https://example.com/proof/new-902"))
+                .thenReturn(updatedRecord);
+
+        PaymentRecord proofDraft = new PaymentRecord();
+        proofDraft.setReceiptUrl("https://example.com/proof/new-902");
+
+        PaymentRecord updated = service.updateCurrentUserPaymentProof(902L, proofDraft);
+
+        assertEquals("https://example.com/proof/new-902", updated.getReceiptUrl());
+        verify(fineRecordService, Mockito.times(1)).findById(901L);
+        verify(paymentRecordService).updateSelfServicePaymentReceiptProof(
+                pendingRecord,
+                "https://example.com/proof/new-902");
     }
 
     @Test
@@ -5861,24 +6331,18 @@ class BusinessFlowConsistencyTest {
         when(sysRequestHistoryService.findByUserId(42L, 1, 100)).thenReturn(firstUserHistoryPage);
         when(sysRequestHistoryService.findByUserId(42L, 2, 100)).thenReturn(List.of());
 
-        FineRecord finePageOne = new FineRecord();
-        finePageOne.setFineId(2001L);
-        FineRecord finePageTwo = new FineRecord();
-        finePageTwo.setFineId(2002L);
         when(currentUserTrafficSupportService.listCurrentUserAppeals(1, 100)).thenReturn(List.of());
-        List<FineRecord> firstFinePage = new java.util.ArrayList<>();
-        firstFinePage.add(finePageOne);
+        List<Long> fineIds = new java.util.ArrayList<>();
+        fineIds.add(2001L);
         for (int index = 0; index < 99; index++) {
-            FineRecord fillerFine = new FineRecord();
-            fillerFine.setFineId(3000L + index);
-            firstFinePage.add(fillerFine);
+            fineIds.add(3000L + index);
         }
-        when(currentUserTrafficSupportService.listCurrentUserFines(1, 100)).thenReturn(firstFinePage);
-        when(currentUserTrafficSupportService.listCurrentUserFines(2, 100)).thenReturn(List.of(finePageTwo));
-        when(currentUserTrafficSupportService.listCurrentUserOffenses(1, 100)).thenReturn(List.of());
-        when(currentUserTrafficSupportService.listCurrentUserDeductions(1, 100)).thenReturn(List.of());
-        when(currentUserTrafficSupportService.listCurrentUserVehicles()).thenReturn(List.of());
-        when(paymentRecordService.searchByPayerIdCard("110101199001010033", 1, 100)).thenReturn(List.of());
+        fineIds.add(2002L);
+        when(currentUserTrafficSupportService.listCurrentUserFineIds()).thenReturn(fineIds);
+        when(currentUserTrafficSupportService.listCurrentUserOffenseIds()).thenReturn(List.of());
+        when(currentUserTrafficSupportService.listCurrentUserDeductionIds()).thenReturn(List.of());
+        when(currentUserTrafficSupportService.listCurrentUserVehicleIds()).thenReturn(List.of());
+        when(paymentRecordService.findIdsByPayerIdCardAndFineIds(eq("110101199001010033"), any())).thenReturn(List.of());
 
         SysRequestHistory relatedHistoryPageOne = new SysRequestHistory();
         relatedHistoryPageOne.setId(1003L);
@@ -6011,8 +6475,12 @@ class BusinessFlowConsistencyTest {
                 transactionManager,
                 stateMachineService);
 
+        PaymentRecord existing = new PaymentRecord();
+        existing.setPaymentId(40L);
+        when(paymentRecordMapper.selectById(40L)).thenReturn(existing);
+
         assertThrows(IllegalStateException.class, () -> service.transitionPaymentStatus(40L, PaymentState.WAIVED));
-        verify(paymentRecordMapper, never()).selectById(any());
+        verify(paymentRecordMapper).selectById(40L);
         verify(stateMachineService, never()).processPaymentState(any(), any(), any());
     }
 
@@ -6035,6 +6503,29 @@ class BusinessFlowConsistencyTest {
         assertNotNull(rolesAllowed, "Missing @RolesAllowed on method: " + method);
         assertEquals(List.of(expectedRoles), List.of(rolesAllowed.value()),
                 "Unexpected roles on method " + method);
+    }
+
+    private PaymentRecord buildFinanceReviewTaskRecord(Long paymentId,
+                                                       String paymentChannel,
+                                                       String paymentStatus,
+                                                       String receiptUrl) {
+        PaymentRecord record = new PaymentRecord();
+        record.setPaymentId(paymentId);
+        record.setPaymentChannel(paymentChannel);
+        record.setPaymentStatus(paymentStatus);
+        record.setReceiptUrl(receiptUrl);
+        return record;
+    }
+
+    private PaymentRecord buildPaidPaymentRecord(Long paymentId, Long fineId, BigDecimal paymentAmount) {
+        PaymentRecord record = new PaymentRecord();
+        record.setPaymentId(paymentId);
+        record.setFineId(fineId);
+        record.setPaymentAmount(paymentAmount);
+        record.setRefundAmount(BigDecimal.ZERO);
+        record.setPaymentStatus(PaymentState.PAID.getCode());
+        record.setPaymentTime(LocalDateTime.of(2026, 4, 12, 10, 0));
+        return record;
     }
 
     @SuppressWarnings("unchecked")

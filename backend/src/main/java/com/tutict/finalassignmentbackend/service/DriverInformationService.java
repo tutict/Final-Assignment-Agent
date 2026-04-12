@@ -53,6 +53,8 @@ public class DriverInformationService {
 
     private static final Logger log = Logger.getLogger(DriverInformationService.class.getName());
     private static final String CACHE_NAME = "driverCache";
+    private static final int FULL_LOAD_BATCH_SIZE = 500;
+    private static final int MAX_SEARCH_CANDIDATES = 500;
 
     private final DriverInformationMapper driverInformationMapper;
     private final DriverVehicleMapper driverVehicleMapper;
@@ -161,7 +163,6 @@ public class DriverInformationService {
                 });
     }
 
-    @Cacheable(cacheNames = CACHE_NAME, key = "'all'", unless = "#result == null || #result.isEmpty()")
     @WsAction(service = "DriverInformationService", action = "getAllDrivers")
     public List<DriverInformation> getAllDrivers() {
         List<DriverInformation> fromIndex = StreamSupport.stream(
@@ -171,9 +172,7 @@ public class DriverInformationService {
         if (!fromIndex.isEmpty()) {
             return fromIndex;
         }
-        List<DriverInformation> db = driverInformationMapper.selectList(null);
-        syncBatchToIndexAfterCommit(db);
-        return db;
+        return loadAllFromDatabase();
     }
 
     @Transactional(readOnly = true)
@@ -220,7 +219,7 @@ public class DriverInformationService {
         }
 
         String normalizedQuery = query.trim();
-        int fetchSize = Math.max(page * size, size);
+        int fetchSize = resolveCandidateFetchSize(page, size);
         Map<Long, DriverInformation> merged = new LinkedHashMap<>();
 
         appendDriver(merged, findDriverByIdQuery(normalizedQuery));
@@ -325,11 +324,10 @@ public class DriverInformationService {
         }
 
         QueryWrapper<DriverInformation> wrapper = new QueryWrapper<>();
-        wrapper.eq(columnName, query.trim());
-        return driverInformationMapper.selectList(wrapper).stream()
-                .skip((long) (page - 1) * size)
-                .limit(size)
-                .collect(Collectors.toList());
+        wrapper.eq(columnName, query.trim())
+                .orderByAsc("name")
+                .orderByAsc("driver_id");
+        return fetchFromDatabase(wrapper, page, size);
     }
 
     private List<DriverInformation> collectExactHits(String query,
@@ -566,7 +564,42 @@ public class DriverInformationService {
 
     private List<DriverInformation> fetchFromDatabase(QueryWrapper<DriverInformation> wrapper, int page, int size) {
         Page<DriverInformation> mpPage = new Page<>(Math.max(page, 1), Math.max(size, 1));
-        return driverInformationMapper.selectPage(mpPage, wrapper).getRecords();
+        driverInformationMapper.selectPage(mpPage, wrapper);
+        List<DriverInformation> records = mpPage.getRecords();
+        if (records == null || records.isEmpty()) {
+            return List.of();
+        }
+        syncBatchToIndexAfterCommit(records);
+        return records;
+    }
+
+    private int resolveCandidateFetchSize(int page, int size) {
+        long requested = (long) Math.max(page, 1) * Math.max(size, 1);
+        long normalized = Math.max(requested, size);
+        return (int) Math.min(normalized, MAX_SEARCH_CANDIDATES);
+    }
+
+    private List<DriverInformation> loadAllFromDatabase() {
+        QueryWrapper<DriverInformation> wrapper = new QueryWrapper<>();
+        wrapper.orderByAsc("driver_id");
+
+        List<DriverInformation> allRecords = new ArrayList<>();
+        long pageNumber = 1L;
+        while (true) {
+            Page<DriverInformation> batchPage = new Page<>(pageNumber, FULL_LOAD_BATCH_SIZE);
+            driverInformationMapper.selectPage(batchPage, wrapper);
+            List<DriverInformation> records = batchPage.getRecords();
+            if (records == null || records.isEmpty()) {
+                break;
+            }
+            allRecords.addAll(records);
+            syncBatchToIndexAfterCommit(records);
+            if (records.size() < FULL_LOAD_BATCH_SIZE) {
+                break;
+            }
+            pageNumber++;
+        }
+        return allRecords;
     }
 
     private Comparator<DriverInformation> driverSearchComparator() {

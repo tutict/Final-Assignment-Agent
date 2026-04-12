@@ -45,7 +45,7 @@ public class WsActionRegistry {
 
             for (Method m : actualClass.getMethods()) {
                 WsAction anno = m.getAnnotation(WsAction.class);
-                if (anno != null) {
+                if (anno != null && anno.exposed()) {
                     // 获取注解
                     String serviceName = anno.service();
                     String actionName = anno.action();
@@ -84,10 +84,12 @@ public class WsActionRegistry {
     public static class HandlerMethod {
         private final Object bean;
         private final Method method;
+        private final WsAction wsAction;
 
         public HandlerMethod(Object bean, Method method) {
             this.bean = bean;
             this.method = method;
+            this.wsAction = method.getAnnotation(WsAction.class);
         }
 
     }

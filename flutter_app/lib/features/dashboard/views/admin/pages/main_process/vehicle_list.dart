@@ -144,17 +144,12 @@ class _VehicleListState extends State<VehicleList> {
 
   Future<bool> _validateJwtToken() async {
     String? jwtToken = (await AuthTokenStore.instance.getJwtToken());
-    debugPrint('Retrieved JWT: $jwtToken');
     if (jwtToken == null || jwtToken.isEmpty) {
-      debugPrint('JWT token not found or empty');
       _setStateSafely(() => _errorMessage = 'vehicle.error.unauthorized'.tr);
       return false;
     }
     try {
-      final decodedToken = JwtDecoder.decode(jwtToken);
-      debugPrint('Decoded JWT: $decodedToken');
       if (JwtDecoder.isExpired(jwtToken)) {
-        debugPrint('JWT token is expired: ${decodedToken['exp']}');
         jwtToken = await _refreshJwtToken();
         if (!mounted) return false;
         if (jwtToken == null) {
@@ -162,8 +157,6 @@ class _VehicleListState extends State<VehicleList> {
           return false;
         }
         await AuthTokenStore.instance.setJwtToken(jwtToken);
-        final newDecodedToken = JwtDecoder.decode(jwtToken);
-        debugPrint('New JWT decoded: $newDecodedToken');
         if (JwtDecoder.isExpired(jwtToken)) {
           _setStateSafely(
               () => _errorMessage = 'vehicle.error.refreshedExpired'.tr);
@@ -172,23 +165,15 @@ class _VehicleListState extends State<VehicleList> {
         await vehicleApi.initializeWithJwt();
         if (!mounted) return false;
       }
-      debugPrint('JWT token is valid. Subject: ${decodedToken['sub']}');
       return true;
     } catch (e) {
-      debugPrint('JWT decode error: $e');
       _setStateSafely(() => _errorMessage = 'vehicle.error.invalidLogin'.tr);
       return false;
     }
   }
 
   Future<String?> _refreshJwtToken() async {
-    final newJwt = await _sessionHelper.refreshJwtToken();
-    if (newJwt != null) {
-      debugPrint('Refreshed JWT successfully');
-    } else {
-      debugPrint('Failed to refresh JWT');
-    }
-    return newJwt;
+    return await _sessionHelper.refreshJwtToken();
   }
 
   Future<void> _initialize() async {
@@ -1020,8 +1005,7 @@ class _AddVehiclePageState extends State<AddVehiclePage> {
       final jwtToken = (await AuthTokenStore.instance.getJwtToken());
       if (!mounted) return;
       if (jwtToken == null) throw Exception('vehicle.error.jwtMissing'.tr);
-      final decodedToken = JwtDecoder.decode(jwtToken);
-      final username = decodedToken['sub'] ?? '';
+      final username = JwtDecoder.decode(jwtToken)['sub'] ?? '';
       if (username.isEmpty) {
         throw Exception('vehicle.error.usernameMissingInJwt'.tr);
       }

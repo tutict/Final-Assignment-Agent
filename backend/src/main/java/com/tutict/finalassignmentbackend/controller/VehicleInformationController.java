@@ -51,9 +51,11 @@ public class VehicleInformationController {
     @GetMapping("/me")
     @RolesAllowed({"SUPER_ADMIN", "ADMIN", "TRAFFIC_POLICE", "USER"})
     @Operation(summary = "List Current User Vehicles")
-    public ResponseEntity<List<VehicleInformation>> listCurrentUserVehicles() {
+    public ResponseEntity<List<VehicleInformation>> listCurrentUserVehicles(
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "100") int size) {
         try {
-            return ResponseEntity.ok(currentUserTrafficSupportService.listCurrentUserVehicles());
+            return ResponseEntity.ok(currentUserTrafficSupportService.listCurrentUserVehicles(page, size));
         } catch (IllegalStateException ex) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
         } catch (Exception ex) {
@@ -239,9 +241,11 @@ public class VehicleInformationController {
 
     @GetMapping("/search/type")
     @Operation(summary = "Search By Type")
-    public ResponseEntity<List<VehicleInformation>> searchByType(@RequestParam String type) {
+    public ResponseEntity<List<VehicleInformation>> searchByType(@RequestParam String type,
+                                                                 @RequestParam(defaultValue = "1") int page,
+                                                                 @RequestParam(defaultValue = "20") int size) {
         try {
-            return ResponseEntity.ok(vehicleInformationService.getVehicleInformationByType(type));
+            return ResponseEntity.ok(vehicleInformationService.searchByVehicleType(type, page, size));
         } catch (Exception ex) {
             LOG.log(Level.WARNING, "Search vehicle by type failed", ex);
             return ResponseEntity.status(resolveStatus(ex)).build();

@@ -32,6 +32,7 @@ public class SysSettingsService {
 
     private static final Logger LOG = Logger.getLogger(SysSettingsService.class.getName());
     private static final String CACHE_NAME = "sysSettingsCache";
+    private static final int FULL_LOAD_BATCH_SIZE = 500;
 
     private final SysSettingsMapper sysSettingsMapper;
     private final SysRequestHistoryMapper sysRequestHistoryMapper;
@@ -224,7 +225,6 @@ public class SysSettingsService {
     }
 
     @Transactional(readOnly = true)
-    @Cacheable(cacheNames = CACHE_NAME, key = "'all'", unless = "#result == null || #result.isEmpty()")
     public List<SysSettings> findAll() {
         List<SysSettings> fromIndex = StreamSupport.stream(sysSettingsSearchRepository.findAll().spliterator(), false)
                 .map(SysSettingsDocument::toEntity)
@@ -232,9 +232,7 @@ public class SysSettingsService {
         if (!fromIndex.isEmpty()) {
             return fromIndex;
         }
-        List<SysSettings> fromDb = sysSettingsMapper.selectList(null);
-        syncBatchToIndexAfterCommit(fromDb);
-        return fromDb;
+        return loadAllFromDatabase();
     }
 
     @Transactional(readOnly = true)
@@ -382,6 +380,28 @@ public class SysSettingsService {
         List<SysSettings> records = mpPage.getRecords();
         syncBatchToIndexAfterCommit(records);
         return records;
+    }
+
+    private List<SysSettings> loadAllFromDatabase() {
+        List<SysSettings> allRecords = new java.util.ArrayList<>();
+        long currentPage = 1L;
+        while (true) {
+            QueryWrapper<SysSettings> wrapper = new QueryWrapper<>();
+            wrapper.orderByAsc("setting_id");
+            Page<SysSettings> mpPage = new Page<>(currentPage, FULL_LOAD_BATCH_SIZE);
+            sysSettingsMapper.selectPage(mpPage, wrapper);
+            List<SysSettings> records = mpPage.getRecords();
+            if (records == null || records.isEmpty()) {
+                break;
+            }
+            allRecords.addAll(records);
+            syncBatchToIndexAfterCommit(records);
+            if (records.size() < FULL_LOAD_BATCH_SIZE) {
+                break;
+            }
+            currentPage++;
+        }
+        return allRecords;
     }
 
     private List<SysSettings> mapHits(org.springframework.data.elasticsearch.core.SearchHits<SysSettingsDocument> hits) {

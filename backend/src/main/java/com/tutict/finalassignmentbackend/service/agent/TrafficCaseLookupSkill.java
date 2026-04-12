@@ -27,6 +27,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.regex.Matcher;
@@ -34,6 +35,9 @@ import java.util.regex.Pattern;
 
 @Component
 public class TrafficCaseLookupSkill implements AgentSkill {
+
+    private static final int ACCESS_SCOPE_LOOKUP_LIMIT = 200;
+    private static final int DRIVER_LOOKUP_LIMIT = 20;
 
     private static final List<String> MANAGER_KEYWORDS = List.of(
             "管理员", "管理端", "后台", "审核", "审计", "复核员", "处理员", "执法", "窗口"
@@ -331,14 +335,27 @@ public class TrafficCaseLookupSkill implements AgentSkill {
         Set<Long> vehicleIds = new LinkedHashSet<>();
         Set<Long> driverIds = new LinkedHashSet<>();
 
-        vehicleInformationMapper.selectList(new QueryWrapper<VehicleInformation>().eq("owner_id_card", context.idCardNumber()))
+        vehicleInformationMapper.selectList(new QueryWrapper<VehicleInformation>()
+                        .select("vehicle_id")
+                        .eq("owner_id_card", context.idCardNumber())
+                        .orderByDesc("updated_at")
+                        .orderByDesc("vehicle_id")
+                        .last("limit " + ACCESS_SCOPE_LOOKUP_LIMIT))
                 .stream().map(VehicleInformation::getVehicleId).filter(Objects::nonNull).forEach(vehicleIds::add);
 
-        driverInformationMapper.selectList(new QueryWrapper<DriverInformation>().eq("id_card_number", context.idCardNumber()))
+        driverInformationMapper.selectList(new QueryWrapper<DriverInformation>()
+                        .select("driver_id")
+                        .eq("id_card_number", context.idCardNumber())
+                        .orderByDesc("driver_id")
+                        .last("limit " + ACCESS_SCOPE_LOOKUP_LIMIT))
                 .stream().map(DriverInformation::getDriverId).filter(Objects::nonNull).forEach(driverIds::add);
 
         if (!driverIds.isEmpty()) {
-            driverVehicleMapper.selectList(new QueryWrapper<DriverVehicle>().in("driver_id", driverIds))
+            driverVehicleMapper.selectList(new QueryWrapper<DriverVehicle>()
+                            .select("vehicle_id", "status")
+                            .in("driver_id", driverIds)
+                            .orderByDesc("id")
+                            .last("limit " + ACCESS_SCOPE_LOOKUP_LIMIT))
                     .stream().filter(binding -> !equalsIgnoreCase(binding.getStatus(), "Inactive"))
                     .map(DriverVehicle::getVehicleId).filter(Objects::nonNull).forEach(vehicleIds::add);
         }
@@ -354,14 +371,18 @@ public class TrafficCaseLookupSkill implements AgentSkill {
     }
 
     private LookupSeed offenseSeedByDriverLicense(AgentSkillContext context, AccessScope scope, String driverLicenseNumber) {
-        List<DriverInformation> drivers = driverInformationMapper.selectList(
-                new QueryWrapper<DriverInformation>().eq("driver_license_number", driverLicenseNumber));
-        List<OffenseRecord> records = new ArrayList<>();
-        for (DriverInformation driver : drivers) {
-            if (canAccessDriver(context, scope, driver.getDriverId())) {
-                records.addAll(offenseRecordService.findByDriverId(driver.getDriverId(), 1, 3));
-            }
-        }
+        List<Long> driverIds = driverInformationMapper.selectList(
+                        new QueryWrapper<DriverInformation>()
+                                .select("driver_id")
+                                .eq("driver_license_number", driverLicenseNumber)
+                                .orderByDesc("driver_id")
+                                .last("limit " + DRIVER_LOOKUP_LIMIT))
+                .stream()
+                .map(DriverInformation::getDriverId)
+                .filter(Objects::nonNull)
+                .filter(driverId -> canAccessDriver(context, scope, driverId))
+                .toList();
+        List<OffenseRecord> records = offenseRecordService.findByDriverIds(driverIds, 1, 3);
         return LookupSeed.of(filterOffenses(context, scope, records));
     }
 
@@ -407,11 +428,29 @@ public class TrafficCaseLookupSkill implements AgentSkill {
     }
 
     private List<FineRecord> filterFines(AgentSkillContext context, AccessScope scope, List<FineRecord> records) {
-        return records.stream().filter(record -> canAccessFine(context, scope, record)).limit(3).toList();
+        if (context.isPrivilegedOperator() || scope.privileged()) {
+            return records.stream().filter(Objects::nonNull).limit(3).toList();
+        }
+        Map<Long, OffenseRecord> offensesById = loadOffenseAccessMap(records.stream()
+                .map(FineRecord::getOffenseId)
+                .toList());
+        return records.stream()
+                .filter(record -> canAccessFine(context, scope, record, offensesById))
+                .limit(3)
+                .toList();
     }
 
     private List<AppealRecord> filterAppeals(AgentSkillContext context, AccessScope scope, List<AppealRecord> records) {
-        return records.stream().filter(record -> canAccessAppeal(context, scope, record)).limit(3).toList();
+        if (context.isPrivilegedOperator() || scope.privileged()) {
+            return records.stream().filter(Objects::nonNull).limit(3).toList();
+        }
+        Map<Long, OffenseRecord> offensesById = loadOffenseAccessMap(records.stream()
+                .map(AppealRecord::getOffenseId)
+                .toList());
+        return records.stream()
+                .filter(record -> canAccessAppeal(context, scope, record, offensesById))
+                .limit(3)
+                .toList();
     }
 
     private boolean canAccessOffense(AgentSkillContext context, AccessScope scope, OffenseRecord record) {
@@ -421,17 +460,27 @@ public class TrafficCaseLookupSkill implements AgentSkill {
     }
 
     private boolean canAccessFine(AgentSkillContext context, AccessScope scope, FineRecord record) {
+        return canAccessFine(context, scope, record, Map.of());
+    }
+
+    private boolean canAccessFine(AgentSkillContext context, AccessScope scope,
+                                  FineRecord record, Map<Long, OffenseRecord> offensesById) {
         if (record == null) {
             return false;
         }
         if (context.isPrivilegedOperator() || scope.privileged()) {
             return true;
         }
-        OffenseRecord offense = record.getOffenseId() == null ? null : offenseRecordService.findById(record.getOffenseId());
+        OffenseRecord offense = resolveOffenseForAccess(record.getOffenseId(), offensesById);
         return canAccessOffense(context, scope, offense);
     }
 
     private boolean canAccessAppeal(AgentSkillContext context, AccessScope scope, AppealRecord record) {
+        return canAccessAppeal(context, scope, record, Map.of());
+    }
+
+    private boolean canAccessAppeal(AgentSkillContext context, AccessScope scope,
+                                    AppealRecord record, Map<Long, OffenseRecord> offensesById) {
         if (record == null) {
             return false;
         }
@@ -441,8 +490,35 @@ public class TrafficCaseLookupSkill implements AgentSkill {
         if (equalsIgnoreCase(record.getAppellantIdCard(), scope.idCardNumber())) {
             return true;
         }
-        OffenseRecord offense = record.getOffenseId() == null ? null : offenseRecordService.findById(record.getOffenseId());
+        OffenseRecord offense = resolveOffenseForAccess(record.getOffenseId(), offensesById);
         return canAccessOffense(context, scope, offense);
+    }
+
+    private Map<Long, OffenseRecord> loadOffenseAccessMap(List<Long> offenseIds) {
+        Set<Long> normalizedIds = new LinkedHashSet<>();
+        if (offenseIds != null) {
+            offenseIds.stream().filter(Objects::nonNull).forEach(normalizedIds::add);
+        }
+        if (normalizedIds.isEmpty()) {
+            return Map.of();
+        }
+        LinkedHashMap<Long, OffenseRecord> offensesById = new LinkedHashMap<>();
+        offenseRecordMapper.selectList(new QueryWrapper<OffenseRecord>()
+                        .select("offense_id", "driver_id", "vehicle_id")
+                        .in("offense_id", normalizedIds))
+                .stream()
+                .filter(Objects::nonNull)
+                .filter(record -> record.getOffenseId() != null)
+                .forEach(record -> offensesById.put(record.getOffenseId(), record));
+        return offensesById;
+    }
+
+    private OffenseRecord resolveOffenseForAccess(Long offenseId, Map<Long, OffenseRecord> offensesById) {
+        if (offenseId == null) {
+            return null;
+        }
+        OffenseRecord offense = offensesById.get(offenseId);
+        return offense != null ? offense : offenseRecordService.findById(offenseId);
     }
 
     private boolean canAccessDriver(AgentSkillContext context, AccessScope scope, Long driverId) {
@@ -499,18 +575,18 @@ public class TrafficCaseLookupSkill implements AgentSkill {
         if (containsAny(text, "申诉中", "appealing")) return List.of("Appealing");
         if (containsAny(text, "申诉通过", "appeal approved")) return List.of("Appeal_Approved");
         if (containsAny(text, "申诉驳回", "appeal rejected")) return List.of("Appeal_Rejected");
-        if (containsAny(text, "已处理", "processed")) return List.of("Processed");
-        if (containsAny(text, "处理中", "processing")) return List.of("Processing");
         if (containsAny(text, "未处理", "待处理", "unprocessed", "pending")) return List.of("Unprocessed", "Pending");
+        if (containsAny(text, "处理中", "processing")) return List.of("Processing");
+        if (containsAny(text, "已处理", "processed")) return List.of("Processed");
         return List.of();
     }
 
     private List<String> fineStatuses(String text) {
-        if (containsAny(text, "已支付", "paid")) return List.of("Paid");
-        if (containsAny(text, "部分支付", "partial")) return List.of("Partial");
         if (containsAny(text, "逾期", "overdue")) return List.of("Overdue");
         if (containsAny(text, "减免", "waived")) return List.of("Waived");
+        if (containsAny(text, "部分支付", "partial")) return List.of("Partial");
         if (containsAny(text, "未支付", "待缴", "unpaid")) return List.of("Unpaid");
+        if (containsAny(text, "已支付", "paid")) return List.of("Paid");
         return List.of();
     }
 

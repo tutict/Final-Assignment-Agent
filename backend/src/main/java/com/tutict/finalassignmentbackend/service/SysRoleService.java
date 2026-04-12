@@ -3,6 +3,7 @@ package com.tutict.finalassignmentbackend.service;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.tutict.finalassignmentbackend.config.login.jwt.AuthenticationSnapshotService;
 import com.tutict.finalassignmentbackend.config.websocket.WsAction;
 import com.tutict.finalassignmentbackend.entity.SysRequestHistory;
 import com.tutict.finalassignmentbackend.entity.SysRole;
@@ -32,24 +33,36 @@ public class SysRoleService {
 
     private static final Logger log = Logger.getLogger(SysRoleService.class.getName());
     private static final String CACHE_NAME = "sysRoleCache";
+    private static final int FULL_LOAD_BATCH_SIZE = 500;
 
     private final SysRoleMapper sysRoleMapper;
     private final SysRequestHistoryMapper sysRequestHistoryMapper;
     private final SysRoleSearchRepository sysRoleSearchRepository;
     private final KafkaTemplate<String, String> kafkaTemplate;
     private final ObjectMapper objectMapper;
+    private final AuthenticationSnapshotService authenticationSnapshotService;
 
     @Autowired
     public SysRoleService(SysRoleMapper sysRoleMapper,
                           SysRequestHistoryMapper sysRequestHistoryMapper,
                           SysRoleSearchRepository sysRoleSearchRepository,
                           KafkaTemplate<String, String> kafkaTemplate,
-                          ObjectMapper objectMapper) {
+                          ObjectMapper objectMapper,
+                          AuthenticationSnapshotService authenticationSnapshotService) {
         this.sysRoleMapper = sysRoleMapper;
         this.sysRequestHistoryMapper = sysRequestHistoryMapper;
         this.sysRoleSearchRepository = sysRoleSearchRepository;
         this.kafkaTemplate = kafkaTemplate;
         this.objectMapper = objectMapper;
+        this.authenticationSnapshotService = authenticationSnapshotService;
+    }
+
+    public SysRoleService(SysRoleMapper sysRoleMapper,
+                          SysRequestHistoryMapper sysRequestHistoryMapper,
+                          SysRoleSearchRepository sysRoleSearchRepository,
+                          KafkaTemplate<String, String> kafkaTemplate,
+                          ObjectMapper objectMapper) {
+        this(sysRoleMapper, sysRequestHistoryMapper, sysRoleSearchRepository, kafkaTemplate, objectMapper, null);
     }
 
     @Transactional
@@ -74,6 +87,7 @@ public class SysRoleService {
     public SysRole createSysRole(SysRole sysRole) {
         validateSysRole(sysRole);
         sysRoleMapper.insert(sysRole);
+        evictAuthenticationSnapshots();
         syncToIndexAfterCommit(sysRole);
         return sysRole;
     }
@@ -87,6 +101,7 @@ public class SysRoleService {
         if (rows == 0) {
             throw new IllegalStateException("SysRole not found for id=" + sysRole.getRoleId());
         }
+        evictAuthenticationSnapshots();
         syncToIndexAfterCommit(sysRole);
         return sysRole;
     }
@@ -99,7 +114,14 @@ public class SysRoleService {
         if (rows == 0) {
             throw new IllegalStateException("SysRole not found for id=" + roleId);
         }
+        evictAuthenticationSnapshots();
         runAfterCommitOrNow(() -> sysRoleSearchRepository.deleteById(roleId));
+    }
+
+    private void evictAuthenticationSnapshots() {
+        if (authenticationSnapshotService != null) {
+            authenticationSnapshotService.evictAll();
+        }
     }
 
     @Transactional(readOnly = true)
@@ -118,7 +140,6 @@ public class SysRoleService {
     }
 
     @Transactional(readOnly = true)
-    @Cacheable(cacheNames = CACHE_NAME, key = "'all'", unless = "#result == null || #result.isEmpty()")
     public List<SysRole> findAll() {
         List<SysRole> fromIndex = StreamSupport.stream(sysRoleSearchRepository.findAll().spliterator(), false)
                 .map(SysRoleDocument::toEntity)
@@ -126,9 +147,7 @@ public class SysRoleService {
         if (!fromIndex.isEmpty()) {
             return fromIndex;
         }
-        List<SysRole> fromDb = sysRoleMapper.selectList(null);
-        syncBatchToIndexAfterCommit(fromDb);
-        return fromDb;
+        return loadAllFromDatabase();
     }
 
     @Transactional(readOnly = true)
@@ -422,6 +441,28 @@ public class SysRoleService {
         List<SysRole> records = mpPage.getRecords();
         syncBatchToIndexAfterCommit(records);
         return records;
+    }
+
+    private List<SysRole> loadAllFromDatabase() {
+        List<SysRole> allRecords = new java.util.ArrayList<>();
+        long currentPage = 1L;
+        while (true) {
+            QueryWrapper<SysRole> wrapper = new QueryWrapper<>();
+            wrapper.orderByAsc("role_id");
+            Page<SysRole> mpPage = new Page<>(currentPage, FULL_LOAD_BATCH_SIZE);
+            sysRoleMapper.selectPage(mpPage, wrapper);
+            List<SysRole> records = mpPage.getRecords();
+            if (records == null || records.isEmpty()) {
+                break;
+            }
+            allRecords.addAll(records);
+            syncBatchToIndexAfterCommit(records);
+            if (records.size() < FULL_LOAD_BATCH_SIZE) {
+                break;
+            }
+            currentPage++;
+        }
+        return allRecords;
     }
 
     private List<SysRole> mapHits(org.springframework.data.elasticsearch.core.SearchHits<SysRoleDocument> hits) {

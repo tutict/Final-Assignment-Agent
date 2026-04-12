@@ -1,6 +1,5 @@
 import 'package:final_assignment_front/utils/services/authentication.dart';
 import 'package:final_assignment_front/utils/services/query_param.dart';
-import 'package:flutter/material.dart';
 
 class HttpBearerAuth implements Authentication {
   dynamic _accessToken;
@@ -21,9 +20,6 @@ class HttpBearerAuth implements Authentication {
             'Type of Bearer accessToken should be String or String Function().');
       }
       headerParams["Authorization"] = "Bearer $token";
-      debugPrint('Applied Authorization header: Bearer $token');
-    } else {
-      debugPrint('No access token set for HttpBearerAuth');
     }
   }
 
@@ -33,7 +29,6 @@ class HttpBearerAuth implements Authentication {
           'Type of Bearer accessToken should be String or String Function().');
     }
     _accessToken = accessToken;
-    debugPrint('Set access token: $_accessToken');
   }
 
   /// Returns the resolved token string if available, otherwise null.

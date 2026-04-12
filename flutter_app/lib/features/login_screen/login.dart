@@ -208,11 +208,7 @@ class _LoginScreenState extends State<LoginScreen> with ValidatorMixin {
       final prefs = await SharedPreferences.getInstance();
       await AuthTokenStore.instance.setJwtToken(jwtToken);
       final refreshToken = result['refreshToken']?.toString();
-      if (refreshToken != null && refreshToken.isNotEmpty) {
-        await prefs.setString('refreshToken', refreshToken);
-      } else {
-        await prefs.remove('refreshToken');
-      }
+      await AuthTokenStore.instance.setRefreshToken(refreshToken);
       await prefs.setString('userRole', _userRole!);
       await prefs.setStringList('userRoles', roleCodes);
       await prefs.setString('userName', username);

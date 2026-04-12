@@ -37,6 +37,7 @@ public class AuditOperationLogService {
 
     private static final Logger log = Logger.getLogger(AuditOperationLogService.class.getName());
     private static final String CACHE_NAME = "auditOperationLogCache";
+    private static final int FULL_LOAD_BATCH_SIZE = 500;
 
     private final AuditOperationLogMapper auditOperationLogMapper;
     private final SysRequestHistoryMapper sysRequestHistoryMapper;
@@ -128,7 +129,6 @@ public class AuditOperationLogService {
     }
 
     @Transactional(readOnly = true)
-    @Cacheable(cacheNames = CACHE_NAME, key = "'all'", unless = "#result == null || #result.isEmpty()")
     public List<AuditOperationLog> findAll() {
         List<AuditOperationLog> fromIndex = StreamSupport.stream(auditOperationLogSearchRepository.findAll().spliterator(), false)
                 .map(AuditOperationLogDocument::toEntity)
@@ -136,9 +136,7 @@ public class AuditOperationLogService {
         if (!fromIndex.isEmpty()) {
             return fromIndex;
         }
-        List<AuditOperationLog> fromDb = auditOperationLogMapper.selectList(null);
-        syncBatchToIndexAfterCommit(fromDb);
-        return fromDb;
+        return loadAllFromDatabase();
     }
 
     @Transactional(readOnly = true)
@@ -439,6 +437,29 @@ public class AuditOperationLogService {
         List<AuditOperationLog> records = mpPage.getRecords();
         syncBatchToIndexAfterCommit(records);
         return records;
+    }
+
+    private List<AuditOperationLog> loadAllFromDatabase() {
+        QueryWrapper<AuditOperationLog> wrapper = new QueryWrapper<>();
+        wrapper.orderByAsc("log_id");
+
+        List<AuditOperationLog> allRecords = new java.util.ArrayList<>();
+        long pageNumber = 1L;
+        while (true) {
+            Page<AuditOperationLog> batchPage = new Page<>(pageNumber, FULL_LOAD_BATCH_SIZE);
+            auditOperationLogMapper.selectPage(batchPage, wrapper);
+            List<AuditOperationLog> records = batchPage.getRecords();
+            if (records == null || records.isEmpty()) {
+                break;
+            }
+            allRecords.addAll(records);
+            syncBatchToIndexAfterCommit(records);
+            if (records.size() < FULL_LOAD_BATCH_SIZE) {
+                break;
+            }
+            pageNumber++;
+        }
+        return allRecords;
     }
 
     private List<AuditOperationLog> mapHits(SearchHits<AuditOperationLogDocument> hits) {

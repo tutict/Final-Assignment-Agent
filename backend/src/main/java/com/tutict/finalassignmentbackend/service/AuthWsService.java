@@ -22,21 +22,31 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.stream.Collectors;
 
 @Service
 public class AuthWsService {
+    private static final int DEFAULT_USER_LIST_PAGE = 1;
+    private static final int DEFAULT_USER_LIST_SIZE = 100;
+
 
     private static final Logger logger = Logger.getLogger(AuthWsService.class.getName());
     private static final int MAX_ROLE_PAGE_SIZE = 100;
+    private static final int MAX_FAILED_LOGIN_ATTEMPTS = 5;
+    private static final int LOGIN_FAILURE_WINDOW_MINUTES = 15;
+    private static final int LOGIN_LOCKOUT_MINUTES = 15;
+    private static final String SYSTEM_LOGIN_IP = "127.0.0.1";
 
     private final TokenProvider tokenProvider;
     private final AuditLoginLogService auditLoginLogService;
     private final SysUserService sysUserService;
     private final SysRoleService sysRoleService;
     private final SysUserRoleService sysUserRoleService;
+    private final ConcurrentMap<String, LoginThrottleState> loginThrottleStates = new ConcurrentHashMap<>();
 
     @Autowired
     public AuthWsService(TokenProvider tokenProvider,
@@ -52,34 +62,47 @@ public class AuthWsService {
     }
 
     @CacheEvict(cacheNames = "AuthCache", allEntries = true)
-    @WsAction(service = "AuthWsService", action = "login")
+    @WsAction(service = "AuthWsService", action = "login", exposed = true, allowAnonymous = true)
     public Map<String, Object> login(LoginRequest loginRequest) {
         validateLoginRequest(loginRequest);
+        String username = loginRequest.getUsername().trim();
+        String throttleKey = normalizeThrottleKey(username);
+        ensureLoginIsAllowed(throttleKey);
 
-        logger.info(() -> String.format("[WS] Attempting to authenticate user: %s", loginRequest.getUsername()));
-        SysUser user = sysUserService.findByUsername(loginRequest.getUsername());
+        logger.info(() -> String.format("[WS] Attempting to authenticate user: %s", username));
+        SysUser user = sysUserService.findByUsername(username);
 
         if (user != null && sysUserService.verifyPassword(user, loginRequest.getPassword())) {
             RoleAggregation aggregation = aggregateRoles(user.getUserId());
             if (aggregation.getRoleCodes().isEmpty()) {
-                logger.severe(() -> String.format("No roles found for user: %s", loginRequest.getUsername()));
-                recordFailedLogin(loginRequest.getUsername(), "NO_ROLES_ASSIGNED");
+                clearFailedAttempts(throttleKey);
+                sysUserService.resetLoginFailures(user);
+                logger.severe(() -> String.format("No roles found for user: %s", username));
+                recordFailedLogin(username, "NO_ROLES_ASSIGNED");
                 throw new RuntimeException("No roles assigned to user.");
             }
+            clearFailedAttempts(throttleKey);
+            sysUserService.recordSuccessfulLogin(user, SYSTEM_LOGIN_IP);
             logger.info(() -> String.format("User authenticated successfully (WS): %s with roles: %s",
-                    loginRequest.getUsername(), String.join(",", aggregation.getRoleCodes())));
+                    username, String.join(",", aggregation.getRoleCodes())));
             Map<String, Object> response = buildAuthenticationResponse(user, aggregation);
-            recordSuccessfulLogin(loginRequest.getUsername(), (String) response.get("jwtToken"));
+            recordSuccessfulLogin(username);
             return response;
         }
 
-        logger.severe(() -> String.format("Authentication failed (WS) for user: %s", loginRequest.getUsername()));
-        recordFailedLogin(loginRequest.getUsername(), "INVALID_CREDENTIALS");
-        throw new RuntimeException("Invalid username or password.");
+        if (user != null) {
+            sysUserService.recordLoginFailure(user);
+        }
+        boolean locked = registerFailedAttempt(throttleKey);
+        logger.severe(() -> String.format("Authentication failed (WS) for user: %s", username));
+        recordFailedLogin(username, locked ? "TOO_MANY_ATTEMPTS" : "INVALID_CREDENTIALS");
+        throw new RuntimeException(locked
+                ? "Too many failed login attempts. Please try again later."
+                : "Invalid username or password.");
     }
 
     @CacheEvict(cacheNames = "AuthCache", allEntries = true)
-    @WsAction(service = "AuthWsService", action = "refreshToken")
+    @WsAction(service = "AuthWsService", action = "refreshToken", exposed = true, allowAnonymous = true)
     public Map<String, Object> refreshToken(String refreshToken) {
         if (!StringUtils.hasText(refreshToken) || !tokenProvider.validateToken(refreshToken)) {
             throw new RuntimeException("Invalid refresh token.");
@@ -103,7 +126,7 @@ public class AuthWsService {
 
     @Transactional
     @CacheEvict(cacheNames = {"AuthCache", "usernameExistsCache"}, allEntries = true)
-    @WsAction(service = "AuthWsService", action = "registerUser")
+    @WsAction(service = "AuthWsService", action = "registerUser", exposed = true, allowAnonymous = true)
     public String registerUser(RegisterRequest registerRequest) {
         validateRegisterRequest(registerRequest);
         logger.info(() -> String.format("Attempting to register user: %s", registerRequest.getUsername()));
@@ -165,10 +188,14 @@ public class AuthWsService {
     }
 
     @CacheEvict(cacheNames = "AuthCache", allEntries = true)
-    @WsAction(service = "AuthWsService", action = "getAllUsers")
+    @WsAction(service = "AuthWsService", action = "getAllUsers", exposed = true, rolesAllowed = {"SUPER_ADMIN", "ADMIN"})
     public List<SysUser> getAllUsers() {
-        logger.info("[WS] Fetching all users");
-        List<SysUser> users = sysUserService.getAllUsers();
+        return getUsers(DEFAULT_USER_LIST_PAGE, DEFAULT_USER_LIST_SIZE);
+    }
+
+    public List<SysUser> getUsers(int page, int size) {
+        logger.info(() -> String.format("[WS] Fetching users page=%d size=%d", page, size));
+        List<SysUser> users = sysUserService.listUsers(page, size);
         if (users.isEmpty()) {
             logger.warning("No users found in the system");
         }
@@ -276,17 +303,17 @@ public class AuthWsService {
         sysUserRoleService.createRelation(relation);
     }
 
-    private void recordSuccessfulLogin(String username, String jwtToken) {
-        AuditLoginLog loginLog = buildLoginLog(username, "SUCCESS", null, jwtToken);
+    private void recordSuccessfulLogin(String username) {
+        AuditLoginLog loginLog = buildLoginLog(username, "SUCCESS", null);
         persistLoginAudit(loginLog);
     }
 
     private void recordFailedLogin(String username, String reason) {
-        AuditLoginLog loginLog = buildLoginLog(username, "FAILED", reason, null);
+        AuditLoginLog loginLog = buildLoginLog(username, "FAILED", reason);
         persistLoginAudit(loginLog);
     }
 
-    private AuditLoginLog buildLoginLog(String username, String loginResult, String failureReason, String jwtToken) {
+    private AuditLoginLog buildLoginLog(String username, String loginResult, String failureReason) {
         AuditLoginLog loginLog = new AuditLoginLog();
         loginLog.setUsername(username);
         loginLog.setLoginTime(LocalDateTime.now());
@@ -301,10 +328,68 @@ public class AuthWsService {
         loginLog.setDeviceType("SERVER");
         loginLog.setUserAgent("AuthWsService");
         loginLog.setSessionId("SYSTEM");
-        loginLog.setToken(jwtToken);
+        loginLog.setToken(null);
         loginLog.setCreatedAt(LocalDateTime.now());
         loginLog.setRemarks("SYSTEM_MANAGED_LOGIN_AUDIT");
         return loginLog;
+    }
+
+    private String normalizeThrottleKey(String username) {
+        return username == null ? "" : username.trim().toLowerCase(Locale.ROOT);
+    }
+
+    private void ensureLoginIsAllowed(String throttleKey) {
+        if (!StringUtils.hasText(throttleKey)) {
+            return;
+        }
+        LoginThrottleState state = loginThrottleStates.get(throttleKey);
+        if (state == null) {
+            return;
+        }
+        synchronized (state) {
+            LocalDateTime now = LocalDateTime.now();
+            if (state.lockedUntil != null && state.lockedUntil.isAfter(now)) {
+                throw new RuntimeException("Too many failed login attempts. Please try again later.");
+            }
+            if (state.lockedUntil != null || isFailureWindowExpired(state, now)) {
+                loginThrottleStates.remove(throttleKey, state);
+            }
+        }
+    }
+
+    private boolean registerFailedAttempt(String throttleKey) {
+        if (!StringUtils.hasText(throttleKey)) {
+            return false;
+        }
+        LocalDateTime now = LocalDateTime.now();
+        LoginThrottleState state = loginThrottleStates.computeIfAbsent(throttleKey, ignored -> new LoginThrottleState());
+        synchronized (state) {
+            if (isFailureWindowExpired(state, now)) {
+                state.failedAttempts = 0;
+                state.firstFailureAt = null;
+                state.lockedUntil = null;
+            }
+            if (state.firstFailureAt == null) {
+                state.firstFailureAt = now;
+            }
+            state.failedAttempts++;
+            if (state.failedAttempts >= MAX_FAILED_LOGIN_ATTEMPTS) {
+                state.lockedUntil = now.plusMinutes(LOGIN_LOCKOUT_MINUTES);
+                return true;
+            }
+            return false;
+        }
+    }
+
+    private void clearFailedAttempts(String throttleKey) {
+        if (StringUtils.hasText(throttleKey)) {
+            loginThrottleStates.remove(throttleKey);
+        }
+    }
+
+    private boolean isFailureWindowExpired(LoginThrottleState state, LocalDateTime now) {
+        return state.firstFailureAt != null
+                && state.firstFailureAt.plusMinutes(LOGIN_FAILURE_WINDOW_MINUTES).isBefore(now);
     }
 
     private void persistLoginAudit(AuditLoginLog loginLog) {
@@ -462,5 +547,11 @@ public class AuthWsService {
     @Data
     public static class RefreshRequest {
         private String refreshToken;
+    }
+
+    private static final class LoginThrottleState {
+        private int failedAttempts;
+        private LocalDateTime firstFailureAt;
+        private LocalDateTime lockedUntil;
     }
 }

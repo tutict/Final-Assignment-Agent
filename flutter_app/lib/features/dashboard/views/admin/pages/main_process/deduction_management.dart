@@ -9,10 +9,10 @@ import 'package:final_assignment_front/features/model/deduction_record.dart';
 import 'package:final_assignment_front/features/model/offense_information.dart';
 import 'package:final_assignment_front/i18n/deduction_localizers.dart';
 import 'package:final_assignment_front/utils/helpers/role_utils.dart';
+import 'package:final_assignment_front/utils/services/auth_token_store.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:jwt_decoder/jwt_decoder.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 
 class DeductionManagement extends StatefulWidget {
@@ -62,8 +62,7 @@ class _DeductionManagementState extends State<DeductionManagement> {
   }
 
   Future<bool> _validateJwtToken() async {
-    final prefs = await SharedPreferences.getInstance();
-    final jwtToken = prefs.getString('jwtToken');
+    final jwtToken = await AuthTokenStore.instance.getJwtToken();
     if (jwtToken == null || jwtToken.isEmpty) {
       setState(() {
         _statusMessage = 'deductionAdmin.error.unauthorized'.tr;
@@ -99,8 +98,7 @@ class _DeductionManagementState extends State<DeductionManagement> {
         return;
       }
       await deductionApi.initializeWithJwt();
-      final prefs = await SharedPreferences.getInstance();
-      final jwtToken = prefs.getString('jwtToken')!;
+      final jwtToken = (await AuthTokenStore.instance.getJwtToken())!;
       final decodedToken = JwtDecoder.decode(jwtToken);
       _isAdmin = hasAnyRole(decodedToken['roles'], const [
         'SUPER_ADMIN',

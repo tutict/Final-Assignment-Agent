@@ -32,6 +32,7 @@ public class SysPermissionService {
 
     private static final Logger log = Logger.getLogger(SysPermissionService.class.getName());
     private static final String CACHE_NAME = "sysPermissionCache";
+    private static final int FULL_LOAD_BATCH_SIZE = 500;
 
     private final SysPermissionMapper sysPermissionMapper;
     private final SysRequestHistoryMapper sysRequestHistoryMapper;
@@ -118,7 +119,6 @@ public class SysPermissionService {
     }
 
     @Transactional(readOnly = true)
-    @Cacheable(cacheNames = CACHE_NAME, key = "'all'", unless = "#result == null || #result.isEmpty()")
     public List<SysPermission> findAll() {
         List<SysPermission> fromIndex = StreamSupport.stream(sysPermissionSearchRepository.findAll().spliterator(), false)
                 .map(SysPermissionDocument::toEntity)
@@ -126,9 +126,7 @@ public class SysPermissionService {
         if (!fromIndex.isEmpty()) {
             return fromIndex;
         }
-        List<SysPermission> fromDb = sysPermissionMapper.selectList(null);
-        syncBatchToIndexAfterCommit(fromDb);
-        return fromDb;
+        return loadAllFromDatabase();
     }
 
     @Transactional(readOnly = true)
@@ -455,6 +453,28 @@ public class SysPermissionService {
         List<SysPermission> records = mpPage.getRecords();
         syncBatchToIndexAfterCommit(records);
         return records;
+    }
+
+    private List<SysPermission> loadAllFromDatabase() {
+        List<SysPermission> allRecords = new java.util.ArrayList<>();
+        long currentPage = 1L;
+        while (true) {
+            QueryWrapper<SysPermission> wrapper = new QueryWrapper<>();
+            wrapper.orderByAsc("permission_id");
+            Page<SysPermission> mpPage = new Page<>(currentPage, FULL_LOAD_BATCH_SIZE);
+            sysPermissionMapper.selectPage(mpPage, wrapper);
+            List<SysPermission> records = mpPage.getRecords();
+            if (records == null || records.isEmpty()) {
+                break;
+            }
+            allRecords.addAll(records);
+            syncBatchToIndexAfterCommit(records);
+            if (records.size() < FULL_LOAD_BATCH_SIZE) {
+                break;
+            }
+            currentPage++;
+        }
+        return allRecords;
     }
 
     private List<SysPermission> mapHits(org.springframework.data.elasticsearch.core.SearchHits<SysPermissionDocument> hits) {

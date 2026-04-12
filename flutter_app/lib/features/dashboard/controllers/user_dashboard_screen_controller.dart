@@ -11,6 +11,7 @@ import 'package:final_assignment_front/features/dashboard/models/profile.dart';
 import 'package:final_assignment_front/shared_components/case_card.dart';
 import 'package:final_assignment_front/shared_components/project_card.dart';
 import 'package:final_assignment_front/utils/helpers/app_helpers.dart';
+import 'package:final_assignment_front/utils/services/auth_token_store.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:get/get.dart';
@@ -77,19 +78,15 @@ class UserDashboardController extends GetxController {
     isLoadingUser.value = true;
     try {
       final prefs = await SharedPreferences.getInstance();
-      final jwtToken = prefs.getString('jwtToken');
+      final jwtToken = await AuthTokenStore.instance.getJwtToken();
       final userName = prefs.getString('userName');
       final displayName =
           prefs.getString('displayName') ?? prefs.getString('driverName');
       final userEmail = prefs.getString('userEmail');
-      final userRole = prefs.getString('userRole');
       final resolvedDisplayName =
           (displayName != null && displayName.isNotEmpty)
               ? displayName
               : userName;
-
-      developer.log(
-          'Loading user from prefs: jwtToken=$jwtToken, userName=$userName, displayName=$resolvedDisplayName, userEmail=$userEmail, userRole=$userRole');
 
       if (jwtToken != null &&
           userName != null &&

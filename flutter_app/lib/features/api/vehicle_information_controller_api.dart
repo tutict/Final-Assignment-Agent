@@ -3,7 +3,6 @@ import 'package:final_assignment_front/features/model/vehicle_information.dart';
 import 'package:final_assignment_front/i18n/api_error_localizers.dart';
 import 'package:final_assignment_front/utils/helpers/api_exception.dart';
 import 'package:final_assignment_front/utils/services/api_client.dart';
-import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:http/http.dart' as http;
 import 'package:final_assignment_front/utils/services/auth_token_store.dart';
@@ -21,8 +20,6 @@ class VehicleInformationControllerApi {
       throw Exception('api.error.notAuthenticated'.tr);
     }
     apiClient.setJwtToken(jwtToken);
-    debugPrint(
-        'Initialized VehicleInformationControllerApi with token: $jwtToken');
   }
 
   String _decode(http.Response r) => r.body;
@@ -71,12 +68,18 @@ class VehicleInformationControllerApi {
     return data.map((e) => VehicleInformation.fromJson(e)).toList();
   }
 
-  // GET /api/vehicles/me
-  Future<List<VehicleInformation>> apiVehiclesMeGet() async {
+  // GET /api/vehicles/me?page=&size=
+  Future<List<VehicleInformation>> apiVehiclesMeGet({
+    int page = 1,
+    int size = 100,
+  }) async {
     final r = await apiClient.invokeAPI(
       '/api/vehicles/me',
       'GET',
-      const [],
+      [
+        QueryParam('page', '$page'),
+        QueryParam('size', '$size'),
+      ],
       null,
       await _headers(),
       const {},
@@ -295,11 +298,15 @@ class VehicleInformationControllerApi {
 
   // GET /api/vehicles/search/type?type=
   Future<List<VehicleInformation>> apiVehiclesSearchTypeGet(
-      {required String type}) async {
+      {required String type, int page = 1, int size = 20}) async {
     final r = await apiClient.invokeAPI(
       '/api/vehicles/search/type',
       'GET',
-      [QueryParam('type', type)],
+      [
+        QueryParam('type', type),
+        QueryParam('page', '$page'),
+        QueryParam('size', '$size'),
+      ],
       null,
       await _headers(),
       const {},

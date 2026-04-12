@@ -9,9 +9,13 @@ import java.lang.annotation.Target;
 @Target(ElementType.METHOD)
 public @interface WsAction {
 
-    // 调用的服务
     String service();
 
-    // 调用的服务中的方法
     String action();
+
+    boolean exposed() default false;
+
+    boolean allowAnonymous() default false;
+
+    String[] rolesAllowed() default {};
 }

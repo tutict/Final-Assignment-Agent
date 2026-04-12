@@ -44,6 +44,7 @@ public class VehicleInformationService {
 
     private static final Logger log = Logger.getLogger(VehicleInformationService.class.getName());
     private static final String CACHE_NAME = "vehicleCache";
+    private static final int FULL_LOAD_BATCH_SIZE = 500;
 
     private final VehicleInformationMapper vehicleInformationMapper;
     private final DriverVehicleMapper driverVehicleMapper;
@@ -155,7 +156,6 @@ public class VehicleInformationService {
                 });
     }
 
-    @Cacheable(cacheNames = CACHE_NAME, key = "'all'", unless = "#result == null || #result.isEmpty()")
     @WsAction(service = "VehicleInformationService", action = "getAllVehicleInformation")
     public List<VehicleInformation> getAllVehicleInformation() {
         List<VehicleInformation> fromIndex = StreamSupport.stream(
@@ -165,9 +165,7 @@ public class VehicleInformationService {
         if (!fromIndex.isEmpty()) {
             return fromIndex;
         }
-        List<VehicleInformation> db = vehicleInformationMapper.selectList(null);
-        syncBatchToIndexAfterCommit(db);
-        return db;
+        return loadAllFromDatabase();
     }
 
     @Cacheable(cacheNames = CACHE_NAME, key = "'page:' + #page + ':' + #size")
@@ -236,24 +234,41 @@ public class VehicleInformationService {
     public List<VehicleInformation> getVehicleInformationByType(String vehicleType) {
         validateInput(vehicleType, "Invalid vehicle type");
         QueryWrapper<VehicleInformation> wrapper = new QueryWrapper<>();
-        wrapper.eq("vehicle_type", vehicleType);
-        return vehicleInformationMapper.selectList(wrapper);
+        wrapper.eq("vehicle_type", vehicleType)
+                .orderByDesc("updated_at")
+                .orderByDesc("vehicle_id");
+        return loadMatchingFromDatabase(wrapper);
+    }
+
+    @Cacheable(cacheNames = CACHE_NAME, key = "'typeSearch:' + #vehicleType + ':' + #page + ':' + #size")
+    public List<VehicleInformation> searchByVehicleType(String vehicleType, int page, int size) {
+        validateInput(vehicleType, "Invalid vehicle type");
+        validatePagination(page, size);
+        QueryWrapper<VehicleInformation> wrapper = new QueryWrapper<>();
+        wrapper.eq("vehicle_type", vehicleType)
+                .orderByDesc("updated_at")
+                .orderByDesc("vehicle_id");
+        return fetchFromDatabase(wrapper, page, size);
     }
 
     @Cacheable(cacheNames = CACHE_NAME, key = "'owner:' + #ownerName")
     public List<VehicleInformation> getVehicleInformationByOwnerName(String ownerName) {
         validateInput(ownerName, "Invalid owner name");
         QueryWrapper<VehicleInformation> wrapper = new QueryWrapper<>();
-        wrapper.eq("owner_name", ownerName);
-        return vehicleInformationMapper.selectList(wrapper);
+        wrapper.eq("owner_name", ownerName)
+                .orderByDesc("updated_at")
+                .orderByDesc("vehicle_id");
+        return loadMatchingFromDatabase(wrapper);
     }
 
     @Cacheable(cacheNames = CACHE_NAME, key = "'idcard:' + #idCardNumber")
     public List<VehicleInformation> getVehicleInformationByIdCardNumber(String idCardNumber) {
         validateInput(idCardNumber, "Invalid ID card number");
         QueryWrapper<VehicleInformation> wrapper = new QueryWrapper<>();
-        wrapper.eq("owner_id_card", idCardNumber);
-        return vehicleInformationMapper.selectList(wrapper);
+        wrapper.eq("owner_id_card", idCardNumber)
+                .orderByDesc("updated_at")
+                .orderByDesc("vehicle_id");
+        return loadMatchingFromDatabase(wrapper);
     }
 
     @Transactional
@@ -299,8 +314,10 @@ public class VehicleInformationService {
     public List<VehicleInformation> getVehicleInformationByStatus(String status) {
         validateInput(status, "Invalid status");
         QueryWrapper<VehicleInformation> wrapper = new QueryWrapper<>();
-        wrapper.eq("status", status);
-        return vehicleInformationMapper.selectList(wrapper);
+        wrapper.eq("status", status)
+                .orderByDesc("updated_at")
+                .orderByDesc("vehicle_id");
+        return loadMatchingFromDatabase(wrapper);
     }
 
     @Cacheable(cacheNames = CACHE_NAME, key = "'ownerNameSearch:' + #ownerName + ':' + #page + ':' + #size")
@@ -337,6 +354,22 @@ public class VehicleInformationService {
         return fetchFromDatabase(wrapper, page, size);
     }
 
+    @Transactional(readOnly = true)
+    public List<Long> findIdsByOwnerIdCard(String ownerIdCard) {
+        validateInput(ownerIdCard, "Invalid owner id card");
+        QueryWrapper<VehicleInformation> wrapper = new QueryWrapper<>();
+        wrapper.select("vehicle_id")
+                .eq("owner_id_card", ownerIdCard.trim())
+                .orderByDesc("updated_at")
+                .orderByDesc("vehicle_id");
+        return vehicleInformationMapper.selectObjs(wrapper).stream()
+                .filter(Objects::nonNull)
+                .map(this::toLong)
+                .filter(Objects::nonNull)
+                .distinct()
+                .collect(Collectors.toList());
+    }
+
     @Cacheable(cacheNames = CACHE_NAME, key = "'statusSearch:' + #status + ':' + #page + ':' + #size")
     public List<VehicleInformation> searchByStatus(String status, int page, int size) {
         validateInput(status, "Invalid status");
@@ -357,22 +390,22 @@ public class VehicleInformationService {
     @Cacheable(cacheNames = CACHE_NAME, key = "'search:' + #query + ':' + #page + ':' + #size")
     public List<VehicleInformation> searchVehicles(String query, int page, int size) {
         validatePagination(page, size);
-        if (query == null || query.trim().isEmpty()) {
+        String normalizedQuery = query == null ? null : query.trim();
+        if (normalizedQuery == null || normalizedQuery.isEmpty()) {
             return Collections.emptyList();
         }
         QueryWrapper<VehicleInformation> wrapper = new QueryWrapper<>();
         wrapper.lambda()
-                .like(VehicleInformation::getLicensePlate, query)
+                .like(VehicleInformation::getLicensePlate, normalizedQuery)
                 .or()
-                .like(VehicleInformation::getOwnerName, query)
+                .like(VehicleInformation::getOwnerName, normalizedQuery)
                 .or()
-                .like(VehicleInformation::getVehicleType, query)
+                .like(VehicleInformation::getVehicleType, normalizedQuery)
                 .or()
-                .like(VehicleInformation::getBrand, query);
-        List<VehicleInformation> list = vehicleInformationMapper.selectList(wrapper);
-        int fromIndex = Math.min((page - 1) * size, list.size());
-        int toIndex = Math.min(fromIndex + size, list.size());
-        return list.subList(fromIndex, toIndex);
+                .like(VehicleInformation::getBrand, normalizedQuery);
+        wrapper.orderByDesc("updated_at")
+                .orderByDesc("vehicle_id");
+        return fetchFromDatabase(wrapper, page, size);
     }
 
     @Cacheable(cacheNames = CACHE_NAME, key = "'autocomplete:me:' + #idCardNumber + ':' + #prefix + ':' + #maxSuggestions")
@@ -398,14 +431,18 @@ public class VehicleInformationService {
     @Cacheable(cacheNames = CACHE_NAME, key = "'autocomplete:type:global:' + #prefix + ':' + #maxSuggestions")
     public List<String> getVehicleTypesByPrefixGlobally(String prefix, int maxSuggestions) {
         validateInput(prefix, "Invalid vehicle type prefix");
+        int normalizedLimit = Math.max(maxSuggestions, 1);
         QueryWrapper<VehicleInformation> wrapper = new QueryWrapper<>();
-        wrapper.select("DISTINCT vehicle_type").like("vehicle_type", prefix);
+        wrapper.select("DISTINCT vehicle_type")
+                .likeRight("vehicle_type", prefix)
+                .orderByAsc("vehicle_type")
+                .last("limit " + normalizedLimit);
         List<VehicleInformation> result = vehicleInformationMapper.selectList(wrapper);
         return result.stream()
                 .map(VehicleInformation::getVehicleType)
                 .filter(Objects::nonNull)
                 .map(type -> URLDecoder.decode(type, StandardCharsets.UTF_8))
-                .limit(Math.max(maxSuggestions, 1))
+                .limit(normalizedLimit)
                 .collect(Collectors.toList());
     }
 
@@ -463,6 +500,49 @@ public class VehicleInformationService {
         List<VehicleInformation> records = mpPage.getRecords();
         syncBatchToIndexAfterCommit(records);
         return records;
+    }
+
+    private List<VehicleInformation> loadMatchingFromDatabase(QueryWrapper<VehicleInformation> wrapper) {
+        List<VehicleInformation> allRecords = new ArrayList<>();
+        long pageNumber = 1L;
+        while (true) {
+            Page<VehicleInformation> batchPage = new Page<>(pageNumber, FULL_LOAD_BATCH_SIZE);
+            vehicleInformationMapper.selectPage(batchPage, wrapper);
+            List<VehicleInformation> records = batchPage.getRecords();
+            if (records == null || records.isEmpty()) {
+                break;
+            }
+            allRecords.addAll(records);
+            syncBatchToIndexAfterCommit(records);
+            if (records.size() < FULL_LOAD_BATCH_SIZE) {
+                break;
+            }
+            pageNumber++;
+        }
+        return allRecords;
+    }
+
+    private List<VehicleInformation> loadAllFromDatabase() {
+        QueryWrapper<VehicleInformation> wrapper = new QueryWrapper<>();
+        wrapper.orderByAsc("vehicle_id");
+
+        List<VehicleInformation> allRecords = new ArrayList<>();
+        long pageNumber = 1L;
+        while (true) {
+            Page<VehicleInformation> batchPage = new Page<>(pageNumber, FULL_LOAD_BATCH_SIZE);
+            vehicleInformationMapper.selectPage(batchPage, wrapper);
+            List<VehicleInformation> records = batchPage.getRecords();
+            if (records == null || records.isEmpty()) {
+                break;
+            }
+            allRecords.addAll(records);
+            syncBatchToIndexAfterCommit(records);
+            if (records.size() < FULL_LOAD_BATCH_SIZE) {
+                break;
+            }
+            pageNumber++;
+        }
+        return allRecords;
     }
 
     private SysRequestHistory buildHistory(String idempotencyKey, VehicleInformation vehicleInformation, String action) {
@@ -633,6 +713,20 @@ public class VehicleInformationService {
         if (page < 1 || size < 1) {
             throw new IllegalArgumentException("Page must be >= 1 and size must be >= 1");
         }
+    }
+
+    private Long toLong(Object value) {
+        if (value instanceof Number number) {
+            return number.longValue();
+        }
+        if (value instanceof String text) {
+            try {
+                return Long.parseLong(text.trim());
+            } catch (NumberFormatException ignored) {
+                return null;
+            }
+        }
+        return null;
     }
 
     private boolean isBlank(String value) {

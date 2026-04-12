@@ -5,7 +5,6 @@ import 'package:final_assignment_front/features/model/vehicle_information.dart';
 import 'package:final_assignment_front/i18n/api_error_localizers.dart';
 import 'package:final_assignment_front/utils/helpers/api_exception.dart';
 import 'package:final_assignment_front/utils/services/api_client.dart';
-import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:http/http.dart' as http;
 import 'package:final_assignment_front/utils/services/auth_token_store.dart';
@@ -27,8 +26,6 @@ class OffenseInformationControllerApi {
       throw Exception('api.error.notAuthenticated'.tr);
     }
     apiClient.setJwtToken(jwtToken);
-    debugPrint(
-        'Initialized OffenseInformationControllerApi with token: $jwtToken');
   }
 
   /// Decodes response bytes as UTF-8 text.
@@ -737,146 +734,4 @@ class OffenseInformationControllerApi {
     return jsonList.map((json) => OffenseInformation.fromJson(json)).toList();
   }
 
-  // WebSocket Methods (Aligned with HTTP Endpoints)
-
-  /// POST /api/offenses (WebSocket)
-  Future<void> eventbusOffensesPost({
-    required OffenseInformation offenseInformation,
-    required String idempotencyKey,
-  }) async {
-    final msg = {
-      'service': 'OffenseInformationService',
-      'action': 'checkAndInsertIdempotency',
-      'args': [idempotencyKey, offenseInformation.toJson(), 'create'],
-    };
-    final respMap = await apiClient.sendWsMessage(msg);
-    if (respMap.containsKey('error')) {
-      if (isDuplicateRequestApiError(respMap['error'])) {
-        throw ApiException(409, localizeDuplicateRequest(idempotencyKey));
-      }
-      throw ApiException(
-          400, localizeApiErrorMessageOrUnknown(respMap['error']));
-    }
-  }
-
-  /// GET /api/offenses/{offenseId} (WebSocket)
-  Future<OffenseInformation?> eventbusOffensesOffenseIdGet({
-    required int offenseId,
-  }) async {
-    final msg = {
-      'service': 'OffenseInformationService',
-      'action': 'getOffenseByOffenseId',
-      'args': [offenseId],
-    };
-    final respMap = await apiClient.sendWsMessage(msg);
-    if (respMap.containsKey('error')) {
-      if (isNotFoundApiError(respMap['error'])) {
-        return null; // Not found, return null
-      }
-      throw ApiException(
-          400, localizeApiErrorMessageOrUnknown(respMap['error']));
-    }
-    if (respMap['result'] == null) return null;
-    return OffenseInformation.fromJson(
-        respMap['result'] as Map<String, dynamic>);
-  }
-
-  /// GET /api/offenses (WebSocket)
-  Future<List<OffenseInformation>> eventbusOffensesGet() async {
-    final msg = {
-      'service': 'OffenseInformationService',
-      'action': 'getOffensesInformation',
-      'args': [],
-    };
-    final respMap = await apiClient.sendWsMessage(msg);
-    if (respMap.containsKey('error')) {
-      throw ApiException(
-          400, localizeApiErrorMessageOrUnknown(respMap['error']));
-    }
-    if (respMap['result'] is List) {
-      return (respMap['result'] as List)
-          .map((json) =>
-              OffenseInformation.fromJson(json as Map<String, dynamic>))
-          .toList();
-    }
-    return [];
-  }
-
-  /// PUT /api/offenses/{offenseId} (WebSocket)
-  Future<OffenseInformation?> eventbusOffensesOffenseIdPut({
-    required int offenseId,
-    required OffenseInformation offenseInformation,
-    required String idempotencyKey,
-  }) async {
-    final msg = {
-      'service': 'OffenseInformationService',
-      'action': 'checkAndInsertIdempotency',
-      'args': [idempotencyKey, offenseInformation.toJson(), 'update'],
-    };
-    final respMap = await apiClient.sendWsMessage(msg);
-    if (respMap.containsKey('error')) {
-      if (isNotFoundApiError(respMap['error'])) {
-        throw ApiException(
-          404,
-          localizeEntityNotFoundWithId('api.entity.offense'.tr, offenseId),
-        );
-      } else if (isDuplicateRequestApiError(respMap['error'])) {
-        throw ApiException(409, localizeDuplicateRequest(idempotencyKey));
-      }
-      throw ApiException(
-          400, localizeApiErrorMessageOrUnknown(respMap['error']));
-    }
-    if (respMap['result'] == null) return null;
-    return OffenseInformation.fromJson(
-        respMap['result'] as Map<String, dynamic>);
-  }
-
-  /// DELETE /api/offenses/{offenseId} (WebSocket)
-  Future<void> eventbusOffensesOffenseIdDelete({
-    required int offenseId,
-  }) async {
-    final msg = {
-      'service': 'OffenseInformationService',
-      'action': 'deleteOffense',
-      'args': [offenseId],
-    };
-    final respMap = await apiClient.sendWsMessage(msg);
-    if (respMap.containsKey('error')) {
-      if (isNotFoundApiError(respMap['error'])) {
-        throw ApiException(
-          404,
-          localizeEntityNotFoundWithId('api.entity.offense'.tr, offenseId),
-        );
-      } else if (isUnauthorizedApiError(respMap['error'])) {
-        throw ApiException(
-            403, localizeAdminOnlyDelete('api.resource.offenses'.tr));
-      }
-      throw ApiException(
-          400, localizeApiErrorMessageOrUnknown(respMap['error']));
-    }
-  }
-
-  /// GET /api/offenses/timeRange (WebSocket)
-  Future<List<OffenseInformation>> eventbusOffensesTimeRangeGet({
-    String startTime = '1970-01-01',
-    String endTime = '2100-01-01',
-  }) async {
-    final msg = {
-      'service': 'OffenseInformationService',
-      'action': 'getOffensesByTimeRange',
-      'args': [startTime, endTime],
-    };
-    final respMap = await apiClient.sendWsMessage(msg);
-    if (respMap.containsKey('error')) {
-      throw ApiException(
-          400, localizeApiErrorMessageOrUnknown(respMap['error']));
-    }
-    if (respMap['result'] is List) {
-      return (respMap['result'] as List)
-          .map((json) =>
-              OffenseInformation.fromJson(json as Map<String, dynamic>))
-          .toList();
-    }
-    return [];
-  }
 }

@@ -10,6 +10,7 @@ import 'package:final_assignment_front/shared_components/case_card.dart';
 import 'package:final_assignment_front/shared_components/project_card.dart';
 import 'package:final_assignment_front/utils/helpers/app_helpers.dart';
 import 'package:final_assignment_front/utils/helpers/role_utils.dart';
+import 'package:final_assignment_front/utils/services/auth_token_store.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:get/get.dart';
@@ -86,7 +87,7 @@ class DashboardController extends GetxController {
 
   Future<void> _loadUserFromPrefs() async {
     final prefs = await SharedPreferences.getInstance();
-    final jwtToken = prefs.getString('jwtToken');
+    final jwtToken = await AuthTokenStore.instance.getJwtToken();
     final userName = prefs.getString('userName');
     final displayName =
         prefs.getString('displayName') ?? prefs.getString('driverName');

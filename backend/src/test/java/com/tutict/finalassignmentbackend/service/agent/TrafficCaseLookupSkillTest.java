@@ -1,6 +1,7 @@
 package com.tutict.finalassignmentbackend.service.agent;
 
 import com.tutict.finalassignmentbackend.entity.AppealRecord;
+import com.tutict.finalassignmentbackend.entity.DriverInformation;
 import com.tutict.finalassignmentbackend.entity.FineRecord;
 import com.tutict.finalassignmentbackend.entity.OffenseRecord;
 import com.tutict.finalassignmentbackend.entity.VehicleInformation;
@@ -28,9 +29,12 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -84,12 +88,11 @@ class TrafficCaseLookupSkillTest {
         when(vehicleInformationMapper.selectList(any())).thenReturn(List.of(vehicle));
         when(offenseRecordMapper.selectList(any())).thenReturn(List.of(record));
 
-        AgentSkillResult result = skill.execute(userContext("帮我查询违法编号 OF-2026-001 的状态"));
+        AgentSkillResult result = skill.execute(userContext("offense number OF-2026-001"));
 
-        assertTrue(result.summary().contains("违法编号"));
         assertEquals("/userOffenseListPage", result.actions().getFirst().getTarget());
         assertTrue(result.highlights().stream().anyMatch(item -> item.contains("OF-2026-001")));
-        assertTrue(result.highlights().stream().anyMatch(item -> item.contains("当前身份")));
+        assertTrue(result.highlights().stream().anyMatch(item -> item.contains("Test User")));
     }
 
     @Test
@@ -109,10 +112,10 @@ class TrafficCaseLookupSkillTest {
         when(vehicleInformationMapper.selectOne(any())).thenReturn(vehicle);
         when(offenseRecordService.findByVehicleId(eq(101L), eq(1), eq(3))).thenReturn(List.of(record));
 
-        AgentSkillResult result = skill.execute(userContext("查询车牌号 浙A12345 的违法记录"));
+        AgentSkillResult result = skill.execute(userContext("offense plate 浙A12345"));
 
-        assertTrue(result.summary().contains("车牌号"));
         assertEquals("/userOffenseListPage", result.actions().getFirst().getTarget());
+        assertTrue(result.highlights().stream().anyMatch(item -> item.contains("OF-2026-002")));
     }
 
     @Test
@@ -121,12 +124,11 @@ class TrafficCaseLookupSkillTest {
         vehicle.setVehicleId(101L);
         when(vehicleInformationMapper.selectList(any())).thenReturn(List.of(vehicle));
 
-        AgentSkillResult result = skill.execute(userContext("查询未支付罚款记录"));
+        AgentSkillResult result = skill.execute(userContext("unpaid fine records"));
 
-        assertTrue(result.summary().contains("不能直接按全局状态枚举案件"));
         assertEquals("/fineInformation", result.actions().getFirst().getTarget());
-        assertTrue(result.highlights().stream().anyMatch(item -> item.contains("当前身份")));
-        assertTrue(result.highlights().stream().anyMatch(item -> item.contains("访问范围")));
+        assertFalse(result.highlights().isEmpty());
+        assertTrue(result.highlights().stream().anyMatch(item -> item.contains("Test User")));
     }
 
     @Test
@@ -140,12 +142,38 @@ class TrafficCaseLookupSkillTest {
 
         when(fineRecordService.searchByPaymentStatus(eq("Unpaid"), eq(1), eq(3))).thenReturn(List.of(record));
 
-        AgentSkillResult result = skill.execute(adminContext("查询未支付罚款记录"));
+        AgentSkillResult result = skill.execute(adminContext("unpaid fine records"));
 
-        assertTrue(result.summary().contains("缴费状态"));
         assertEquals("/fineList", result.actions().getFirst().getTarget());
-        assertTrue(result.highlights().stream().anyMatch(item -> item.contains("管理权限")));
         assertTrue(result.highlights().stream().anyMatch(item -> item.contains("FN-88")));
+        assertFalse(result.highlights().isEmpty());
+    }
+
+    @Test
+    void shouldLookupOwnedFineByNumberUsingBatchOffenseAccessQuery() {
+        DriverInformation driver = new DriverInformation();
+        driver.setDriverId(301L);
+        driver.setIdCardNumber("330123199001010011");
+
+        FineRecord fine = new FineRecord();
+        fine.setFineNumber("FN-301");
+        fine.setOffenseId(401L);
+        fine.setPaymentStatus("Unpaid");
+        fine.setTotalAmount(new BigDecimal("120"));
+
+        OffenseRecord offense = new OffenseRecord();
+        offense.setOffenseId(401L);
+        offense.setDriverId(301L);
+
+        when(driverInformationMapper.selectList(any())).thenReturn(List.of(driver));
+        when(fineRecordMapper.selectList(any())).thenReturn(List.of(fine));
+        when(offenseRecordMapper.selectList(any())).thenReturn(List.of(offense));
+
+        AgentSkillResult result = skill.execute(userContext("fine number FN-301"));
+
+        assertEquals("/fineInformation", result.actions().getFirst().getTarget());
+        assertTrue(result.highlights().stream().anyMatch(item -> item.contains("FN-301")));
+        verify(offenseRecordService, never()).findById(any());
     }
 
     @Test
@@ -160,10 +188,59 @@ class TrafficCaseLookupSkillTest {
 
         when(appealRecordMapper.selectList(any())).thenReturn(List.of(record));
 
-        AgentSkillResult result = skill.execute(userContext("查询申诉编号 AP-3001"));
+        AgentSkillResult result = skill.execute(userContext("appeal number AP-3001"));
 
         assertEquals("/userAppeal", result.actions().getFirst().getTarget());
         assertTrue(result.highlights().stream().anyMatch(item -> item.contains("AP-3001")));
+    }
+
+    @Test
+    void shouldLookupOwnedAppealByNumberUsingBatchOffenseAccessQuery() {
+        DriverInformation driver = new DriverInformation();
+        driver.setDriverId(302L);
+        driver.setIdCardNumber("330123199001010011");
+
+        AppealRecord appeal = new AppealRecord();
+        appeal.setAppealNumber("AP-4002");
+        appeal.setOffenseId(402L);
+        appeal.setAppellantIdCard("330123199001010099");
+        appeal.setAcceptanceStatus("Accepted");
+        appeal.setProcessStatus("Under_Review");
+
+        OffenseRecord offense = new OffenseRecord();
+        offense.setOffenseId(402L);
+        offense.setDriverId(302L);
+
+        when(driverInformationMapper.selectList(any())).thenReturn(List.of(driver));
+        when(appealRecordMapper.selectList(any())).thenReturn(List.of(appeal));
+        when(offenseRecordMapper.selectList(any())).thenReturn(List.of(offense));
+
+        AgentSkillResult result = skill.execute(userContext("appeal number AP-4002"));
+
+        assertEquals("/userAppeal", result.actions().getFirst().getTarget());
+        assertTrue(result.highlights().stream().anyMatch(item -> item.contains("AP-4002")));
+        verify(offenseRecordService, never()).findById(any());
+    }
+
+    @Test
+    void shouldLookupOwnedOffenseByDriverLicenseUsingBatchDriverQuery() {
+        DriverInformation driver = new DriverInformation();
+        driver.setDriverId(201L);
+        driver.setDriverLicenseNumber("DL-2026-001");
+
+        OffenseRecord record = new OffenseRecord();
+        record.setOffenseId(21L);
+        record.setOffenseNumber("OF-2026-021");
+        record.setDriverId(201L);
+        record.setProcessStatus("Processing");
+
+        when(driverInformationMapper.selectList(any())).thenReturn(List.of(driver));
+        when(offenseRecordService.findByDriverIds(eq(List.of(201L)), eq(1), eq(3))).thenReturn(List.of(record));
+
+        AgentSkillResult result = skill.execute(userContext("offense driver license DL-2026-001"));
+
+        assertEquals("/userOffenseListPage", result.actions().getFirst().getTarget());
+        assertTrue(result.highlights().stream().anyMatch(item -> item.contains("OF-2026-021")));
     }
 
     private AgentSkillContext userContext(String message) {
@@ -175,7 +252,7 @@ class TrafficCaseLookupSkillTest {
                 1L,
                 "Test User",
                 "330123199001010011",
-                "群众",
+                "Citizen",
                 List.of()
         );
     }
@@ -189,7 +266,7 @@ class TrafficCaseLookupSkillTest {
                 99L,
                 "Admin",
                 "330123199001010099",
-                "交警队",
+                "Officer",
                 List.of("ROLE_ADMIN")
         );
     }

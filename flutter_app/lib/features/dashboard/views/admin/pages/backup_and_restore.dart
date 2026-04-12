@@ -5,10 +5,10 @@ import 'package:final_assignment_front/features/model/backup_restore.dart';
 import 'package:final_assignment_front/i18n/backup_restore_localizers.dart';
 import 'package:final_assignment_front/i18n/status_localizers.dart';
 import 'package:final_assignment_front/utils/helpers/role_utils.dart';
+import 'package:final_assignment_front/utils/services/auth_token_store.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:jwt_decoder/jwt_decoder.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 
 String generateIdempotencyKey() => const Uuid().v4();
@@ -86,8 +86,7 @@ class _BackupAndRestoreState extends State<BackupAndRestore> {
         });
         return;
       }
-      final prefs = await SharedPreferences.getInstance();
-      final jwtToken = prefs.getString('jwtToken');
+      final jwtToken = await AuthTokenStore.instance.getJwtToken();
       if (jwtToken == null || jwtToken.isEmpty) {
         throw Exception('backupRestore.error.notLoggedIn'.tr);
       }
@@ -1046,8 +1045,7 @@ class _BackupDetailPageState extends State<BackupDetailPage> {
         setState(() => _isLoading = false);
         return;
       }
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('jwtToken');
+      final token = await AuthTokenStore.instance.getJwtToken();
       if (token == null || token.isEmpty) {
         setState(() {
           _isAdmin = false;

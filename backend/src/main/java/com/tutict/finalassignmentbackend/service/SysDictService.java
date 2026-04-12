@@ -32,6 +32,7 @@ public class SysDictService {
 
     private static final Logger log = Logger.getLogger(SysDictService.class.getName());
     private static final String CACHE_NAME = "sysDictCache";
+    private static final int FULL_LOAD_BATCH_SIZE = 500;
 
     private final SysDictMapper sysDictMapper;
     private final SysRequestHistoryMapper sysRequestHistoryMapper;
@@ -116,7 +117,6 @@ public class SysDictService {
     }
 
     @Transactional(readOnly = true)
-    @Cacheable(cacheNames = CACHE_NAME, key = "'all'", unless = "#result == null || #result.isEmpty()")
     public List<SysDict> findAll() {
         List<SysDict> fromIndex = StreamSupport.stream(sysDictSearchRepository.findAll().spliterator(), false)
                 .map(SysDictDocument::toEntity)
@@ -124,9 +124,7 @@ public class SysDictService {
         if (!fromIndex.isEmpty()) {
             return fromIndex;
         }
-        List<SysDict> fromDb = sysDictMapper.selectList(null);
-        syncBatchToIndexAfterCommit(fromDb);
-        return fromDb;
+        return loadAllFromDatabase();
     }
 
     @Transactional(readOnly = true)
@@ -397,6 +395,28 @@ public class SysDictService {
         List<SysDict> records = mpPage.getRecords();
         syncBatchToIndexAfterCommit(records);
         return records;
+    }
+
+    private List<SysDict> loadAllFromDatabase() {
+        List<SysDict> allRecords = new java.util.ArrayList<>();
+        long currentPage = 1L;
+        while (true) {
+            QueryWrapper<SysDict> wrapper = new QueryWrapper<>();
+            wrapper.orderByAsc("dict_id");
+            Page<SysDict> mpPage = new Page<>(currentPage, FULL_LOAD_BATCH_SIZE);
+            sysDictMapper.selectPage(mpPage, wrapper);
+            List<SysDict> records = mpPage.getRecords();
+            if (records == null || records.isEmpty()) {
+                break;
+            }
+            allRecords.addAll(records);
+            syncBatchToIndexAfterCommit(records);
+            if (records.size() < FULL_LOAD_BATCH_SIZE) {
+                break;
+            }
+            currentPage++;
+        }
+        return allRecords;
     }
 
     private List<SysDict> mapHits(org.springframework.data.elasticsearch.core.SearchHits<SysDictDocument> hits) {

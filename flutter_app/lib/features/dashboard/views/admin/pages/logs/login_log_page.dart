@@ -10,11 +10,11 @@ import 'package:final_assignment_front/features/model/login_log.dart';
 import 'package:final_assignment_front/i18n/log_localizers.dart';
 import 'package:final_assignment_front/utils/helpers/api_exception.dart';
 import 'package:final_assignment_front/utils/helpers/role_utils.dart';
+import 'package:final_assignment_front/utils/services/auth_token_store.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:jwt_decoder/jwt_decoder.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 class LoginLogPage extends StatefulWidget {
   const LoginLogPage({super.key});
@@ -66,8 +66,7 @@ class _LoginLogPageState extends State<LoginLogPage> {
   }
 
   Future<bool> _validateJwtToken() async {
-    final prefs = await SharedPreferences.getInstance();
-    final jwtToken = prefs.getString('jwtToken');
+    final jwtToken = await AuthTokenStore.instance.getJwtToken();
     if (jwtToken == null || jwtToken.isEmpty) {
       setState(() => _errorMessage = 'loginLog.error.unauthorized'.tr);
       return false;
@@ -113,8 +112,7 @@ class _LoginLogPageState extends State<LoginLogPage> {
         Get.offAllNamed(Routes.login);
         return;
       }
-      final prefs = await SharedPreferences.getInstance();
-      final jwtToken = prefs.getString('jwtToken')!;
+      final jwtToken = (await AuthTokenStore.instance.getJwtToken())!;
       final decodedToken = JwtDecoder.decode(jwtToken);
       final roles = decodedToken['roles'];
       setState(() => _isAdmin = hasAnyRole(roles, const [

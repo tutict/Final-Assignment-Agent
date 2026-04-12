@@ -3,6 +3,7 @@ package com.tutict.finalassignmentbackend.service;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.tutict.finalassignmentbackend.config.login.jwt.AuthenticationSnapshotService;
 import com.tutict.finalassignmentbackend.config.websocket.WsAction;
 import com.tutict.finalassignmentbackend.entity.SysRequestHistory;
 import com.tutict.finalassignmentbackend.entity.SysUserRole;
@@ -37,18 +38,29 @@ public class SysUserRoleService {
     private final SysUserRoleSearchRepository sysUserRoleSearchRepository;
     private final KafkaTemplate<String, String> kafkaTemplate;
     private final ObjectMapper objectMapper;
+    private final AuthenticationSnapshotService authenticationSnapshotService;
 
     @Autowired
     public SysUserRoleService(SysUserRoleMapper sysUserRoleMapper,
                               SysRequestHistoryMapper sysRequestHistoryMapper,
                               SysUserRoleSearchRepository sysUserRoleSearchRepository,
                               KafkaTemplate<String, String> kafkaTemplate,
-                              ObjectMapper objectMapper) {
+                              ObjectMapper objectMapper,
+                              AuthenticationSnapshotService authenticationSnapshotService) {
         this.sysUserRoleMapper = sysUserRoleMapper;
         this.sysRequestHistoryMapper = sysRequestHistoryMapper;
         this.sysUserRoleSearchRepository = sysUserRoleSearchRepository;
         this.kafkaTemplate = kafkaTemplate;
         this.objectMapper = objectMapper;
+        this.authenticationSnapshotService = authenticationSnapshotService;
+    }
+
+    public SysUserRoleService(SysUserRoleMapper sysUserRoleMapper,
+                              SysRequestHistoryMapper sysRequestHistoryMapper,
+                              SysUserRoleSearchRepository sysUserRoleSearchRepository,
+                              KafkaTemplate<String, String> kafkaTemplate,
+                              ObjectMapper objectMapper) {
+        this(sysUserRoleMapper, sysRequestHistoryMapper, sysUserRoleSearchRepository, kafkaTemplate, objectMapper, null);
     }
 
     @Transactional
@@ -73,6 +85,7 @@ public class SysUserRoleService {
     public SysUserRole createRelation(SysUserRole relation) {
         validateRelation(relation);
         sysUserRoleMapper.insert(relation);
+        evictAuthenticationSnapshots();
         syncToIndexAfterCommit(relation);
         return relation;
     }
@@ -101,6 +114,7 @@ public class SysUserRoleService {
         if (rows == 0) {
             throw new IllegalStateException("SysUserRole not found for id=" + relation.getId());
         }
+        evictAuthenticationSnapshots();
         syncToIndexAfterCommit(relation);
         return relation;
     }
@@ -113,6 +127,7 @@ public class SysUserRoleService {
         if (rows == 0) {
             throw new IllegalStateException("SysUserRole not found for id=" + relationId);
         }
+        evictAuthenticationSnapshots();
         runAfterCommitOrNow(() -> sysUserRoleSearchRepository.deleteById(relationId));
     }
 
@@ -220,6 +235,12 @@ public class SysUserRoleService {
         history.setRequestParams(appendFailureReason(history.getRequestParams(), reason));
         history.setUpdatedAt(LocalDateTime.now());
         sysRequestHistoryMapper.updateById(history);
+    }
+
+    private void evictAuthenticationSnapshots() {
+        if (authenticationSnapshotService != null) {
+            authenticationSnapshotService.evictAll();
+        }
     }
 
     private SysRequestHistory buildHistory(String idempotencyKey, SysUserRole relation, String action) {

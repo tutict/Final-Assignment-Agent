@@ -2,11 +2,9 @@ import 'dart:convert';
 import 'package:final_assignment_front/features/model/login_log.dart';
 import 'package:final_assignment_front/features/model/operation_log.dart';
 import 'package:final_assignment_front/features/model/sys_request_history.dart';
-import 'package:final_assignment_front/features/model/system_logs.dart';
 import 'package:final_assignment_front/i18n/api_error_localizers.dart';
 import 'package:final_assignment_front/utils/helpers/api_exception.dart';
 import 'package:final_assignment_front/utils/services/api_client.dart';
-import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:final_assignment_front/utils/services/auth_token_store.dart';
 import 'package:http/http.dart' as http;
@@ -22,7 +20,6 @@ class SystemLogsControllerApi {
       throw Exception('api.error.notAuthenticated'.tr);
     }
     _apiClient.setJwtToken(jwtToken);
-    debugPrint('Initialized SystemLogsControllerApi with token: $jwtToken');
   }
 
   String _decode(http.Response r) => r.body;
@@ -395,19 +392,4 @@ class SystemLogsControllerApi {
   }
 
   // 以下 WebSocket 示例保留
-  Future<List<SystemLogs>> eventbusSystemLogsGet() async {
-    final msg = {
-      'service': 'SystemLogsService',
-      'action': 'getAllSystemLogs',
-      'args': [],
-    };
-    final respMap = await _apiClient.sendWsMessage(msg);
-    if (respMap.containsKey('error')) {
-      throw ApiException(
-          400, localizeApiErrorMessageOrUnknown(respMap['error']));
-    }
-    final result = respMap['result'] as List<dynamic>?;
-    if (result == null) return [];
-    return SystemLogs.listFromJson(result);
-  }
 }

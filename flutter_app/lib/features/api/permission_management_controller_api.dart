@@ -2,7 +2,6 @@ import 'package:final_assignment_front/features/model/permission_management.dart
 import 'package:final_assignment_front/i18n/api_error_localizers.dart';
 import 'package:final_assignment_front/utils/helpers/api_exception.dart';
 import 'package:final_assignment_front/utils/services/api_client.dart';
-import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:http/http.dart' as http;
 import 'package:final_assignment_front/utils/services/auth_token_store.dart';
@@ -27,8 +26,6 @@ class PermissionManagementControllerApi {
       throw Exception('api.error.notAuthenticated'.tr);
     }
     apiClient.setJwtToken(jwtToken);
-    debugPrint(
-        'Initialized PermissionManagementControllerApi with token: $jwtToken');
   }
 
   /// Decodes the response body.
@@ -227,165 +224,6 @@ class PermissionManagementControllerApi {
     final List<dynamic> data =
         apiClient.deserialize(_decodeBodyBytes(response), 'List<dynamic>');
     return PermissionManagement.listFromJson(data);
-  }
-
-  // WebSocket Methods (Aligned with HTTP Endpoints)
-
-  /// GET /api/permissions (WebSocket)
-  /// Maps to @WsAction(service="PermissionManagement", action="getAllPermissions")
-  Future<List<Object>?> eventbusPermissionsGet() async {
-    final msg = {
-      "service": "PermissionManagement",
-      "action": "getAllPermissions",
-      "args": []
-    };
-    final respMap = await apiClient.sendWsMessage(msg);
-    if (respMap.containsKey("error")) {
-      throw ApiException(
-          400, localizeApiErrorMessageOrUnknown(respMap["error"]));
-    }
-    if (respMap["result"] is List) {
-      return (respMap["result"] as List).cast<Object>();
-    }
-    return null;
-  }
-
-  /// DELETE /api/permissions/name/{permissionName} (WebSocket)
-  /// Maps to @WsAction(service="PermissionManagement", action="deletePermissionByName")
-  Future<bool> eventbusPermissionsNamePermissionNameDelete(
-      {required String permissionName}) async {
-    if (permissionName.isEmpty) {
-      throw ApiException(400, localizeMissingRequiredParam('permissionName'));
-    }
-    final msg = {
-      "service": "PermissionManagement",
-      "action": "deletePermissionByName",
-      "args": [permissionName]
-    };
-    final respMap = await apiClient.sendWsMessage(msg);
-    if (respMap.containsKey("error")) {
-      throw ApiException(
-          400, localizeApiErrorMessageOrUnknown(respMap["error"]));
-    }
-    return true; // Success if no error
-  }
-
-  /// GET /api/permissions/name/{permissionName} (WebSocket)
-  /// Maps to @WsAction(service="PermissionManagement", action="getPermissionByName")
-  Future<Object?> eventbusPermissionsNamePermissionNameGet(
-      {required String permissionName}) async {
-    if (permissionName.isEmpty) {
-      throw ApiException(400, localizeMissingRequiredParam('permissionName'));
-    }
-    final msg = {
-      "service": "PermissionManagement",
-      "action": "getPermissionByName",
-      "args": [permissionName]
-    };
-    final respMap = await apiClient.sendWsMessage(msg);
-    if (respMap.containsKey("error")) {
-      throw ApiException(
-          400, localizeApiErrorMessageOrUnknown(respMap["error"]));
-    }
-    return respMap["result"];
-  }
-
-  /// DELETE /api/permissions/{permissionId} (WebSocket)
-  /// Maps to @WsAction(service="PermissionManagement", action="deletePermission")
-  Future<bool> eventbusPermissionsPermissionIdDelete(
-      {required String permissionId}) async {
-    if (permissionId.isEmpty) {
-      throw ApiException(400, localizeMissingRequiredParam('permissionId'));
-    }
-    final msg = {
-      "service": "PermissionManagement",
-      "action": "deletePermission",
-      "args": [int.parse(permissionId)]
-    };
-    final respMap = await apiClient.sendWsMessage(msg);
-    if (respMap.containsKey("error")) {
-      throw ApiException(
-          400, localizeApiErrorMessageOrUnknown(respMap["error"]));
-    }
-    return true; // Success if no error
-  }
-
-  /// GET /api/permissions/{permissionId} (WebSocket)
-  /// Maps to @WsAction(service="PermissionManagement", action="getPermissionById")
-  Future<Object?> eventbusPermissionsPermissionIdGet(
-      {required String permissionId}) async {
-    if (permissionId.isEmpty) {
-      throw ApiException(400, localizeMissingRequiredParam('permissionId'));
-    }
-    final msg = {
-      "service": "PermissionManagement",
-      "action": "getPermissionById",
-      "args": [int.parse(permissionId)]
-    };
-    final respMap = await apiClient.sendWsMessage(msg);
-    if (respMap.containsKey("error")) {
-      throw ApiException(
-          400, localizeApiErrorMessageOrUnknown(respMap["error"]));
-    }
-    return respMap["result"];
-  }
-
-  /// PUT /api/permissions/{permissionId} (WebSocket)
-  /// Maps to @WsAction(service="PermissionManagement", action="updatePermission")
-  Future<Object?> eventbusPermissionsPermissionIdPut({
-    required String permissionId,
-    required PermissionManagement permissionManagement,
-  }) async {
-    if (permissionId.isEmpty) {
-      throw ApiException(400, localizeMissingRequiredParam('permissionId'));
-    }
-    final msg = {
-      "service": "PermissionManagement",
-      "action": "updatePermission",
-      "args": [int.parse(permissionId), permissionManagement.toJson()]
-    };
-    final respMap = await apiClient.sendWsMessage(msg);
-    if (respMap.containsKey("error")) {
-      throw ApiException(
-          400, localizeApiErrorMessageOrUnknown(respMap["error"]));
-    }
-    return respMap["result"];
-  }
-
-  /// POST /api/permissions (WebSocket)
-  /// Maps to @WsAction(service="PermissionManagement", action="createPermission")
-  Future<Object?> eventbusPermissionsPost(
-      {required PermissionManagement permissionManagement}) async {
-    final msg = {
-      "service": "PermissionManagement",
-      "action": "createPermission",
-      "args": [permissionManagement.toJson()]
-    };
-    final respMap = await apiClient.sendWsMessage(msg);
-    if (respMap.containsKey("error")) {
-      throw ApiException(
-          400, localizeApiErrorMessageOrUnknown(respMap["error"]));
-    }
-    return respMap["result"];
-  }
-
-  /// GET /api/permissions/search (WebSocket)
-  /// Maps to @WsAction(service="PermissionManagement", action="getPermissionsByNameLike")
-  Future<List<Object>?> eventbusPermissionsSearchGet({String? name}) async {
-    final msg = {
-      "service": "PermissionManagement",
-      "action": "getPermissionsByNameLike",
-      "args": [name ?? ""]
-    };
-    final respMap = await apiClient.sendWsMessage(msg);
-    if (respMap.containsKey("error")) {
-      throw ApiException(
-          400, localizeApiErrorMessageOrUnknown(respMap["error"]));
-    }
-    if (respMap["result"] is List) {
-      return (respMap["result"] as List).cast<Object>();
-    }
-    return null;
   }
 
   // HTTP: GET /api/permissions/parent/{parentId} - fetch permissions by parent ID.

@@ -11,6 +11,7 @@ import 'package:final_assignment_front/features/model/offense_information.dart';
 import 'package:final_assignment_front/i18n/offense_localizers.dart';
 import 'package:final_assignment_front/utils/helpers/api_exception.dart';
 import 'package:final_assignment_front/utils/helpers/role_utils.dart';
+import 'package:final_assignment_front/utils/services/auth_token_store.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
@@ -118,7 +119,7 @@ class _UserOffenseListPageState extends State<UserOffenseListPage> {
 
   Future<bool> _validateJwtToken() async {
     final prefs = await SharedPreferences.getInstance();
-    final jwtToken = prefs.getString('jwtToken');
+    final jwtToken = await AuthTokenStore.instance.getJwtToken();
     if (jwtToken == null || jwtToken.isEmpty) {
       _setStateSafely(() {
         _isUser = false;

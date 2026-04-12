@@ -50,6 +50,7 @@ public class OffenseRecordService {
 
     private static final Logger log = Logger.getLogger(OffenseRecordService.class.getName());
     private static final String CACHE_NAME = "offenseRecordCache";
+    private static final int FULL_LOAD_BATCH_SIZE = 500;
 
     private final OffenseRecordMapper offenseRecordMapper;
     private final FineRecordMapper fineRecordMapper;
@@ -203,7 +204,15 @@ public class OffenseRecordService {
     }
 
     @Transactional(readOnly = true)
-    @Cacheable(cacheNames = CACHE_NAME, key = "'all'", unless = "#result == null || #result.isEmpty()")
+    public boolean existsById(Long offenseId) {
+        requirePositive(offenseId, "Offense ID");
+        QueryWrapper<OffenseRecord> wrapper = new QueryWrapper<>();
+        wrapper.eq("offense_id", offenseId).last("limit 1");
+        Long count = offenseRecordMapper.selectCount(wrapper);
+        return count != null && count > 0;
+    }
+
+    @Transactional(readOnly = true)
     public List<OffenseRecord> findAll() {
         List<OffenseRecord> fromIndex = StreamSupport.stream(offenseInformationSearchRepository.findAll().spliterator(), false)
                 .map(OffenseRecordDocument::toEntity)
@@ -211,9 +220,7 @@ public class OffenseRecordService {
         if (!fromIndex.isEmpty()) {
             return fromIndex;
         }
-        List<OffenseRecord> fromDb = offenseRecordMapper.selectList(null);
-        syncBatchToIndexAfterCommit(fromDb);
-        return fromDb;
+        return loadAllFromDatabase();
     }
 
     @Transactional(readOnly = true)
@@ -610,6 +617,29 @@ public class OffenseRecordService {
         List<OffenseRecord> records = mpPage.getRecords();
         syncBatchToIndexAfterCommit(records);
         return records;
+    }
+
+    private List<OffenseRecord> loadAllFromDatabase() {
+        QueryWrapper<OffenseRecord> wrapper = new QueryWrapper<>();
+        wrapper.orderByAsc("offense_id");
+
+        List<OffenseRecord> allRecords = new ArrayList<>();
+        long pageNumber = 1L;
+        while (true) {
+            Page<OffenseRecord> batchPage = new Page<>(pageNumber, FULL_LOAD_BATCH_SIZE);
+            offenseRecordMapper.selectPage(batchPage, wrapper);
+            List<OffenseRecord> records = batchPage.getRecords();
+            if (records == null || records.isEmpty()) {
+                break;
+            }
+            allRecords.addAll(records);
+            syncBatchToIndexAfterCommit(records);
+            if (records.size() < FULL_LOAD_BATCH_SIZE) {
+                break;
+            }
+            pageNumber++;
+        }
+        return allRecords;
     }
 
     private org.springframework.data.domain.Pageable pageable(int page, int size) {

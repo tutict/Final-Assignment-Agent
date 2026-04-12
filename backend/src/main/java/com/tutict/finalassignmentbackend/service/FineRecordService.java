@@ -47,6 +47,7 @@ public class FineRecordService {
 
     private static final Logger log = Logger.getLogger(FineRecordService.class.getName());
     private static final String CACHE_NAME = "fineRecordCache";
+    private static final int FULL_LOAD_BATCH_SIZE = 500;
 
     private final FineRecordMapper fineRecordMapper;
     private final PaymentRecordMapper paymentRecordMapper;
@@ -152,7 +153,6 @@ public class FineRecordService {
     }
 
     @Transactional(readOnly = true)
-    @Cacheable(cacheNames = CACHE_NAME, key = "'all'", unless = "#result == null || #result.isEmpty()")
     public List<FineRecord> findAll() {
         List<FineRecord> fromIndex = StreamSupport.stream(fineRecordSearchRepository.findAll().spliterator(), false)
                 .map(FineRecordDocument::toEntity)
@@ -160,9 +160,7 @@ public class FineRecordService {
         if (!fromIndex.isEmpty()) {
             return fromIndex;
         }
-        List<FineRecord> fromDb = fineRecordMapper.selectList(null);
-        syncBatchToIndexAfterCommit(fromDb);
-        return fromDb;
+        return loadAllFromDatabase();
     }
 
     @Transactional(readOnly = true)
@@ -202,6 +200,25 @@ public class FineRecordService {
                 .orderByDesc("updated_at")
                 .orderByDesc("fine_date");
         return fetchFromDatabase(wrapper, page, size);
+    }
+
+    @Transactional(readOnly = true)
+    public List<Long> findIdsByOffenseIds(Iterable<Long> offenseIds) {
+        List<Long> normalizedIds = normalizePositiveIds(offenseIds);
+        if (normalizedIds.isEmpty()) {
+            return List.of();
+        }
+        QueryWrapper<FineRecord> wrapper = new QueryWrapper<>();
+        wrapper.select("fine_id")
+                .in("offense_id", normalizedIds)
+                .orderByDesc("updated_at")
+                .orderByDesc("fine_date");
+        return fineRecordMapper.selectObjs(wrapper).stream()
+                .filter(Objects::nonNull)
+                .map(this::toLong)
+                .filter(Objects::nonNull)
+                .distinct()
+                .collect(Collectors.toList());
     }
 
     @Cacheable(cacheNames = CACHE_NAME, key = "'handlerPrefix:' + #handler + ':' + #page + ':' + #size", unless = "#result == null || #result.isEmpty()")
@@ -409,6 +426,28 @@ public class FineRecordService {
         return records;
     }
 
+    private List<FineRecord> loadAllFromDatabase() {
+        List<FineRecord> allRecords = new java.util.ArrayList<>();
+        long currentPage = 1L;
+        while (true) {
+            QueryWrapper<FineRecord> wrapper = new QueryWrapper<>();
+            wrapper.orderByAsc("fine_id");
+            Page<FineRecord> mpPage = new Page<>(currentPage, FULL_LOAD_BATCH_SIZE);
+            fineRecordMapper.selectPage(mpPage, wrapper);
+            List<FineRecord> records = mpPage.getRecords();
+            if (records == null || records.isEmpty()) {
+                break;
+            }
+            allRecords.addAll(records);
+            syncBatchToIndexAfterCommit(records);
+            if (records.size() < FULL_LOAD_BATCH_SIZE) {
+                break;
+            }
+            currentPage++;
+        }
+        return allRecords;
+    }
+
     private org.springframework.data.domain.Pageable pageable(int page, int size) {
         return org.springframework.data.domain.PageRequest.of(Math.max(page - 1, 0), Math.max(size, 1));
     }
@@ -416,7 +455,7 @@ public class FineRecordService {
     private void validateFineRecord(FineRecord fineRecord) {
         Objects.requireNonNull(fineRecord, "FineRecord must not be null");
         requirePositive(fineRecord.getOffenseId(), "Offense ID");
-        if (offenseRecordService.findById(fineRecord.getOffenseId()) == null) {
+        if (!offenseRecordService.existsById(fineRecord.getOffenseId())) {
             throw new IllegalArgumentException("Offense record does not exist");
         }
         ensureSingleFinePerOffense(fineRecord);
@@ -515,11 +554,11 @@ public class FineRecordService {
     private void ensureSingleFinePerOffense(FineRecord fineRecord) {
         QueryWrapper<FineRecord> wrapper = new QueryWrapper<>();
         wrapper.eq("offense_id", fineRecord.getOffenseId());
-        List<FineRecord> existingRecords = fineRecordMapper.selectList(wrapper);
-        for (FineRecord existing : existingRecords) {
-            if (existing == null || Objects.equals(existing.getFineId(), fineRecord.getFineId())) {
-                continue;
-            }
+        if (fineRecord.getFineId() != null) {
+            wrapper.ne("fine_id", fineRecord.getFineId());
+        }
+        Long duplicateCount = fineRecordMapper.selectCount(wrapper);
+        if (duplicateCount != null && duplicateCount > 0) {
             throw new IllegalStateException("Only one fine record is allowed for each offense");
         }
     }
@@ -629,6 +668,20 @@ public class FineRecordService {
             }
         }
         return new ArrayList<>(normalized);
+    }
+
+    private Long toLong(Object value) {
+        if (value instanceof Number number) {
+            return number.longValue();
+        }
+        if (value instanceof String text) {
+            try {
+                return Long.parseLong(text.trim());
+            } catch (NumberFormatException ignored) {
+                return null;
+            }
+        }
+        return null;
     }
 
     private void runAfterCommitOrNow(Runnable task) {

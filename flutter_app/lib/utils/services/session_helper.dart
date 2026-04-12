@@ -4,7 +4,6 @@ import 'package:final_assignment_front/features/model/user_management.dart';
 import 'package:final_assignment_front/utils/helpers/role_utils.dart';
 import 'package:final_assignment_front/utils/services/auth_token_store.dart';
 import 'package:jwt_decoder/jwt_decoder.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 class SessionHelper {
   SessionHelper({
@@ -17,8 +16,7 @@ class SessionHelper {
   final UserManagementControllerApi _userApi;
 
   Future<String?> refreshJwtToken() async {
-    final prefs = await SharedPreferences.getInstance();
-    final refreshToken = prefs.getString('refreshToken');
+    final refreshToken = await AuthTokenStore.instance.getRefreshToken();
     if (refreshToken == null || refreshToken.trim().isEmpty) {
       return null;
     }
@@ -32,7 +30,7 @@ class SessionHelper {
       final refreshedToken = payload['refreshToken']?.toString();
       await AuthTokenStore.instance.setJwtToken(newJwt);
       if (refreshedToken != null && refreshedToken.isNotEmpty) {
-        await prefs.setString('refreshToken', refreshedToken);
+        await AuthTokenStore.instance.setRefreshToken(refreshedToken);
       }
       return newJwt;
     } catch (_) {

@@ -160,11 +160,17 @@ class AuthControllerApi {
     }
   }
 
-  /// Sends the HTTP request that fetches all users.
-  Future<http.Response> apiAuthUsersGetWithHttpInfo() async {
+  /// Sends the HTTP request that fetches a page of users.
+  Future<http.Response> apiAuthUsersGetWithHttpInfo({
+    int page = 1,
+    int size = 100,
+  }) async {
     String path = "/api/auth/users".replaceAll("{format}", "json");
 
-    List<QueryParam> queryParams = [];
+    List<QueryParam> queryParams = [
+      QueryParam('page', page.toString()),
+      QueryParam('size', size.toString()),
+    ];
     Map<String, String> headerParams = await _getHeaders();
     Map<String, String> formParams = {};
 
@@ -178,10 +184,16 @@ class AuthControllerApi {
     return response;
   }
 
-  /// Fetches all users.
-  Future<Map<String, dynamic>> apiAuthUsersGet() async {
+  /// Fetches a page of users.
+  Future<List<dynamic>> apiAuthUsersGet({
+    int page = 1,
+    int size = 100,
+  }) async {
     try {
-      http.Response response = await apiAuthUsersGetWithHttpInfo();
+      http.Response response = await apiAuthUsersGetWithHttpInfo(
+        page: page,
+        size: size,
+      );
       debugPrint('Users get response status: ${response.statusCode}');
       debugPrint('Users get response body: ${response.body}');
 
@@ -191,9 +203,9 @@ class AuthControllerApi {
             : localizeUnknownApiError();
         throw ApiException(response.statusCode, errorMessage);
       } else if (response.body.isNotEmpty) {
-        return jsonDecode(response.body) as Map<String, dynamic>;
+        return jsonDecode(response.body) as List<dynamic>;
       } else {
-        return {};
+        return const [];
       }
     } catch (e) {
       debugPrint('Users get error: $e');
@@ -242,74 +254,4 @@ class AuthControllerApi {
     }
   }
 
-  /// Logs in through WebSocket.
-  Future<Object?> eventbusAuthLoginPost(
-      {required LoginRequest loginRequest}) async {
-    final msg = <String, dynamic>{
-      "service": "Auth",
-      "action": "login",
-      "args": [
-        {"username": loginRequest.username, "password": loginRequest.password}
-      ],
-    };
-
-    final respMap = await apiClient.sendWsMessage(msg);
-
-    if (respMap.containsKey("error")) {
-      throw ApiException(
-          400, localizeApiErrorMessageOrUnknown(respMap["error"]));
-    }
-    if (respMap.containsKey("result")) {
-      return respMap["result"];
-    }
-    return null;
-  }
-
-  /// Registers a user through WebSocket.
-  Future<Object?> eventbusAuthRegisterPost(
-      {required RegisterRequest registerRequest}) async {
-    final msg = <String, dynamic>{
-      "service": "Auth",
-      "action": "register",
-      "args": [
-        {
-          "username": registerRequest.username,
-          "password": registerRequest.password,
-          "role": registerRequest.role,
-          "idempotencyKey": registerRequest.idempotencyKey
-        }
-      ],
-    };
-
-    final respMap = await apiClient.sendWsMessage(msg);
-
-    if (respMap.containsKey("error")) {
-      throw ApiException(
-          400, localizeApiErrorMessageOrUnknown(respMap["error"]));
-    }
-    if (respMap.containsKey("result")) {
-      return respMap["result"];
-    }
-    return null;
-  }
-
-  /// Fetches all users through WebSocket.
-  Future<Object?> eventbusAuthUsersGet() async {
-    final msg = <String, dynamic>{
-      "service": "Auth",
-      "action": "getAllUsers",
-      "args": []
-    };
-
-    final respMap = await apiClient.sendWsMessage(msg);
-
-    if (respMap.containsKey("error")) {
-      throw ApiException(
-          400, localizeApiErrorMessageOrUnknown(respMap["error"]));
-    }
-    if (respMap.containsKey("result")) {
-      return respMap["result"];
-    }
-    return null;
-  }
 }

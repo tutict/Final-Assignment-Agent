@@ -33,6 +33,7 @@ public class SysBackupRestoreService {
 
     private static final Logger log = Logger.getLogger(SysBackupRestoreService.class.getName());
     private static final String CACHE_NAME = "sysBackupRestoreCache";
+    private static final int FULL_LOAD_BATCH_SIZE = 500;
 
     private final SysBackupRestoreMapper sysBackupRestoreMapper;
     private final SysRequestHistoryMapper sysRequestHistoryMapper;
@@ -119,7 +120,6 @@ public class SysBackupRestoreService {
     }
 
     @Transactional(readOnly = true)
-    @Cacheable(cacheNames = CACHE_NAME, key = "'all'", unless = "#result == null || #result.isEmpty()")
     public List<SysBackupRestore> findAll() {
         List<SysBackupRestore> fromIndex = StreamSupport.stream(sysBackupRestoreSearchRepository.findAll().spliterator(), false)
                 .map(SysBackupRestoreDocument::toEntity)
@@ -127,9 +127,7 @@ public class SysBackupRestoreService {
         if (!fromIndex.isEmpty()) {
             return fromIndex;
         }
-        List<SysBackupRestore> fromDb = sysBackupRestoreMapper.selectList(null);
-        syncBatchToIndexAfterCommit(fromDb);
-        return fromDb;
+        return loadAllFromDatabase();
     }
 
     @Transactional(readOnly = true)
@@ -398,6 +396,28 @@ public class SysBackupRestoreService {
         List<SysBackupRestore> records = mpPage.getRecords();
         syncBatchToIndexAfterCommit(records);
         return records;
+    }
+
+    private List<SysBackupRestore> loadAllFromDatabase() {
+        List<SysBackupRestore> allRecords = new java.util.ArrayList<>();
+        long currentPage = 1L;
+        while (true) {
+            QueryWrapper<SysBackupRestore> wrapper = new QueryWrapper<>();
+            wrapper.orderByAsc("backup_id");
+            Page<SysBackupRestore> mpPage = new Page<>(currentPage, FULL_LOAD_BATCH_SIZE);
+            sysBackupRestoreMapper.selectPage(mpPage, wrapper);
+            List<SysBackupRestore> records = mpPage.getRecords();
+            if (records == null || records.isEmpty()) {
+                break;
+            }
+            allRecords.addAll(records);
+            syncBatchToIndexAfterCommit(records);
+            if (records.size() < FULL_LOAD_BATCH_SIZE) {
+                break;
+            }
+            currentPage++;
+        }
+        return allRecords;
     }
 
     private List<SysBackupRestore> mapHits(org.springframework.data.elasticsearch.core.SearchHits<SysBackupRestoreDocument> hits) {

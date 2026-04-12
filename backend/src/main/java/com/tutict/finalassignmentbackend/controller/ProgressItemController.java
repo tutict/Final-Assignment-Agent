@@ -130,30 +130,17 @@ public class ProgressItemController {
 
             if (appealId == null) {
                 String currentUserIdCardNumber = tryResolveCurrentUserIdCardNumber();
-                fetchAllPages(pageNumber -> currentUserTrafficSupportService.listCurrentUserFines(pageNumber, relatedPageSize), relatedPageSize).stream()
-                        .map(fine -> fine == null ? null : fine.getFineId())
-                        .filter(id -> id != null && id > 0)
+                currentUserTrafficSupportService.listCurrentUserFineIds()
                         .forEach(id -> registerBusinessId(relatedBusinessIds, businessIds, id, "FINE_"));
-                relatedBusinessIds.getOrDefault("FINE_", new LinkedHashSet<>()).forEach(fineIds::add);
-                fetchAllPages(pageNumber -> currentUserTrafficSupportService.listCurrentUserOffenses(pageNumber, relatedPageSize), relatedPageSize).stream()
-                        .map(offense -> offense == null ? null : offense.getOffenseId())
-                        .filter(id -> id != null && id > 0)
+                fineIds.addAll(relatedBusinessIds.getOrDefault("FINE_", new LinkedHashSet<>()));
+                currentUserTrafficSupportService.listCurrentUserOffenseIds()
                         .forEach(id -> registerBusinessId(relatedBusinessIds, businessIds, id, "OFFENSE_"));
-                fetchAllPages(pageNumber -> currentUserTrafficSupportService.listCurrentUserDeductions(pageNumber, relatedPageSize), relatedPageSize).stream()
-                        .map(deduction -> deduction == null ? null : deduction.getDeductionId())
-                        .filter(id -> id != null && id > 0)
+                currentUserTrafficSupportService.listCurrentUserDeductionIds()
                         .forEach(id -> registerBusinessId(relatedBusinessIds, businessIds, id, "DEDUCTION_"));
                 if (currentUserIdCardNumber != null) {
-                    currentUserTrafficSupportService.listCurrentUserVehicles().stream()
-                            .map(vehicle -> vehicle == null ? null : vehicle.getVehicleId())
-                            .filter(id -> id != null && id > 0)
+                    currentUserTrafficSupportService.listCurrentUserVehicleIds()
                             .forEach(id -> registerBusinessId(relatedBusinessIds, businessIds, id, "VEHICLE_"));
-                    fetchAllPages(pageNumber -> paymentRecordService.searchByPayerIdCard(currentUserIdCardNumber, pageNumber, relatedPageSize), relatedPageSize).stream()
-                            .filter(payment -> payment != null
-                                    && payment.getFineId() != null
-                                    && fineIds.contains(payment.getFineId()))
-                            .map(payment -> payment.getPaymentId())
-                            .filter(id -> id != null && id > 0)
+                    paymentRecordService.findIdsByPayerIdCardAndFineIds(currentUserIdCardNumber, fineIds)
                             .forEach(id -> registerBusinessId(
                                     relatedBusinessIds,
                                     businessIds,

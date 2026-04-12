@@ -7,6 +7,7 @@ import 'package:final_assignment_front/features/dashboard/views/admin/pages/main
 import 'package:final_assignment_front/features/dashboard/views/admin/pages/main_process/vehicle_list.dart';
 import 'package:final_assignment_front/features/dashboard/views/shared/widgets/dashboard_page_template.dart';
 import 'package:final_assignment_front/utils/helpers/role_utils.dart';
+import 'package:final_assignment_front/utils/services/auth_token_store.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:jwt_decoder/jwt_decoder.dart';
@@ -91,7 +92,7 @@ class _AdminBusinessProcessingState extends State<AdminBusinessProcessing> {
       final prefs = await SharedPreferences.getInstance();
       final storedRoles = prefs.getStringList('userRoles');
       final fallbackRole = prefs.getString('userRole');
-      final jwtToken = prefs.getString('jwtToken');
+      final jwtToken = await AuthTokenStore.instance.getJwtToken();
       final jwtRoles = jwtToken == null
           ? const []
           : normalizeRoleCodes(JwtDecoder.decode(jwtToken)['roles']);

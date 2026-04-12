@@ -1,5 +1,7 @@
 package com.tutict.finalassignmentbackend.config;
 
+import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.tutict.finalassignmentbackend.entity.AppealRecord;
 import com.tutict.finalassignmentbackend.entity.AppealReview;
 import com.tutict.finalassignmentbackend.entity.AuditLoginLog;
@@ -85,13 +87,14 @@ import com.tutict.finalassignmentbackend.repository.SysUserRoleSearchRepository;
 import com.tutict.finalassignmentbackend.repository.SysUserSearchRepository;
 import com.tutict.finalassignmentbackend.repository.VehicleInformationSearchRepository;
 import jakarta.annotation.PostConstruct;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.data.elasticsearch.repository.ElasticsearchRepository;
 import org.springframework.data.elasticsearch.repository.config.EnableElasticsearchRepositories;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Function;
 import java.util.logging.Level;
@@ -103,7 +106,9 @@ import java.util.logging.Logger;
 public class ElasticSearchConfig {
 
     private static final Logger LOG = Logger.getLogger(ElasticSearchConfig.class.getName());
+
     private final boolean syncOnStartup;
+    private final int syncBatchSize;
     private final VehicleInformationMapper vehicleInformationMapper;
     private final DriverInformationMapper driverInformationMapper;
     private final DriverVehicleMapper driverVehicleMapper;
@@ -150,6 +155,7 @@ public class ElasticSearchConfig {
 
     public ElasticSearchConfig(
             @Value("${app.elasticsearch.sync-on-startup:false}") boolean syncOnStartup,
+            @Value("${app.elasticsearch.sync-batch-size:500}") int syncBatchSize,
             VehicleInformationMapper vehicleInformationMapper,
             DriverInformationMapper driverInformationMapper,
             DriverVehicleMapper driverVehicleMapper,
@@ -193,6 +199,7 @@ public class ElasticSearchConfig {
             @Lazy AuditLoginLogSearchRepository auditLoginLogSearchRepository,
             @Lazy AuditOperationLogSearchRepository auditOperationLogSearchRepository) {
         this.syncOnStartup = syncOnStartup;
+        this.syncBatchSize = Math.max(1, syncBatchSize);
         this.vehicleInformationMapper = vehicleInformationMapper;
         this.driverInformationMapper = driverInformationMapper;
         this.driverVehicleMapper = driverVehicleMapper;
@@ -243,160 +250,121 @@ public class ElasticSearchConfig {
             LOG.log(Level.INFO, "Skipping startup database to Elasticsearch sync because app.elasticsearch.sync-on-startup=false");
             return;
         }
-        LOG.log(Level.INFO, "开始执行数据库 -> Elasticsearch 全量同步任务");
 
-        syncEntities("vehicle_information",
-                vehicleInformationMapper.selectList(null),
-                vehicleInformationSearchRepository,
-                VehicleInformationDocument::fromEntity,
-                VehicleInformation::getVehicleId);
+        LOG.log(Level.INFO, "Starting startup database to Elasticsearch sync with batch size {0}", syncBatchSize);
 
-        syncEntities("driver_information",
-                driverInformationMapper.selectList(null),
-                driverInformationSearchRepository,
-                DriverInformationDocument::fromEntity,
-                DriverInformation::getDriverId);
+        syncEntities("vehicle_information", vehicleInformationMapper, vehicleInformationSearchRepository, VehicleInformationDocument::fromEntity, VehicleInformation::getVehicleId);
+        syncEntities("driver_information", driverInformationMapper, driverInformationSearchRepository, DriverInformationDocument::fromEntity, DriverInformation::getDriverId);
+        syncEntities("driver_vehicle", driverVehicleMapper, driverVehicleSearchRepository, DriverVehicleDocument::fromEntity, DriverVehicle::getId);
+        syncEntities("offense_record", offenseRecordMapper, offenseInformationSearchRepository, OffenseRecordDocument::fromEntity, OffenseRecord::getOffenseId);
+        syncEntities("appeal_record", appealRecordMapper, appealRecordSearchRepository, AppealRecordDocument::fromEntity, AppealRecord::getAppealId);
+        syncEntities("appeal_review", appealReviewMapper, appealReviewSearchRepository, AppealReviewDocument::fromEntity, AppealReview::getReviewId);
+        syncEntities("fine_record", fineRecordMapper, fineRecordSearchRepository, FineRecordDocument::fromEntity, FineRecord::getFineId);
+        syncEntities("deduction_record", deductionRecordMapper, deductionRecordSearchRepository, DeductionRecordDocument::fromEntity, DeductionRecord::getDeductionId);
+        syncEntities("payment_record", paymentRecordMapper, paymentRecordSearchRepository, PaymentRecordDocument::fromEntity, PaymentRecord::getPaymentId);
+        syncEntities("offense_type_dict", offenseTypeDictMapper, offenseTypeDictSearchRepository, OffenseTypeDictDocument::fromEntity, OffenseTypeDict::getTypeId);
+        syncEntities("sys_user", sysUserMapper, sysUserSearchRepository, SysUserDocument::fromEntity, SysUser::getUserId);
+        syncEntities("sys_role", sysRoleMapper, sysRoleSearchRepository, SysRoleDocument::fromEntity, SysRole::getRoleId);
+        syncEntities("sys_user_role", sysUserRoleMapper, sysUserRoleSearchRepository, SysUserRoleDocument::fromEntity, SysUserRole::getId);
+        syncEntities("sys_permission", sysPermissionMapper, sysPermissionSearchRepository, SysPermissionDocument::fromEntity, SysPermission::getPermissionId);
+        syncEntities("sys_dict", sysDictMapper, sysDictSearchRepository, SysDictDocument::fromEntity, SysDict::getDictId);
+        syncEntities("sys_settings", sysSettingsMapper, sysSettingsSearchRepository, SysSettingsDocument::fromEntity, SysSettings::getSettingId);
+        syncEntities("sys_backup_restore", sysBackupRestoreMapper, sysBackupRestoreSearchRepository, SysBackupRestoreDocument::fromEntity, SysBackupRestore::getBackupId);
+        syncEntities("sys_request_history", sysRequestHistoryMapper, sysRequestHistorySearchRepository, SysRequestHistoryDocument::fromEntity, SysRequestHistory::getId);
+        syncEntities("sys_role_permission", sysRolePermissionMapper, sysRolePermissionSearchRepository, SysRolePermissionDocument::fromEntity, SysRolePermission::getId);
+        syncEntities("audit_login_log", auditLoginLogMapper, auditLoginLogSearchRepository, AuditLoginLogDocument::fromEntity, AuditLoginLog::getLogId);
+        syncEntities("audit_operation_log", auditOperationLogMapper, auditOperationLogSearchRepository, AuditOperationLogDocument::fromEntity, AuditOperationLog::getLogId);
 
-        syncEntities("driver_vehicle",
-                driverVehicleMapper.selectList(null),
-                driverVehicleSearchRepository,
-                DriverVehicleDocument::fromEntity,
-                DriverVehicle::getId);
-
-        syncEntities("offense_record",
-                offenseRecordMapper.selectList(null),
-                offenseInformationSearchRepository,
-                OffenseRecordDocument::fromEntity,
-                OffenseRecord::getOffenseId);
-
-        syncEntities("appeal_record",
-                appealRecordMapper.selectList(null),
-                appealRecordSearchRepository,
-                AppealRecordDocument::fromEntity,
-                AppealRecord::getAppealId);
-
-        syncEntities("appeal_review",
-                appealReviewMapper.selectList(null),
-                appealReviewSearchRepository,
-                AppealReviewDocument::fromEntity,
-                AppealReview::getReviewId);
-
-        syncEntities("fine_record",
-                fineRecordMapper.selectList(null),
-                fineRecordSearchRepository,
-                FineRecordDocument::fromEntity,
-                FineRecord::getFineId);
-
-        syncEntities("deduction_record",
-                deductionRecordMapper.selectList(null),
-                deductionRecordSearchRepository,
-                DeductionRecordDocument::fromEntity,
-                DeductionRecord::getDeductionId);
-
-        syncEntities("payment_record",
-                paymentRecordMapper.selectList(null),
-                paymentRecordSearchRepository,
-                PaymentRecordDocument::fromEntity,
-                PaymentRecord::getPaymentId);
-
-        syncEntities("offense_type_dict",
-                offenseTypeDictMapper.selectList(null),
-                offenseTypeDictSearchRepository,
-                OffenseTypeDictDocument::fromEntity,
-                OffenseTypeDict::getTypeId);
-
-        syncEntities("sys_user",
-                sysUserMapper.selectList(null),
-                sysUserSearchRepository,
-                SysUserDocument::fromEntity,
-                SysUser::getUserId);
-
-        syncEntities("sys_role",
-                sysRoleMapper.selectList(null),
-                sysRoleSearchRepository,
-                SysRoleDocument::fromEntity,
-                SysRole::getRoleId);
-
-        syncEntities("sys_user_role",
-                sysUserRoleMapper.selectList(null),
-                sysUserRoleSearchRepository,
-                SysUserRoleDocument::fromEntity,
-                SysUserRole::getId);
-
-        syncEntities("sys_permission",
-                sysPermissionMapper.selectList(null),
-                sysPermissionSearchRepository,
-                SysPermissionDocument::fromEntity,
-                SysPermission::getPermissionId);
-
-        syncEntities("sys_dict",
-                sysDictMapper.selectList(null),
-                sysDictSearchRepository,
-                SysDictDocument::fromEntity,
-                SysDict::getDictId);
-
-        syncEntities("sys_settings",
-                sysSettingsMapper.selectList(null),
-                sysSettingsSearchRepository,
-                SysSettingsDocument::fromEntity,
-                SysSettings::getSettingId);
-
-        syncEntities("sys_backup_restore",
-                sysBackupRestoreMapper.selectList(null),
-                sysBackupRestoreSearchRepository,
-                SysBackupRestoreDocument::fromEntity,
-                SysBackupRestore::getBackupId);
-
-        syncEntities("sys_request_history",
-                sysRequestHistoryMapper.selectList(null),
-                sysRequestHistorySearchRepository,
-                SysRequestHistoryDocument::fromEntity,
-                SysRequestHistory::getId);
-
-        syncEntities("sys_role_permission",
-                sysRolePermissionMapper.selectList(null),
-                sysRolePermissionSearchRepository,
-                SysRolePermissionDocument::fromEntity,
-                SysRolePermission::getId);
-
-        syncEntities("audit_login_log",
-                auditLoginLogMapper.selectList(null),
-                auditLoginLogSearchRepository,
-                AuditLoginLogDocument::fromEntity,
-                AuditLoginLog::getLogId);
-
-        syncEntities("audit_operation_log",
-                auditOperationLogMapper.selectList(null),
-                auditOperationLogSearchRepository,
-                AuditOperationLogDocument::fromEntity,
-                AuditOperationLog::getLogId);
-
-        LOG.log(Level.INFO, "数据库 -> Elasticsearch 同步完成");
+        LOG.log(Level.INFO, "Finished startup database to Elasticsearch sync");
     }
 
     private <T, ID, D> void syncEntities(String entityType,
-                                         List<T> entities,
+                                         BaseMapper<T> mapper,
                                          ElasticsearchRepository<D, ID> repository,
                                          Function<T, D> converter,
                                          Function<T, ID> idExtractor) {
-        if (entities == null || entities.isEmpty()) {
-            LOG.log(Level.INFO, "实体 {0} 在数据库中没有记录需要同步", entityType);
+        long pageNumber = 1L;
+        int savedCount = 0;
+        int failedCount = 0;
+        int batchCount = 0;
+
+        while (true) {
+            Page<T> batchPage = new Page<>(pageNumber, syncBatchSize, false);
+            List<T> records = mapper.selectPage(batchPage, null).getRecords();
+            if (records == null || records.isEmpty()) {
+                break;
+            }
+
+            List<D> documents = new ArrayList<>(records.size());
+            for (T entity : records) {
+                try {
+                    D document = converter.apply(entity);
+                    if (document == null) {
+                        failedCount++;
+                        LOG.log(Level.WARNING, "Skipping {0} record because document conversion returned null. id={1}",
+                                new Object[]{entityType, idExtractor.apply(entity)});
+                        continue;
+                    }
+                    documents.add(document);
+                } catch (Exception error) {
+                    failedCount++;
+                    LOG.log(Level.WARNING, "Failed to convert {0} record. id={1}, error={2}",
+                            new Object[]{entityType, idExtractor.apply(entity), error.getMessage()});
+                }
+            }
+
+            savedCount += saveBatch(entityType, repository, documents, records, converter, idExtractor);
+            batchCount++;
+            LOG.log(Level.INFO, "Synced Elasticsearch batch for {0}: batch={1}, fetched={2}, saved={3}, failed={4}",
+                    new Object[]{entityType, batchCount, records.size(), savedCount, failedCount});
+
+            if (records.size() < syncBatchSize) {
+                break;
+            }
+            pageNumber++;
+        }
+
+        if (batchCount == 0) {
+            LOG.log(Level.INFO, "No records found for Elasticsearch startup sync: {0}", entityType);
             return;
         }
-        for (T entity : entities) {
+
+        LOG.log(Level.INFO, "Completed Elasticsearch startup sync for {0}: batches={1}, saved={2}, failed={3}",
+                new Object[]{entityType, batchCount, savedCount, failedCount});
+    }
+
+    private <T, ID, D> int saveBatch(String entityType,
+                                     ElasticsearchRepository<D, ID> repository,
+                                     List<D> documents,
+                                     List<T> sourceRecords,
+                                     Function<T, D> converter,
+                                     Function<T, ID> idExtractor) {
+        if (documents == null || documents.isEmpty()) {
+            return 0;
+        }
+
+        try {
+            repository.saveAll(documents);
+            return documents.size();
+        } catch (Exception batchError) {
+            LOG.log(Level.SEVERE, "Batch sync failed for {0}, retrying each document individually: {1}",
+                    new Object[]{entityType, batchError.getMessage()});
+        }
+
+        int saved = 0;
+        for (T entity : sourceRecords) {
             try {
                 D document = converter.apply(entity);
                 if (document == null) {
-                    LOG.log(Level.WARNING, "实体 {0} 转换为文档失败，ID={1}", new Object[]{entityType, idExtractor.apply(entity)});
                     continue;
                 }
                 repository.save(document);
-                LOG.log(Level.INFO, "已同步 {0} -> ES，ID={1}", new Object[]{entityType, idExtractor.apply(entity)});
-            } catch (Exception e) {
-                LOG.log(Level.SEVERE, "同步 {0} 失败，ID={1}, 错误: {2}",
-                        new Object[]{entityType, idExtractor.apply(entity), e.getMessage()});
+                saved++;
+            } catch (Exception itemError) {
+                LOG.log(Level.SEVERE, "Failed to sync {0} record to Elasticsearch. id={1}, error={2}",
+                        new Object[]{entityType, idExtractor.apply(entity), itemError.getMessage()});
             }
         }
-        LOG.log(Level.INFO, "完成 {0} 条 {1} 的同步", new Object[]{entities.size(), entityType});
+        return saved;
     }
 }

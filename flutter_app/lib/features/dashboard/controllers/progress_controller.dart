@@ -7,10 +7,10 @@ import 'package:final_assignment_front/i18n/progress_localizers.dart';
 import 'package:final_assignment_front/utils/helpers/api_exception.dart';
 import 'package:final_assignment_front/utils/helpers/role_utils.dart';
 import 'package:final_assignment_front/utils/services/api_client.dart';
+import 'package:final_assignment_front/utils/services/auth_token_store.dart';
 import 'package:final_assignment_front/utils/ui/ui_utils.dart';
 import 'package:get/get.dart';
 import 'package:jwt_decoder/jwt_decoder.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 class ProgressController extends GetxController {
   static const int _progressPageSize = 100;
@@ -71,8 +71,7 @@ class ProgressController extends GetxController {
   }
 
   Future<void> _loadUserRole() async {
-    final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString('jwtToken');
+    final token = await AuthTokenStore.instance.getJwtToken();
     if (token == null || token.isEmpty) {
       _isAdmin.value = false;
       return;
@@ -326,8 +325,7 @@ class ProgressController extends GetxController {
   }
 
   Future<String> _requireJwtToken() async {
-    final prefs = await SharedPreferences.getInstance();
-    final jwtToken = prefs.getString('jwtToken');
+    final jwtToken = await AuthTokenStore.instance.getJwtToken();
     if (jwtToken == null || jwtToken.isEmpty) {
       throw Exception('auth.error.loginRequiredForReset'.tr);
     }

@@ -12,6 +12,7 @@ import 'package:final_assignment_front/i18n/status_localizers.dart';
 import 'package:final_assignment_front/i18n/vehicle_field_localizers.dart';
 import 'package:final_assignment_front/utils/helpers/api_exception.dart';
 import 'package:final_assignment_front/utils/helpers/role_utils.dart';
+import 'package:final_assignment_front/utils/services/auth_token_store.dart';
 import 'package:get/get.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:jwt_decoder/jwt_decoder.dart';
@@ -114,7 +115,6 @@ class _VehicleManagementState extends State<VehicleManagement> {
   List<VehicleInformation> _filteredVehicleList = [];
   bool _isLoading = true;
   String _errorMessage = '';
-  String? _currentDriverName;
   String? _currentDriverIdCardNumber;
   bool _hasMore = true;
   String _searchType = kVehicleSearchTypeLicensePlate;
@@ -171,7 +171,7 @@ class _VehicleManagementState extends State<VehicleManagement> {
     try {
       final prefs = await SharedPreferences.getInstance();
       if (!mounted) return;
-      final jwtToken = prefs.getString('jwtToken');
+      final jwtToken = await AuthTokenStore.instance.getJwtToken();
       if (jwtToken == null) {
         throw Exception('vehicle.error.jwtMissingRelogin'.tr);
       }
@@ -187,7 +187,7 @@ class _VehicleManagementState extends State<VehicleManagement> {
       if (!mounted) return;
       final driverInfo = await _fetchDriverInformation();
       if (!mounted) return;
-      _currentDriverName = _resolveVehicleOwnerName(
+      _resolveVehicleOwnerName(
         driverInfo: driverInfo,
         user: user,
         prefs: prefs,
@@ -196,8 +196,6 @@ class _VehicleManagementState extends State<VehicleManagement> {
         driverInfo: driverInfo,
         user: user,
       );
-      debugPrint(
-          'Current driver name: $_currentDriverName, idCardNumber: $_currentDriverIdCardNumber');
 
       if (_currentDriverIdCardNumber == null ||
           _currentDriverIdCardNumber!.isEmpty) {
@@ -271,8 +269,6 @@ class _VehicleManagementState extends State<VehicleManagement> {
       if (!mounted) return;
       final filteredVehicles = _buildFilteredVehicles(vehicles, searchQuery);
 
-      debugPrint(
-          'Vehicles fetched: ${vehicles.map((v) => v.toJson()).toList()}');
       _setStateSafely(() {
         _vehicleList
           ..clear()
@@ -311,19 +307,15 @@ class _VehicleManagementState extends State<VehicleManagement> {
     _setStateSafely(() {
       _filteredVehicleList = filteredVehicles;
       _errorMessage = _resolveVehicleListErrorMessage(filteredVehicles, query);
-      debugPrint('Filtered vehicles: ${_filteredVehicleList.length}');
     });
   }
 
   Future<List<String>> _fetchAutocompleteSuggestions(String prefix) async {
     if (_currentDriverIdCardNumber == null) {
-      debugPrint('Cannot fetch suggestions: idCardNumber is null');
       return [];
     }
     try {
       if (_searchType == kVehicleSearchTypeLicensePlate) {
-        debugPrint(
-            'Fetching license plate suggestions for idCardNumber: $_currentDriverIdCardNumber, prefix: $prefix');
         final suggestions = await vehicleApi.apiVehiclesMeAutocompletePlatesGet(
           prefix: prefix,
           size: 5,
@@ -332,8 +324,6 @@ class _VehicleManagementState extends State<VehicleManagement> {
             .where((s) => s.toLowerCase().contains(prefix.toLowerCase()))
             .toList();
       } else {
-        debugPrint(
-            'Fetching vehicle type suggestions for idCardNumber: $_currentDriverIdCardNumber, prefix: $prefix');
         final suggestions = await vehicleApi.apiVehiclesMeAutocompleteTypesGet(
           prefix: prefix,
           size: 5,
@@ -810,8 +800,7 @@ class _AddVehiclePageState extends State<AddVehiclePage> {
   Future<void> _initialize() async {
     setState(() => _isLoading = true);
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final jwtToken = prefs.getString('jwtToken');
+      final jwtToken = await AuthTokenStore.instance.getJwtToken();
       if (jwtToken == null) throw Exception('vehicle.error.jwtMissing'.tr);
 
       await vehicleApi.initializeWithJwt();
@@ -1218,8 +1207,7 @@ class _EditVehiclePageState extends State<EditVehiclePage> {
   }
 
   Future<void> _initializeFields() async {
-    final prefs = await SharedPreferences.getInstance();
-    final jwtToken = prefs.getString('jwtToken');
+    final jwtToken = await AuthTokenStore.instance.getJwtToken();
     if (jwtToken == null) throw Exception('vehicle.error.jwtMissing'.tr);
 
     await userApi.initializeWithJwt();
@@ -1591,8 +1579,7 @@ class _VehicleDetailPageState extends State<VehicleDetailPage> {
   Future<void> _initialize() async {
     setState(() => _isLoading = true);
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final jwtToken = prefs.getString('jwtToken');
+      final jwtToken = await AuthTokenStore.instance.getJwtToken();
       if (jwtToken == null) {
         throw Exception('vehicle.error.jwtMissingRelogin'.tr);
       }
@@ -1637,8 +1624,7 @@ class _VehicleDetailPageState extends State<VehicleDetailPage> {
 
   Future<void> _checkUserRole() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final jwtToken = prefs.getString('jwtToken');
+      final jwtToken = await AuthTokenStore.instance.getJwtToken();
       if (jwtToken == null) {
         throw Exception('vehicle.error.jwtMissingRelogin'.tr);
       }

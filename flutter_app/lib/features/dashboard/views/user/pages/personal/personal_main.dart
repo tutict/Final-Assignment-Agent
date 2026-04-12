@@ -6,6 +6,7 @@ import 'package:final_assignment_front/features/dashboard/views/user/widgets/use
 import 'package:final_assignment_front/features/model/driver_information.dart';
 import 'package:final_assignment_front/features/model/user_management.dart';
 import 'package:final_assignment_front/i18n/personal_field_localizers.dart';
+import 'package:final_assignment_front/utils/services/auth_token_store.dart';
 import 'package:final_assignment_front/utils/ui/ui_utils.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
@@ -72,7 +73,7 @@ class _PersonalMainPageState extends State<PersonalMainPage> {
     });
     try {
       final prefs = await SharedPreferences.getInstance();
-      final jwtToken = prefs.getString('jwtToken');
+      final jwtToken = await AuthTokenStore.instance.getJwtToken();
       if (jwtToken == null) {
         throw Exception('personal.error.notLoggedIn'.tr);
       }

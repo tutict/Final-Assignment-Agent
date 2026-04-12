@@ -3,6 +3,8 @@ package com.tutict.finalassignmentbackend.config;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.tutict.finalassignmentbackend.config.login.jwt.AuthenticationSnapshot;
+import com.tutict.finalassignmentbackend.config.login.jwt.AuthenticationSnapshotService;
 import com.tutict.finalassignmentbackend.config.login.jwt.TokenProvider;
 import com.tutict.finalassignmentbackend.config.websocket.WsActionRegistry;
 import com.tutict.finalassignmentbackend.model.ai.AgentEvent;
@@ -21,6 +23,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
@@ -28,6 +31,8 @@ import org.reactivestreams.Publisher;
 import reactor.core.publisher.Flux;
 
 import java.lang.reflect.Method;
+import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -39,6 +44,22 @@ import static io.vertx.core.Vertx.vertx;
 @Slf4j
 @Component
 public class NetWorkHandler extends AbstractVerticle {
+    private static final Set<String> SENSITIVE_HEADERS = Set.of(
+            "authorization",
+            "cookie",
+            "set-cookie",
+            "proxy-authorization"
+    );
+    private static final Set<String> SENSITIVE_FIELDS = Set.of(
+            "token",
+            "jwttoken",
+            "refreshtoken",
+            "authorization",
+            "password",
+            "currentpassword",
+            "newpassword",
+            "accesstoken"
+    );
 
     @Value("${network.server.port:8081}")
     int port;
@@ -49,17 +70,24 @@ public class NetWorkHandler extends AbstractVerticle {
     @Value("${backend.port}")
     int backendPort;
 
+    @Value("${network.cors.allowed-origins:}")
+    String allowedOriginsConfig;
+
     TokenProvider tokenProvider;
 
     @Lazy
     WsActionRegistry wsActionRegistry;
 
     private final ObjectMapper objectMapper;
+    private final AuthenticationSnapshotService authenticationSnapshotService;
     private WebClient webClient;
 
-    public NetWorkHandler(TokenProvider tokenProvider, ObjectMapper objectMapper) {
+    public NetWorkHandler(TokenProvider tokenProvider,
+                          ObjectMapper objectMapper,
+                          AuthenticationSnapshotService authenticationSnapshotService) {
         this.tokenProvider = tokenProvider;
         this.objectMapper = objectMapper;
+        this.authenticationSnapshotService = authenticationSnapshotService;
     }
 
     @PostConstruct
@@ -124,8 +152,12 @@ public class NetWorkHandler extends AbstractVerticle {
                 "Sec-WebSocket-Version", "Sec-WebSocket-Protocol", "Content-Type", "Accept"
         );
 
-        router.route().handler(CorsHandler.create()
-                .addOrigin("*")
+        CorsHandler corsHandler = CorsHandler.create();
+        Arrays.stream(allowedOriginsConfig.split(","))
+                .map(String::trim)
+                .filter(origin -> !origin.isEmpty())
+                .forEach(corsHandler::addOrigin);
+        router.route().handler(corsHandler
                 .allowedHeaders(allowedHeaders)
                 .allowedMethod(io.vertx.core.http.HttpMethod.GET)
                 .allowedMethod(io.vertx.core.http.HttpMethod.POST)
@@ -139,18 +171,11 @@ public class NetWorkHandler extends AbstractVerticle {
                 String message = frame.textData();
                 try {
                     JsonNode root = objectMapper.readTree(message);
-                    String token = root.path("token").asText(null);
-
-                    if (token == null || !tokenProvider.validateToken(token)) {
-                        log.warn("Invalid token, closing WS");
-                        ws.close((short) 1000, "Invalid token").onSuccess(result -> log.info("WebSocket closed due to invalid token: {}", result))
-                                .onFailure(failure -> log.error("Error closing WebSocket: {}", failure.getMessage(), failure));
-                        return;
-                    }
-
                     String service = root.path("service").asText(null);
                     String action = root.path("action").asText(null);
                     String idempotencyKey = root.path("idempotencyKey").asText(null);
+                    String token = resolveWebSocketToken(ws, root.path("token").asText(null));
+                    AuthenticationSnapshot authenticationSnapshot = resolveAuthenticationSnapshot(token);
 
                     JsonNode argsArray = root.path("args");
                     if (argsArray.isMissingNode() || !argsArray.isArray()) {
@@ -169,6 +194,15 @@ public class NetWorkHandler extends AbstractVerticle {
                         ws.writeTextMessage("{\"error\":\"No such WsAction for " + service + "#" + action + "\"}")
                                 .onSuccess(result -> log.info("WebSocket write success: {}", result))
                                 .onFailure(failure -> log.error("WebSocket write failure: {}", failure.getMessage(), failure));
+                        return;
+                    }
+
+                    if (!isAuthorized(handler, token, authenticationSnapshot)) {
+                        log.warn("Rejected unauthorized WebSocket action {}#{}", service, action);
+                        ws.writeTextMessage("{\"error\":\"Forbidden\"}")
+                                .onSuccess(result -> log.info("WebSocket write success: {}", result))
+                                .onFailure(failure -> log.error("WebSocket write failure: {}", failure.getMessage(), failure));
+                        ws.close((short) 1008, "Forbidden");
                         return;
                     }
 
@@ -193,7 +227,7 @@ public class NetWorkHandler extends AbstractVerticle {
                     }
 
                     SecurityContext previousContext = SecurityContextHolder.getContext();
-                    SecurityContext currentContext = buildSecurityContext(token);
+                    SecurityContext currentContext = buildSecurityContext(authenticationSnapshot);
                     Object result;
                     try {
                         SecurityContextHolder.setContext(currentContext);
@@ -297,15 +331,69 @@ public class NetWorkHandler extends AbstractVerticle {
         }
     }
 
-    private SecurityContext buildSecurityContext(String token) {
+    private SecurityContext buildSecurityContext(AuthenticationSnapshot snapshot) {
         SecurityContext context = SecurityContextHolder.createEmptyContext();
-        String username = tokenProvider.getUsernameFromToken(token);
-        List<org.springframework.security.core.authority.SimpleGrantedAuthority> authorities = tokenProvider.extractRoles(token)
-                .stream()
-                .map(org.springframework.security.core.authority.SimpleGrantedAuthority::new)
-                .collect(Collectors.toList());
-        context.setAuthentication(new UsernamePasswordAuthenticationToken(username, null, authorities));
+        if (snapshot == null) {
+            return context;
+        }
+        context.setAuthentication(new UsernamePasswordAuthenticationToken(
+                snapshot.username(),
+                null,
+                snapshot.grantedAuthorities()
+        ));
         return context;
+    }
+
+    private AuthenticationSnapshot resolveAuthenticationSnapshot(String token) {
+        if (token == null || token.isBlank()) {
+            return null;
+        }
+        String username = tokenProvider.getUsernameFromToken(token);
+        return authenticationSnapshotService.findActiveSnapshotByUsername(username);
+    }
+
+    private String resolveWebSocketToken(ServerWebSocket ws, String messageToken) {
+        if (messageToken != null && !messageToken.isBlank()) {
+            return messageToken.trim();
+        }
+        String authorization = ws.headers().get("Authorization");
+        if (authorization != null && authorization.startsWith("Bearer ")) {
+            return authorization.substring(7).trim();
+        }
+        return null;
+    }
+
+    private boolean isAuthorized(WsActionRegistry.HandlerMethod handler, String token, AuthenticationSnapshot snapshot) {
+        var wsAction = handler.getWsAction();
+        if (wsAction == null) {
+            return false;
+        }
+        if (wsAction.allowAnonymous()) {
+            return true;
+        }
+        if (token == null || token.isBlank() || !tokenProvider.validateToken(token) || !tokenProvider.isAccessToken(token)) {
+            return false;
+        }
+        if (snapshot == null) {
+            return false;
+        }
+        String[] rolesAllowed = wsAction.rolesAllowed();
+        if (rolesAllowed == null || rolesAllowed.length == 0) {
+            return true;
+        }
+        Authentication authentication = buildSecurityContext(snapshot).getAuthentication();
+        if (authentication == null) {
+            return false;
+        }
+        Set<String> granted = authentication.getAuthorities().stream()
+                .map(authority -> authority == null ? null : authority.getAuthority())
+                .filter(authority -> authority != null && !authority.isBlank())
+                .collect(Collectors.toSet());
+        return Arrays.stream(rolesAllowed)
+                .map(role -> role == null ? "" : role.trim())
+                .filter(role -> !role.isEmpty())
+                .map(role -> role.startsWith("ROLE_") ? role : "ROLE_" + role)
+                .anyMatch(granted::contains);
     }
 
     private void forwardHttpRequest(HttpServerRequest request) {
@@ -313,7 +401,7 @@ public class NetWorkHandler extends AbstractVerticle {
         String path = request.path();
         String query = request.query();
         String targetUrl = backendUrl + ":" + backendPort + path + (query != null ? "?" + query : "");
-        log.info("[{}] Forwarding request from path: {} to targetUrl: {}", requestId, path, targetUrl);
+        log.debug("[{}] Forwarding request from path: {} to targetUrl: {}", requestId, path, targetUrl);
 
         if (request.headers().contains("X-Forwarded-By")) {
             log.error("[{}] Detected circular forwarding, aborting request", requestId);
@@ -326,17 +414,18 @@ public class NetWorkHandler extends AbstractVerticle {
         MultiMap headers = MultiMap.caseInsensitiveMultiMap();
         request.headers().forEach(entry -> {
             headers.add(entry.getKey(), entry.getValue());
-            log.info("[{}] Forwarded header: {} = {}", requestId, entry.getKey(), entry.getValue());
+            log.debug("[{}] Forwarded header: {} = {}", requestId, entry.getKey(),
+                    redactHeaderValue(entry.getKey(), entry.getValue()));
         });
 
         MultiMap queryParams = request.params();
-        log.info("[{}] Query params: {}", requestId, queryParams);
+        log.debug("[{}] Query params: {}", requestId, queryParams);
 
         HttpMethod method = request.method();
         var httpRequest = webClient.requestAbs(method, targetUrl).putHeaders(headers);
 
         if (method == HttpMethod.GET || method == HttpMethod.DELETE) {
-            log.info("[{}] Forwarding {} request with query params: {}", requestId, method, queryParams);
+            log.debug("[{}] Forwarding {} request with query params: {}", requestId, method, queryParams);
             httpRequest.send()
                     .onSuccess(response -> handleResponse(request, response, requestId))
                     .onFailure(failure -> {
@@ -348,7 +437,7 @@ public class NetWorkHandler extends AbstractVerticle {
                 try {
                     String contentType = request.getHeader("Content-Type");
                     if (body.length() == 0) {
-                        log.info("[{}] No body provided for {} request, proceeding with empty request", requestId, method);
+                        log.debug("[{}] No body provided for {} request, proceeding with empty request", requestId, method);
                         httpRequest.send()
                                 .onSuccess(response -> handleResponse(request, response, requestId))
                                 .onFailure(failure -> {
@@ -357,7 +446,7 @@ public class NetWorkHandler extends AbstractVerticle {
                                 });
                     } else if (contentType != null && contentType.toLowerCase().contains("text/plain")) {
                         String rawBody = body.toString();
-                        log.info("[{}] Raw body for {}: {}", requestId, method, rawBody);
+                        log.debug("[{}] Raw body for {}: {}", requestId, method, sanitizeForLog(rawBody));
                         httpRequest.putHeader("Content-Type", contentType);
                         httpRequest.sendBuffer(Buffer.buffer(rawBody))
                                 .onSuccess(response -> handleResponse(request, response, requestId))
@@ -367,7 +456,7 @@ public class NetWorkHandler extends AbstractVerticle {
                                 });
                     } else if (contentType != null && contentType.toLowerCase().contains("application/json")) {
                         JsonObject jsonBody = body.toJsonObject();
-                        log.info("[{}] JSON body for {}: {}", requestId, method, jsonBody);
+                        log.debug("[{}] JSON body for {}: {}", requestId, method, sanitizeForLog(jsonBody.encode()));
                         httpRequest.putHeader("Content-Type", "application/json");
                         httpRequest.sendJsonObject(jsonBody)
                                 .onSuccess(response -> handleResponse(request, response, requestId))
@@ -393,10 +482,10 @@ public class NetWorkHandler extends AbstractVerticle {
     }
 
     private void handleResponse(HttpServerRequest request, HttpResponse<io.vertx.core.buffer.Buffer> response, String requestId) {
-        log.info("[{}] Response status code: {}", requestId, response.statusCode());
-        log.info("[{}] Response headers: {}", requestId, response.headers());
+        log.debug("[{}] Response status code: {}", requestId, response.statusCode());
+        log.debug("[{}] Response headers: {}", requestId, sanitizeHeaders(response.headers().entries()));
         String responseBody = response.bodyAsString();
-        log.info("[{}] Backend response body: {}", requestId, responseBody != null ? responseBody : "null");
+        log.debug("[{}] Backend response body: {}", requestId, responseBody != null ? sanitizeForLog(responseBody) : "null");
 
         HttpServerResponse clientResponse = request.response();
         clientResponse.setStatusCode(response.statusCode());
@@ -422,6 +511,56 @@ public class NetWorkHandler extends AbstractVerticle {
             log.warn("[{}] Response body is null or empty, status: {}", requestId, response.statusCode());
             clientResponse.putHeader("Content-Type", "application/json");
             clientResponse.end();
+        }
+    }
+
+    private String redactHeaderValue(String name, String value) {
+        return name != null && SENSITIVE_HEADERS.contains(name.toLowerCase())
+                ? "<redacted>"
+                : sanitizeForLog(value);
+    }
+
+    private Map<String, String> sanitizeHeaders(Iterable<Map.Entry<String, String>> entries) {
+        Map<String, String> sanitized = new LinkedHashMap<>();
+        for (Map.Entry<String, String> entry : entries) {
+            sanitized.put(entry.getKey(), redactHeaderValue(entry.getKey(), entry.getValue()));
+        }
+        return sanitized;
+    }
+
+    private String sanitizeForLog(String value) {
+        if (value == null || value.isBlank()) {
+            return value;
+        }
+        try {
+            JsonNode root = objectMapper.readTree(value);
+            redactJsonNode(root);
+            return objectMapper.writeValueAsString(root);
+        } catch (Exception ignored) {
+            return value;
+        }
+    }
+
+    private void redactJsonNode(JsonNode node) {
+        if (node == null) {
+            return;
+        }
+        if (node.isObject()) {
+            var fields = node.fields();
+            while (fields.hasNext()) {
+                Map.Entry<String, JsonNode> entry = fields.next();
+                if (SENSITIVE_FIELDS.contains(entry.getKey().toLowerCase())) {
+                    ((com.fasterxml.jackson.databind.node.ObjectNode) node).put(entry.getKey(), "<redacted>");
+                } else {
+                    redactJsonNode(entry.getValue());
+                }
+            }
+            return;
+        }
+        if (node.isArray()) {
+            for (JsonNode child : node) {
+                redactJsonNode(child);
+            }
         }
     }
 }

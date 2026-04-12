@@ -32,6 +32,7 @@ public class OffenseTypeDictService {
 
     private static final Logger log = Logger.getLogger(OffenseTypeDictService.class.getName());
     private static final String CACHE_NAME = "offenseTypeDictCache";
+    private static final int FULL_LOAD_BATCH_SIZE = 500;
 
     private final OffenseTypeDictMapper offenseTypeDictMapper;
     private final SysRequestHistoryMapper sysRequestHistoryMapper;
@@ -115,7 +116,6 @@ public class OffenseTypeDictService {
     }
 
     @Transactional(readOnly = true)
-    @Cacheable(cacheNames = CACHE_NAME, key = "'all'", unless = "#result == null || #result.isEmpty()")
     public List<OffenseTypeDict> findAll() {
         List<OffenseTypeDict> fromIndex = StreamSupport.stream(offenseTypeDictSearchRepository.findAll().spliterator(), false)
                 .map(OffenseTypeDictDocument::toEntity)
@@ -123,9 +123,7 @@ public class OffenseTypeDictService {
         if (!fromIndex.isEmpty()) {
             return fromIndex;
         }
-        List<OffenseTypeDict> fromDb = offenseTypeDictMapper.selectList(null);
-        syncBatchToIndexAfterCommit(fromDb);
-        return fromDb;
+        return loadAllFromDatabase();
     }
 
     @Transactional(readOnly = true)
@@ -427,6 +425,28 @@ public class OffenseTypeDictService {
         List<OffenseTypeDict> records = mpPage.getRecords();
         syncBatchToIndexAfterCommit(records);
         return records;
+    }
+
+    private List<OffenseTypeDict> loadAllFromDatabase() {
+        List<OffenseTypeDict> allRecords = new java.util.ArrayList<>();
+        long currentPage = 1L;
+        while (true) {
+            QueryWrapper<OffenseTypeDict> wrapper = new QueryWrapper<>();
+            wrapper.orderByAsc("type_id");
+            Page<OffenseTypeDict> mpPage = new Page<>(currentPage, FULL_LOAD_BATCH_SIZE);
+            offenseTypeDictMapper.selectPage(mpPage, wrapper);
+            List<OffenseTypeDict> records = mpPage.getRecords();
+            if (records == null || records.isEmpty()) {
+                break;
+            }
+            allRecords.addAll(records);
+            syncBatchToIndexAfterCommit(records);
+            if (records.size() < FULL_LOAD_BATCH_SIZE) {
+                break;
+            }
+            currentPage++;
+        }
+        return allRecords;
     }
 
     private List<OffenseTypeDict> mapHits(org.springframework.data.elasticsearch.core.SearchHits<OffenseTypeDictDocument> hits) {

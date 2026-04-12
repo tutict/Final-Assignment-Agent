@@ -1,6 +1,7 @@
 package com.tutict.finalassignmentbackend.config;
 
 import com.tutict.finalassignmentbackend.config.login.jwt.JwtAuthenticationFilter;
+import com.tutict.finalassignmentbackend.config.login.jwt.AuthenticationSnapshotService;
 import com.tutict.finalassignmentbackend.config.login.jwt.TokenProvider;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -18,9 +19,12 @@ import org.springframework.security.web.authentication.AnonymousAuthenticationFi
 public class SecurityConfig {
 
     private final TokenProvider tokenProvider;
+    private final AuthenticationSnapshotService authenticationSnapshotService;
 
-    public SecurityConfig(TokenProvider tokenProvider) {
+    public SecurityConfig(TokenProvider tokenProvider,
+                          AuthenticationSnapshotService authenticationSnapshotService) {
         this.tokenProvider = tokenProvider;
+        this.authenticationSnapshotService = authenticationSnapshotService;
     }
 
     @Bean
@@ -32,9 +36,6 @@ public class SecurityConfig {
                         .requestMatchers(
                                 "/api/auth/register",
                                 "/api/auth/login",
-                                "/api/ai/chat",
-                                "/api/ai/chat/actions",
-                                "/api/ai/skills",
                                 "/api/auth/refresh",
                                 "/actuator/health"
                         ).permitAll()
@@ -46,7 +47,7 @@ public class SecurityConfig {
 
     @Bean
     public JwtAuthenticationFilter jwtAuthenticationFilter() {
-        return new JwtAuthenticationFilter(tokenProvider);
+        return new JwtAuthenticationFilter(tokenProvider, authenticationSnapshotService);
     }
 
     @Bean

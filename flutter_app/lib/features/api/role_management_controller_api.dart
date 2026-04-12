@@ -3,7 +3,6 @@ import 'package:final_assignment_front/i18n/api_error_localizers.dart';
 import 'package:final_assignment_front/utils/helpers/api_exception.dart';
 import 'package:final_assignment_front/utils/services/api_client.dart';
 import 'package:final_assignment_front/utils/services/auth_token_store.dart';
-import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:http/http.dart' as http;
 
@@ -27,7 +26,6 @@ class RoleManagementControllerApi {
       throw Exception('api.error.notAuthenticated'.tr);
     }
     apiClient.setJwtToken(jwtToken);
-    debugPrint('Initialized RoleManagementControllerApi with token: $jwtToken');
   }
 
   /// Decodes the response body.
@@ -242,169 +240,6 @@ class RoleManagementControllerApi {
       }
     }
     throw ApiException(403, localizeCannotDetermineUserRole());
-  }
-
-  // WebSocket Methods (Aligned with HTTP Endpoints)
-
-  /// GET /api/roles (WebSocket)
-  /// Maps to @WsAction(service="RoleManagement", action="getAllRoles")
-  Future<List<RoleManagement>> eventbusRolesGet() async {
-    final msg = {
-      "service": "RoleManagement",
-      "action": "getAllRoles",
-      "args": []
-    };
-    final respMap = await apiClient.sendWsMessage(msg);
-    if (respMap.containsKey("error")) {
-      throw ApiException(
-          400, localizeApiErrorMessageOrUnknown(respMap["error"]));
-    }
-    if (respMap["result"] is List) {
-      return (respMap["result"] as List)
-          .map((json) => RoleManagement.fromJson(json as Map<String, dynamic>))
-          .toList();
-    }
-    return [];
-  }
-
-  /// DELETE /api/roles/name/{roleName} (WebSocket)
-  /// Maps to @WsAction(service="RoleManagement", action="deleteRoleByName")
-  Future<bool> eventbusRolesNameRoleNameDelete(
-      {required String roleName}) async {
-    if (roleName.isEmpty) {
-      throw ApiException(400, localizeMissingRequiredParam('roleName'));
-    }
-    final msg = {
-      "service": "RoleManagement",
-      "action": "deleteRoleByName",
-      "args": [roleName]
-    };
-    final respMap = await apiClient.sendWsMessage(msg);
-    if (respMap.containsKey("error")) {
-      throw ApiException(
-          400, localizeApiErrorMessageOrUnknown(respMap["error"]));
-    }
-    return true; // Success if no error
-  }
-
-  /// GET /api/roles/name/{roleName} (WebSocket)
-  /// Maps to @WsAction(service="RoleManagement", action="getRoleByName")
-  Future<RoleManagement?> eventbusRolesNameRoleNameGet(
-      {required String roleName}) async {
-    if (roleName.isEmpty) {
-      throw ApiException(400, localizeMissingRequiredParam('roleName'));
-    }
-    final msg = {
-      "service": "RoleManagement",
-      "action": "getRoleByName",
-      "args": [roleName]
-    };
-    final respMap = await apiClient.sendWsMessage(msg);
-    if (respMap.containsKey("error")) {
-      throw ApiException(
-          400, localizeApiErrorMessageOrUnknown(respMap["error"]));
-    }
-    if (respMap["result"] != null) {
-      return RoleManagement.fromJson(respMap["result"] as Map<String, dynamic>);
-    }
-    return null;
-  }
-
-  /// POST /api/roles (WebSocket)
-  /// Maps to @WsAction(service="RoleManagement", action="createRole")
-  Future<RoleManagement> eventbusRolesPost(
-      {required RoleManagement roleManagement, String? idempotencyKey}) async {
-    final msg = {
-      "service": "RoleManagement",
-      "action": "createRole",
-      "args": idempotencyKey != null
-          ? [roleManagement.toJson(), idempotencyKey]
-          : [roleManagement.toJson()]
-    };
-    final respMap = await apiClient.sendWsMessage(msg);
-    if (respMap.containsKey("error")) {
-      throw ApiException(
-          400, localizeApiErrorMessageOrUnknown(respMap["error"]));
-    }
-    return RoleManagement.fromJson(respMap["result"] as Map<String, dynamic>);
-  }
-
-  /// DELETE /api/roles/{roleId} (WebSocket)
-  /// Maps to @WsAction(service="RoleManagement", action="deleteRole")
-  Future<bool> eventbusRolesRoleIdDelete({required int roleId}) async {
-    final msg = {
-      "service": "RoleManagement",
-      "action": "deleteRole",
-      "args": [roleId]
-    };
-    final respMap = await apiClient.sendWsMessage(msg);
-    if (respMap.containsKey("error")) {
-      throw ApiException(
-          400, localizeApiErrorMessageOrUnknown(respMap["error"]));
-    }
-    return true; // Success if no error
-  }
-
-  /// GET /api/roles/{roleId} (WebSocket)
-  /// Maps to @WsAction(service="RoleManagement", action="getRoleById")
-  Future<RoleManagement?> eventbusRolesRoleIdGet({required int roleId}) async {
-    final msg = {
-      "service": "RoleManagement",
-      "action": "getRoleById",
-      "args": [roleId]
-    };
-    final respMap = await apiClient.sendWsMessage(msg);
-    if (respMap.containsKey("error")) {
-      throw ApiException(
-          400, localizeApiErrorMessageOrUnknown(respMap["error"]));
-    }
-    if (respMap["result"] != null) {
-      return RoleManagement.fromJson(respMap["result"] as Map<String, dynamic>);
-    }
-    return null;
-  }
-
-  /// PUT /api/roles/{roleId} (WebSocket)
-  /// Maps to @WsAction(service="RoleManagement", action="updateRole")
-  Future<RoleManagement> eventbusRolesRoleIdPut({
-    required int roleId,
-    required RoleManagement updatedRole,
-    String? idempotencyKey,
-  }) async {
-    final msg = {
-      "service": "RoleManagement",
-      "action": "updateRole",
-      "args": idempotencyKey != null
-          ? [roleId, updatedRole.toJson(), idempotencyKey]
-          : [roleId, updatedRole.toJson()]
-    };
-    final respMap = await apiClient.sendWsMessage(msg);
-    if (respMap.containsKey("error")) {
-      throw ApiException(
-          400, localizeApiErrorMessageOrUnknown(respMap["error"]));
-    }
-    return RoleManagement.fromJson(respMap["result"] as Map<String, dynamic>);
-  }
-
-  /// GET /api/roles/search (WebSocket)
-  /// Maps to @WsAction(service="RoleManagement", action="getRolesByNameLike")
-  Future<List<RoleManagement>> eventbusRolesSearchGet({String? name}) async {
-    final msg = {
-      "service": "RoleManagement",
-      "action": "getRolesByNameLike",
-      "args": [name ?? ""]
-    };
-    final respMap = await apiClient.sendWsMessage(msg);
-    if (respMap.containsKey("error")) {
-      throw ApiException(
-          400, localizeApiErrorMessageOrUnknown(respMap["error"]));
-    }
-    if (respMap["result"] is List) {
-      return (respMap["result"] as List)
-          .map((json) => RoleManagement.fromJson(json as Map<String, dynamic>))
-          .toList();
-    }
-    return [];
   }
 
   // HTTP: GET /api/roles/by-code/{roleCode} - fetch a role by code.

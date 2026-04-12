@@ -43,6 +43,7 @@ public class DeductionRecordService {
 
     private static final Logger log = Logger.getLogger(DeductionRecordService.class.getName());
     private static final String CACHE_NAME = "deductionRecordCache";
+    private static final int FULL_LOAD_BATCH_SIZE = 500;
 
     private final DeductionRecordMapper deductionRecordMapper;
     private final SysRequestHistoryMapper sysRequestHistoryMapper;
@@ -145,7 +146,6 @@ public class DeductionRecordService {
     }
 
     @Transactional(readOnly = true)
-    @Cacheable(cacheNames = CACHE_NAME, key = "'all'", unless = "#result == null || #result.isEmpty()")
     public List<DeductionRecord> findAll() {
         List<DeductionRecord> fromIndex = StreamSupport.stream(deductionRecordSearchRepository.findAll().spliterator(), false)
                 .map(DeductionRecordDocument::toEntity)
@@ -153,9 +153,7 @@ public class DeductionRecordService {
         if (!fromIndex.isEmpty()) {
             return fromIndex;
         }
-        List<DeductionRecord> fromDb = deductionRecordMapper.selectList(null);
-        syncBatchToIndexAfterCommit(fromDb);
-        return fromDb;
+        return loadAllFromDatabase();
     }
 
     @Transactional(readOnly = true)
@@ -200,6 +198,31 @@ public class DeductionRecordService {
                 .orderByDesc("updated_at")
                 .orderByDesc("deduction_time");
         return fetchFromDatabase(wrapper, page, size);
+    }
+
+    @Transactional(readOnly = true)
+    public List<Long> findIdsByDriverIds(Iterable<Long> driverIds) {
+        List<Long> normalizedIds = driverIds == null
+                ? List.of()
+                : StreamSupport.stream(driverIds.spliterator(), false)
+                .filter(Objects::nonNull)
+                .filter(id -> id > 0)
+                .distinct()
+                .collect(Collectors.toList());
+        if (normalizedIds.isEmpty()) {
+            return List.of();
+        }
+        QueryWrapper<DeductionRecord> wrapper = new QueryWrapper<>();
+        wrapper.select("deduction_id")
+                .in("driver_id", normalizedIds)
+                .orderByDesc("updated_at")
+                .orderByDesc("deduction_time");
+        return deductionRecordMapper.selectObjs(wrapper).stream()
+                .filter(Objects::nonNull)
+                .map(this::toLong)
+                .filter(Objects::nonNull)
+                .distinct()
+                .collect(Collectors.toList());
     }
 
     @Cacheable(cacheNames = CACHE_NAME, key = "'offense:' + #offenseId + ':' + #page + ':' + #size", unless = "#result == null || #result.isEmpty()")
@@ -453,6 +476,28 @@ public class DeductionRecordService {
         return records;
     }
 
+    private List<DeductionRecord> loadAllFromDatabase() {
+        List<DeductionRecord> allRecords = new java.util.ArrayList<>();
+        long currentPage = 1L;
+        while (true) {
+            QueryWrapper<DeductionRecord> wrapper = new QueryWrapper<>();
+            wrapper.orderByAsc("deduction_id");
+            Page<DeductionRecord> mpPage = new Page<>(currentPage, FULL_LOAD_BATCH_SIZE);
+            deductionRecordMapper.selectPage(mpPage, wrapper);
+            List<DeductionRecord> records = mpPage.getRecords();
+            if (records == null || records.isEmpty()) {
+                break;
+            }
+            allRecords.addAll(records);
+            syncBatchToIndexAfterCommit(records);
+            if (records.size() < FULL_LOAD_BATCH_SIZE) {
+                break;
+            }
+            currentPage++;
+        }
+        return allRecords;
+    }
+
     private org.springframework.data.domain.Pageable pageable(int page, int size) {
         return org.springframework.data.domain.PageRequest.of(Math.max(page - 1, 0), Math.max(size, 1));
     }
@@ -502,6 +547,20 @@ public class DeductionRecordService {
         if (page < 1 || size < 1) {
             throw new IllegalArgumentException("Page must be >= 1 and size must be >= 1");
         }
+    }
+
+    private Long toLong(Object value) {
+        if (value instanceof Number number) {
+            return number.longValue();
+        }
+        if (value instanceof String text) {
+            try {
+                return Long.parseLong(text.trim());
+            } catch (NumberFormatException ignored) {
+                return null;
+            }
+        }
+        return null;
     }
 
     private void requirePositive(Number number, String fieldName) {

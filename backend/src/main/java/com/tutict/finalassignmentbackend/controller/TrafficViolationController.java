@@ -189,9 +189,6 @@ public class TrafficViolationController {
 
     private List<OffenseRecord> loadOffensePage(int page, int size) {
         List<OffenseRecord> offenses = offenseRecordService.listOffenses(page, size);
-        if ((offenses == null || offenses.isEmpty()) && page == 1) {
-            offenses = offenseRecordService.findAll();
-        }
         return offenses != null ? offenses : List.of();
     }
 
@@ -218,9 +215,6 @@ public class TrafficViolationController {
 
     private List<AppealRecord> loadAppealPage(List<Long> offenseIds, int page, int size) {
         List<AppealRecord> appeals = appealRecordService.findByOffenseIds(offenseIds, page, size);
-        if ((appeals == null || appeals.isEmpty()) && page == 1) {
-            appeals = appealRecordService.findByOffenseIds(offenseIds);
-        }
         return appeals != null ? appeals : List.of();
     }
 
@@ -244,9 +238,6 @@ public class TrafficViolationController {
 
     private List<FineRecord> loadFinePage(int page, int size) {
         List<FineRecord> fines = fineRecordService.listFines(page, size);
-        if ((fines == null || fines.isEmpty()) && page == 1) {
-            fines = fineRecordService.findAll();
-        }
         return fines != null ? fines : List.of();
     }
 
@@ -328,9 +319,6 @@ public class TrafficViolationController {
 
     private List<OffenseTypeDict> loadOffenseTypePage(int page, int size) {
         List<OffenseTypeDict> offenseTypes = offenseTypeDictService.findAll(page, size);
-        if ((offenseTypes == null || offenseTypes.isEmpty()) && page == 1) {
-            offenseTypes = offenseTypeDictService.findAll();
-        }
         return offenseTypes != null ? offenseTypes : List.of();
     }
 

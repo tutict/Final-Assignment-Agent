@@ -13,33 +13,100 @@ import com.tutict.finalassignmentbackend.service.agent.AgentUserContextResolver;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.FluxSink;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 @Service
 public class ChatAgent {
 
     private static final Logger logger = LoggerFactory.getLogger(ChatAgent.class);
+    private static final int DEFAULT_MAX_CONCURRENT = 16;
+    private static final Duration DEFAULT_SKILL_TIMEOUT = Duration.ofSeconds(8);
+    private static final String ANALYZING_STATUS = "正在分析问题并规划技能执行。";
+    private static final String BUSY_STATUS = "当前 AI 会话较多，正在保护服务稳定性。";
+    private static final String BUSY_ANSWER = "当前请求较多，我暂时没有接入新的会话。请稍后再试。";
 
     private final List<AgentSkill> skills;
     private final AgentUserContextResolver agentUserContextResolver;
-    private final ExecutorService agentExecutor = Executors.newVirtualThreadPerTaskExecutor();
+    private final ExecutorService agentExecutor;
+    private final Semaphore conversationLimiter;
+    private final Duration skillTimeout;
+    private final int maxConcurrentConversations;
 
-    public ChatAgent(List<AgentSkill> skills, AgentUserContextResolver agentUserContextResolver) {
+    @Autowired
+    public ChatAgent(
+            List<AgentSkill> skills,
+            AgentUserContextResolver agentUserContextResolver,
+            @Value("${app.ai.chat.max-concurrent:16}") int maxConcurrentConversations,
+            @Value("${app.ai.chat.skill-timeout-seconds:8}") long skillTimeoutSeconds
+    ) {
+        this(
+                skills,
+                agentUserContextResolver,
+                maxConcurrentConversations,
+                Duration.ofSeconds(skillTimeoutSeconds),
+                Executors.newVirtualThreadPerTaskExecutor()
+        );
+    }
+
+    ChatAgent(List<AgentSkill> skills, AgentUserContextResolver agentUserContextResolver) {
+        this(
+                skills,
+                agentUserContextResolver,
+                DEFAULT_MAX_CONCURRENT,
+                DEFAULT_SKILL_TIMEOUT,
+                Executors.newVirtualThreadPerTaskExecutor()
+        );
+    }
+
+    ChatAgent(
+            List<AgentSkill> skills,
+            AgentUserContextResolver agentUserContextResolver,
+            int maxConcurrentConversations,
+            Duration skillTimeout
+    ) {
+        this(
+                skills,
+                agentUserContextResolver,
+                maxConcurrentConversations,
+                skillTimeout,
+                Executors.newVirtualThreadPerTaskExecutor()
+        );
+    }
+
+    private ChatAgent(
+            List<AgentSkill> skills,
+            AgentUserContextResolver agentUserContextResolver,
+            int maxConcurrentConversations,
+            Duration skillTimeout,
+            ExecutorService agentExecutor
+    ) {
         this.skills = skills.stream()
                 .sorted(Comparator.comparing(AgentSkill::id))
                 .toList();
         this.agentUserContextResolver = agentUserContextResolver;
+        this.maxConcurrentConversations = Math.max(1, maxConcurrentConversations);
+        this.skillTimeout = normalizeSkillTimeout(skillTimeout);
+        this.agentExecutor = agentExecutor;
+        this.conversationLimiter = new Semaphore(this.maxConcurrentConversations, true);
     }
 
     public Flux<ServerSentEvent<AgentEvent>> streamChat(String message, String massage, boolean webSearch) {
@@ -55,14 +122,14 @@ public class ChatAgent {
         return Flux.create(sink -> agentExecutor.submit(() -> streamConversation(context, sink)));
     }
 
-    @WsAction(service = "ChatAgent", action = "chatStream")
+    @WsAction(service = "ChatAgent", action = "chatStream", exposed = true)
     public Flux<AgentEvent> chatStream(String message, boolean webSearch) {
         return streamChatEvents(message, null, webSearch);
     }
 
     public ChatActionResponse chatWithActions(String message, String massage, boolean webSearch) {
         String userMessage = resolveUserMessage(message, massage);
-        AgentConversation conversation = executeConversation(buildContext(userMessage, webSearch));
+        AgentConversation conversation = executeConversationWithPermit(buildContext(userMessage, webSearch));
         return new ChatActionResponse(
                 conversation.answer(),
                 conversation.actions(),
@@ -78,8 +145,13 @@ public class ChatAgent {
     }
 
     private void streamConversation(AgentSkillContext context, FluxSink<AgentEvent> sink) {
+        if (!tryAcquireConversationSlot()) {
+            emitBusyConversation(context, sink);
+            return;
+        }
+
         try {
-            sink.next(AgentEvent.status("正在分析问题并规划技能执行。"));
+            sink.next(AgentEvent.status(ANALYZING_STATUS));
 
             AgentConversation conversation = executeConversation(context);
 
@@ -102,9 +174,23 @@ public class ChatAgent {
             }
 
             sink.complete();
-        } catch (Exception e) {
-            logger.error("Agent stream failed", e);
-            sink.error(e);
+        } catch (Exception error) {
+            logger.error("Agent stream failed", error);
+            sink.error(error);
+        } finally {
+            conversationLimiter.release();
+        }
+    }
+
+    private AgentConversation executeConversationWithPermit(AgentSkillContext context) {
+        if (!tryAcquireConversationSlot()) {
+            return busyConversation(context);
+        }
+
+        try {
+            return executeConversation(context);
+        } finally {
+            conversationLimiter.release();
         }
     }
 
@@ -113,16 +199,7 @@ public class ChatAgent {
                 .filter(skill -> skill.supports(context))
                 .toList();
 
-        List<CompletableFuture<AgentSkillResult>> futures = selectedSkills.stream()
-                .map(skill -> CompletableFuture.supplyAsync(() -> skill.execute(context), agentExecutor)
-                        .exceptionally(error -> {
-                            logger.warn("Skill {} failed: {}", skill.id(), error.getMessage());
-                            return AgentSkillResult.empty(skill.id());
-                        }))
-                .toList();
-
-        List<AgentSkillResult> results = futures.stream()
-                .map(CompletableFuture::join)
+        List<AgentSkillResult> results = submitSkills(selectedSkills, context).stream()
                 .filter(AgentSkillResult::hasContent)
                 .toList();
 
@@ -148,6 +225,52 @@ public class ChatAgent {
         AgentContextInfo agentContext = AgentContextInfo.from(context);
         List<String> skillNames = selectedSkills.stream().map(AgentSkill::displayName).toList();
         return new AgentConversation(answer, actions, needConfirm, searchResults, skillNames, agentContext);
+    }
+
+    private List<AgentSkillResult> submitSkills(List<AgentSkill> selectedSkills, AgentSkillContext context) {
+        if (selectedSkills.isEmpty()) {
+            return List.of();
+        }
+
+        List<SkillExecution> executions = selectedSkills.stream()
+                .map(skill -> new SkillExecution(
+                        skill,
+                        agentExecutor.submit(() -> skill.execute(context)),
+                        System.nanoTime() + skillTimeout.toNanos()
+                ))
+                .toList();
+
+        return executions.stream()
+                .map(this::awaitSkillResult)
+                .toList();
+    }
+
+    private AgentSkillResult awaitSkillResult(SkillExecution execution) {
+        long remainingNanos = execution.deadlineNanos() - System.nanoTime();
+        if (remainingNanos <= 0) {
+            execution.future().cancel(true);
+            logger.warn("Skill {} timed out after {} ms", execution.skill().id(), skillTimeout.toMillis());
+            return AgentSkillResult.empty(execution.skill().id());
+        }
+
+        try {
+            return execution.future().get(remainingNanos, TimeUnit.NANOSECONDS);
+        } catch (TimeoutException error) {
+            execution.future().cancel(true);
+            logger.warn("Skill {} timed out after {} ms", execution.skill().id(), skillTimeout.toMillis());
+            return AgentSkillResult.empty(execution.skill().id());
+        } catch (InterruptedException error) {
+            execution.future().cancel(true);
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Agent conversation was interrupted", error);
+        } catch (CancellationException error) {
+            logger.warn("Skill {} was cancelled", execution.skill().id());
+            return AgentSkillResult.empty(execution.skill().id());
+        } catch (ExecutionException error) {
+            Throwable cause = error.getCause() == null ? error : error.getCause();
+            logger.warn("Skill {} failed: {}", execution.skill().id(), cause.getMessage());
+            return AgentSkillResult.empty(execution.skill().id());
+        }
     }
 
     private AgentSkillContext buildContext(String userMessage, boolean webSearch) {
@@ -207,6 +330,35 @@ public class ChatAgent {
         return builder.toString();
     }
 
+    private boolean tryAcquireConversationSlot() {
+        boolean acquired = conversationLimiter.tryAcquire();
+        if (!acquired) {
+            logger.warn("Rejecting chat conversation because the agent is busy. maxConcurrent={}", maxConcurrentConversations);
+        }
+        return acquired;
+    }
+
+    private AgentConversation busyConversation(AgentSkillContext context) {
+        return new AgentConversation(
+                BUSY_ANSWER,
+                List.of(),
+                false,
+                List.of(),
+                List.of(),
+                AgentContextInfo.from(context)
+        );
+    }
+
+    private void emitBusyConversation(AgentSkillContext context, FluxSink<AgentEvent> sink) {
+        AgentConversation conversation = busyConversation(context);
+        sink.next(AgentEvent.context(conversation.agentContext()));
+        sink.next(AgentEvent.status(BUSY_STATUS));
+        for (String chunk : splitIntoChunks(conversation.answer())) {
+            sink.next(AgentEvent.message(chunk));
+        }
+        sink.complete();
+    }
+
     private List<String> splitIntoChunks(String content) {
         if (content == null || content.isBlank()) {
             return List.of("暂时没有可返回的内容。");
@@ -242,6 +394,15 @@ public class ChatAgent {
         return value == null ? "" : value;
     }
 
+    private Duration normalizeSkillTimeout(Duration configuredSkillTimeout) {
+        if (configuredSkillTimeout == null
+                || configuredSkillTimeout.isZero()
+                || configuredSkillTimeout.isNegative()) {
+            return DEFAULT_SKILL_TIMEOUT;
+        }
+        return configuredSkillTimeout;
+    }
+
     @PreDestroy
     public void shutdown() {
         agentExecutor.shutdown();
@@ -254,6 +415,13 @@ public class ChatAgent {
             List<String> searchResults,
             List<String> skillNames,
             AgentContextInfo agentContext
+    ) {
+    }
+
+    private record SkillExecution(
+            AgentSkill skill,
+            Future<AgentSkillResult> future,
+            long deadlineNanos
     ) {
     }
 }

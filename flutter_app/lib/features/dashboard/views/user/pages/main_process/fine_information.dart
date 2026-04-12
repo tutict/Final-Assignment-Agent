@@ -11,6 +11,7 @@ import 'package:final_assignment_front/i18n/fine_localizers.dart';
 import 'package:final_assignment_front/i18n/i18n_utils.dart';
 import 'package:final_assignment_front/i18n/status_localizers.dart';
 import 'package:final_assignment_front/utils/helpers/payment_review_helper.dart';
+import 'package:final_assignment_front/utils/services/auth_token_store.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'dart:developer' as developer;
@@ -54,7 +55,7 @@ class _FineInformationPageState extends State<FineInformationPage> {
     });
     try {
       final prefs = await SharedPreferences.getInstance();
-      final jwtToken = prefs.getString('jwtToken');
+      final jwtToken = await AuthTokenStore.instance.getJwtToken();
       if (jwtToken == null) {
         throw Exception('fine.error.missingLoginOrDriver'.tr);
       }
