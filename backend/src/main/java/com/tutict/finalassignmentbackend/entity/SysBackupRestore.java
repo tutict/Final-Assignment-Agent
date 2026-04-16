@@ -26,6 +26,18 @@ public class SysBackupRestore implements Serializable {
     @TableId(value = "backup_id", type = IdType.AUTO)
     private Long backupId;
 
+    @TableField("tenant_id")
+    private String tenantId;
+
+    @TableField("organization_code")
+    private String organizationCode;
+
+    @TableField("region_code")
+    private String regionCode;
+
+    @TableField("department_code")
+    private String departmentCode;
+
     /**
      * 备份类型 (Full, Incremental, Differential)
      */

@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/io_client.dart';
 
+import 'package:final_assignment_front/config/app_config.dart';
 import 'package:final_assignment_front/utils/helpers/api_exception.dart';
 import 'package:final_assignment_front/utils/services/authentication.dart';
 import 'package:final_assignment_front/utils/services/auth_token_store.dart';
@@ -46,8 +47,8 @@ class ApiClient {
   final RegExp _regMap = RegExp(r'^Map<String,(.*)>$');
 
   ApiClient({
-    this.basePath = "http://localhost:8080",
-    this.webSocketBasePath = "http://localhost:8081",
+    this.basePath = AppConfig.apiBaseUrl,
+    this.webSocketBasePath = AppConfig.webSocketBaseUrl,
     http.Client? client,
   })
       : client = client ?? _sharedClient;

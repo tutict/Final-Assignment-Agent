@@ -196,338 +196,589 @@ class _SystemLogPageState extends State<SystemLogPage> {
     await _fetchSystemLogData(showLoader: false);
   }
 
-  Widget _buildWarningCard(ThemeData themeData) {
-    return Card(
-      color: themeData.colorScheme.errorContainer,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16.0)),
-      child: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Row(
-          children: [
-            Icon(CupertinoIcons.exclamationmark_triangle_fill,
-                color: themeData.colorScheme.onErrorContainer),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                _errorMessage,
-                style: themeData.textTheme.bodyMedium?.copyWith(
-                  color: themeData.colorScheme.onErrorContainer,
-                  fontWeight: FontWeight.w600,
+  int _recentLoginFailures() {
+    return _recentLoginLogs
+        .where((log) =>
+            localizeSystemLogResult(
+                  log.loginResult,
+                  emptyKey: 'common.unknown',
+                ) !=
+                'common.success'.tr &&
+            (log.loginResult ?? '').trim().isNotEmpty)
+        .length;
+  }
+
+  int _recentOperationAlerts() {
+    return _recentOperationLogs
+        .where((log) =>
+            localizeSystemLogResult(
+                  log.operationResult,
+                  emptyKey: 'common.unknown',
+                ) !=
+                'common.success'.tr &&
+            (log.operationResult ?? '').trim().isNotEmpty)
+        .length;
+  }
+
+  Widget _buildHeroSection(ThemeData themeData) {
+    final onHero = themeData.brightness == Brightness.dark
+        ? Colors.white
+        : const Color(0xFF102530);
+    final muted = onHero.withValues(alpha: 0.72);
+    final overviewCount = _overviewData.length;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(28),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: themeData.brightness == Brightness.dark
+              ? const [
+                  Color(0xFF07141D),
+                  Color(0xFF0B202B),
+                  Color(0xFF123848),
+                ]
+              : const [
+                  Color(0xFFF5F9FC),
+                  Color(0xFFE9F1F8),
+                  Color(0xFFDCE8F0),
+                ],
+        ),
+        borderRadius: BorderRadius.circular(30),
+        border: Border.all(
+          color: themeData.colorScheme.outline.withValues(alpha: 0.12),
+        ),
+      ),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final stacked = constraints.maxWidth < 940;
+          final lead = Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: [
+                  _SystemHeroBadge(
+                    label: 'systemLog.workspace.eyebrow'.tr.toUpperCase(),
+                    foregroundColor: onHero,
+                  ),
+                  _SystemHeroBadge(
+                    label: 'common.adminConsole'.tr.toUpperCase(),
+                    foregroundColor: Colors.white,
+                    backgroundColor: const Color(0xFF2F6FD6),
+                    filled: true,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 18),
+              Text(
+                'systemLog.workspace.title'.tr,
+                style: themeData.textTheme.headlineMedium?.copyWith(
+                  color: onHero,
+                  fontWeight: FontWeight.w800,
+                  height: 1.05,
                 ),
               ),
-            ),
-          ],
-        ),
+              const SizedBox(height: 12),
+              Text(
+                'systemLog.workspace.subtitle'.tr,
+                style: themeData.textTheme.bodyLarge?.copyWith(
+                  color: muted,
+                  height: 1.55,
+                ),
+              ),
+              const SizedBox(height: 18),
+              Wrap(
+                spacing: 12,
+                runSpacing: 12,
+                children: [
+                  _SystemInlineSignal(
+                    icon: Icons.login_rounded,
+                    label: 'systemLog.workspace.signal.login'.trParams({
+                      'count': '${_recentLoginLogs.length}',
+                    }),
+                    color: onHero,
+                  ),
+                  _SystemInlineSignal(
+                    icon: Icons.fact_check_outlined,
+                    label: 'systemLog.workspace.signal.operation'.trParams({
+                      'count': '${_recentOperationLogs.length}',
+                    }),
+                    color: onHero,
+                  ),
+                  _SystemInlineSignal(
+                    icon: Icons.refresh_rounded,
+                    label: 'systemLog.workspace.signal.refresh'.tr,
+                    color: onHero,
+                  ),
+                ],
+              ),
+            ],
+          );
+          final metrics = Wrap(
+            spacing: 14,
+            runSpacing: 14,
+            children: [
+              _SystemMetricTile(
+                label: 'systemLog.workspace.metric.overview'.tr,
+                value: '$overviewCount',
+              ),
+              _SystemMetricTile(
+                label: 'systemLog.workspace.metric.login'.tr,
+                value: '${_recentLoginLogs.length}',
+              ),
+              _SystemMetricTile(
+                label: 'systemLog.workspace.metric.operation'.tr,
+                value: '${_recentOperationLogs.length}',
+              ),
+              _SystemMetricTile(
+                label: 'systemLog.workspace.metric.alert'.tr,
+                value: '${_recentLoginFailures() + _recentOperationAlerts()}',
+              ),
+            ],
+          );
+
+          if (stacked) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                lead,
+                const SizedBox(height: 22),
+                metrics,
+              ],
+            );
+          }
+
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(flex: 6, child: lead),
+              const SizedBox(width: 24),
+              Expanded(
+                flex: 4,
+                child: Align(alignment: Alignment.topRight, child: metrics),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
 
-  Widget _buildOverviewSection(ThemeData themeData) {
-    return Card(
-      elevation: 4,
-      color: themeData.colorScheme.surfaceContainerLowest,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16.0)),
-      child: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'systemLog.section.overview'.tr,
-              style: themeData.textTheme.titleMedium?.copyWith(
-                color: themeData.colorScheme.onSurface,
-                fontWeight: FontWeight.bold,
+  Widget _buildWarningBanner(ThemeData themeData) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: themeData.colorScheme.errorContainer,
+        borderRadius: BorderRadius.circular(22),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            CupertinoIcons.exclamationmark_triangle_fill,
+            color: themeData.colorScheme.onErrorContainer,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              _errorMessage,
+              style: themeData.textTheme.bodyMedium?.copyWith(
+                color: themeData.colorScheme.onErrorContainer,
+                fontWeight: FontWeight.w600,
               ),
             ),
-            const SizedBox(height: 12),
-            if (_overviewData.isEmpty)
-              _buildEmptySection(themeData, 'systemLog.empty.overview'.tr)
-            else
-              Wrap(
-                spacing: 12,
-                runSpacing: 12,
-                children: _overviewData.entries.map((entry) {
-                  final value = entry.value;
-                  return Container(
-                    width: 150,
-                    padding: const EdgeInsets.all(12.0),
-                    decoration: BoxDecoration(
-                      color: themeData.colorScheme.surfaceContainer,
-                      borderRadius: BorderRadius.circular(12.0),
-                      border: Border.all(
-                        color: themeData.colorScheme.outlineVariant,
-                      ),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          formatSystemLogOverviewLabel(entry.key),
-                          style: themeData.textTheme.bodySmall?.copyWith(
-                            color: themeData.colorScheme.onSurfaceVariant,
-                          ),
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          value?.toString() ?? '0',
-                          style: themeData.textTheme.titleMedium?.copyWith(
-                            color: themeData.colorScheme.primary,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ],
-                    ),
-                  );
-                }).toList(),
-              ),
-          ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSectionHeading(
+    ThemeData themeData, {
+    required String eyebrow,
+    required String title,
+    required String description,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          eyebrow.toUpperCase(),
+          style: themeData.textTheme.labelMedium?.copyWith(
+            color: themeData.colorScheme.primary,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 1.3,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          title,
+          style: themeData.textTheme.headlineSmall?.copyWith(
+            fontWeight: FontWeight.w800,
+            height: 1.1,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          description,
+          style: themeData.textTheme.bodyMedium?.copyWith(
+            color: themeData.colorScheme.onSurfaceVariant,
+            height: 1.5,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSurfacePanel(
+    ThemeData themeData, {
+    required Widget child,
+  }) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(22),
+      decoration: BoxDecoration(
+        color: themeData.colorScheme.surfaceContainerLowest,
+        borderRadius: BorderRadius.circular(26),
+        border: Border.all(
+          color: themeData.colorScheme.outline.withValues(alpha: 0.12),
         ),
       ),
+      child: child,
     );
   }
 
   Widget _buildEmptySection(ThemeData themeData, String message) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 12.0),
-      child: Row(
-        children: [
-          Icon(
-            CupertinoIcons.info,
-            color: themeData.colorScheme.onSurfaceVariant,
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              message,
-              style: themeData.textTheme.bodyMedium?.copyWith(
-                color: themeData.colorScheme.onSurfaceVariant,
-              ),
+    return Row(
+      children: [
+        Icon(
+          CupertinoIcons.info,
+          color: themeData.colorScheme.onSurfaceVariant,
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            message,
+            style: themeData.textTheme.bodyMedium?.copyWith(
+              color: themeData.colorScheme.onSurfaceVariant,
             ),
           ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildOverviewSection(ThemeData themeData) {
+    return _buildSurfacePanel(
+      themeData,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildSectionHeading(
+            themeData,
+            eyebrow: 'systemLog.section.overview'.tr,
+            title: 'systemLog.section.overview'.tr,
+            description: 'systemLog.workspace.overviewBody'.tr,
+          ),
+          const SizedBox(height: 18),
+          if (_overviewData.isEmpty)
+            _buildEmptySection(themeData, 'systemLog.empty.overview'.tr)
+          else
+            Wrap(
+              spacing: 14,
+              runSpacing: 14,
+              children: _overviewData.entries.map((entry) {
+                final value = entry.value;
+                return _OverviewSignalTile(
+                  label: formatSystemLogOverviewLabel(entry.key),
+                  value: value?.toString() ?? '0',
+                  themeData: themeData,
+                );
+              }).toList(),
+            ),
         ],
       ),
     );
   }
 
   Widget _buildLoginLogsSection(ThemeData themeData) {
-    return Card(
-      elevation: 4,
-      color: themeData.colorScheme.surfaceContainerLowest,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16.0)),
-      child: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'systemLog.section.recentLogin'.tr,
-              style: themeData.textTheme.titleMedium?.copyWith(
-                color: themeData.colorScheme.onSurface,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 12),
-            if (_recentLoginLogs.isEmpty)
-              _buildEmptySection(themeData, 'systemLog.empty.login'.tr)
-            else
-              ..._recentLoginLogs.asMap().entries.map((entry) {
-                return Column(
-                  children: [
-                    _buildLoginLogTile(entry.value, themeData),
-                    if (entry.key != _recentLoginLogs.length - 1)
-                      Divider(
-                        height: 16,
-                        color: themeData.colorScheme.outlineVariant,
-                      ),
-                  ],
-                );
-              }),
-          ],
-        ),
+    return _buildSurfacePanel(
+      themeData,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildSectionHeading(
+            themeData,
+            eyebrow: 'systemLog.workspace.loginEyebrow'.tr,
+            title: 'systemLog.section.recentLogin'.tr,
+            description: 'systemLog.workspace.loginBody'.tr,
+          ),
+          const SizedBox(height: 18),
+          if (_recentLoginLogs.isEmpty)
+            _buildEmptySection(themeData, 'systemLog.empty.login'.tr)
+          else
+            ..._recentLoginLogs.asMap().entries.map((entry) {
+              return Padding(
+                padding: EdgeInsets.only(
+                  bottom: entry.key == _recentLoginLogs.length - 1 ? 0 : 14,
+                ),
+                child: _buildLoginLogTile(entry.value, themeData),
+              );
+            }),
+        ],
       ),
     );
   }
 
   Widget _buildLoginLogTile(LoginLog log, ThemeData themeData) {
-    final subtitleStyle = themeData.textTheme.bodyMedium?.copyWith(
-      color: themeData.colorScheme.onSurfaceVariant,
+    final result = localizeSystemLogResult(
+      log.loginResult,
+      emptyKey: 'common.unknown',
     );
-    return ListTile(
-      contentPadding: EdgeInsets.zero,
-      title: Text(
-        log.username ?? 'systemLog.value.unknownUser'.tr,
-        style: themeData.textTheme.titleMedium?.copyWith(
-          color: themeData.colorScheme.onSurface,
-          fontWeight: FontWeight.w600,
-        ),
+    final isSuccess = result == 'common.success'.tr;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: themeData.colorScheme.surface,
+        borderRadius: BorderRadius.circular(22),
       ),
-      subtitle: Column(
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'systemLog.detail.loginResult'.trParams(
-              {
-                'value': localizeSystemLogResult(
-                  log.loginResult,
-                  emptyKey: 'common.unknown',
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      log.username ?? 'systemLog.value.unknownUser'.tr,
+                      style: themeData.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Wrap(
+                      spacing: 12,
+                      runSpacing: 12,
+                      children: [
+                        _LogStatusBadge(
+                          label: result,
+                          color: isSuccess
+                              ? const Color(0xFF1F9D68)
+                              : const Color(0xFFC45A4E),
+                        ),
+                        _LogMetaChip(
+                          icon: Icons.schedule_rounded,
+                          label: formatSystemLogDateTime(log.loginTime),
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
-              },
-            ),
-            style: subtitleStyle,
+              ),
+            ],
           ),
-          Text(
-            'systemLog.detail.loginIp'.trParams(
-              {'value': log.loginIp ?? 'common.unknown'.tr},
-            ),
-            style: subtitleStyle,
+          const SizedBox(height: 16),
+          Wrap(
+            spacing: 16,
+            runSpacing: 12,
+            children: [
+              _LogMetaChip(
+                icon: Icons.language_rounded,
+                label: 'systemLog.detail.loginIp'
+                    .trParams({'value': log.loginIp ?? 'common.unknown'.tr}),
+              ),
+              _LogMetaChip(
+                icon: Icons.devices_outlined,
+                label: 'systemLog.detail.loginDevice'
+                    .trParams({'value': buildSystemLogDeviceInfo(log)}),
+              ),
+              if (log.loginLocation != null && log.loginLocation!.isNotEmpty)
+                _LogMetaChip(
+                  icon: Icons.place_outlined,
+                  label: 'systemLog.detail.loginLocation'
+                      .trParams({'value': log.loginLocation!}),
+                ),
+            ],
           ),
-          if (log.loginLocation != null && log.loginLocation!.isNotEmpty)
-            Text(
-              'systemLog.detail.loginLocation'
-                  .trParams({'value': log.loginLocation!}),
-              style: subtitleStyle,
-            ),
-          Text(
-            'systemLog.detail.loginDevice'
-                .trParams({'value': buildSystemLogDeviceInfo(log)}),
-            style: subtitleStyle,
-          ),
-          if (log.remarks != null && log.remarks!.isNotEmpty)
+          if (log.remarks != null && log.remarks!.isNotEmpty) ...[
+            const SizedBox(height: 14),
             Text(
               'systemLog.detail.remarks'.trParams({'value': log.remarks!}),
-              style: subtitleStyle,
+              style: themeData.textTheme.bodySmall?.copyWith(
+                color: themeData.colorScheme.onSurfaceVariant,
+                height: 1.45,
+              ),
             ),
+          ],
         ],
-      ),
-      trailing: Text(
-        formatSystemLogDateTime(log.loginTime),
-        style: themeData.textTheme.bodySmall?.copyWith(
-          color: themeData.colorScheme.onSurfaceVariant,
-        ),
-        textAlign: TextAlign.right,
       ),
     );
   }
 
   Widget _buildOperationLogsSection(ThemeData themeData) {
-    return Card(
-      elevation: 4,
-      color: themeData.colorScheme.surfaceContainerLowest,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16.0)),
-      child: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'systemLog.section.recentOperation'.tr,
-              style: themeData.textTheme.titleMedium?.copyWith(
-                color: themeData.colorScheme.onSurface,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 12),
-            if (_recentOperationLogs.isEmpty)
-              _buildEmptySection(themeData, 'systemLog.empty.operation'.tr)
-            else
-              ..._recentOperationLogs.asMap().entries.map((entry) {
-                return Column(
-                  children: [
-                    _buildOperationLogTile(entry.value, themeData),
-                    if (entry.key != _recentOperationLogs.length - 1)
-                      Divider(
-                        height: 16,
-                        color: themeData.colorScheme.outlineVariant,
-                      ),
-                  ],
-                );
-              }),
-          ],
-        ),
+    return _buildSurfacePanel(
+      themeData,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildSectionHeading(
+            themeData,
+            eyebrow: 'systemLog.workspace.operationEyebrow'.tr,
+            title: 'systemLog.section.recentOperation'.tr,
+            description: 'systemLog.workspace.operationBody'.tr,
+          ),
+          const SizedBox(height: 18),
+          if (_recentOperationLogs.isEmpty)
+            _buildEmptySection(themeData, 'systemLog.empty.operation'.tr)
+          else
+            ..._recentOperationLogs.asMap().entries.map((entry) {
+              return Padding(
+                padding: EdgeInsets.only(
+                  bottom: entry.key == _recentOperationLogs.length - 1 ? 0 : 14,
+                ),
+                child: _buildOperationLogTile(entry.value, themeData),
+              );
+            }),
+        ],
       ),
     );
   }
 
   Widget _buildOperationLogTile(OperationLog log, ThemeData themeData) {
-    final subtitleStyle = themeData.textTheme.bodyMedium?.copyWith(
-      color: themeData.colorScheme.onSurfaceVariant,
-    );
     final userLabel = log.username ??
         log.realName ??
         log.userId?.toString() ??
         'systemLog.value.unknownUser'.tr;
-    return ListTile(
-      contentPadding: EdgeInsets.zero,
-      title: Text(
-        log.operationModule ??
-            log.operationFunction ??
-            'systemLog.value.unknownModule'.tr,
-        style: themeData.textTheme.titleMedium?.copyWith(
-          color: themeData.colorScheme.onSurface,
-          fontWeight: FontWeight.w600,
-        ),
+    final result = localizeSystemLogResult(
+      log.operationResult,
+      emptyKey: 'common.unknown',
+    );
+    final isSuccess = result == 'common.success'.tr;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: themeData.colorScheme.surface,
+        borderRadius: BorderRadius.circular(22),
       ),
-      subtitle: Column(
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'systemLog.detail.operationType'.trParams(
-              {'value': log.operationType ?? 'common.unknown'.tr},
-            ),
-            style: subtitleStyle,
-          ),
-          Text(
-            'systemLog.detail.user'.trParams({'value': userLabel}),
-            style: subtitleStyle,
-          ),
-          Text(
-            'systemLog.detail.operationResult'.trParams(
-              {
-                'value': localizeSystemLogResult(
-                  log.operationResult,
-                  emptyKey: 'common.unknown',
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      log.operationModule ??
+                          log.operationFunction ??
+                          'systemLog.value.unknownModule'.tr,
+                      style: themeData.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Wrap(
+                      spacing: 12,
+                      runSpacing: 12,
+                      children: [
+                        _LogStatusBadge(
+                          label: result,
+                          color: isSuccess
+                              ? const Color(0xFF1F9D68)
+                              : const Color(0xFFC45A4E),
+                        ),
+                        _LogMetaChip(
+                          icon: Icons.schedule_rounded,
+                          label: formatSystemLogDateTime(log.operationTime),
+                        ),
+                        _LogMetaChip(
+                          icon: Icons.person_outline_rounded,
+                          label: 'systemLog.detail.user'.trParams({
+                            'value': userLabel,
+                          }),
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
-              },
-            ),
-            style: subtitleStyle,
+              ),
+            ],
           ),
-          if (log.operationContent != null && log.operationContent!.isNotEmpty)
+          const SizedBox(height: 16),
+          Wrap(
+            spacing: 16,
+            runSpacing: 12,
+            children: [
+              _LogMetaChip(
+                icon: Icons.category_outlined,
+                label: 'systemLog.detail.operationType'.trParams({
+                  'value': log.operationType ?? 'common.unknown'.tr,
+                }),
+              ),
+              _LogMetaChip(
+                icon: Icons.language_rounded,
+                label: 'systemLog.detail.requestIp'.trParams({
+                  'value': log.requestIp ?? 'common.unknown'.tr,
+                }),
+              ),
+            ],
+          ),
+          if (log.operationContent != null &&
+              log.operationContent!.isNotEmpty) ...[
+            const SizedBox(height: 14),
             Text(
               'systemLog.detail.operationContent'
                   .trParams({'value': log.operationContent!}),
-              style: subtitleStyle,
-              maxLines: 2,
+              style: themeData.textTheme.bodySmall?.copyWith(
+                color: themeData.colorScheme.onSurfaceVariant,
+                height: 1.45,
+              ),
+              maxLines: 3,
               overflow: TextOverflow.ellipsis,
             ),
-          Text(
-            'systemLog.detail.requestIp'.trParams(
-              {'value': log.requestIp ?? 'common.unknown'.tr},
-            ),
-            style: subtitleStyle,
-          ),
-          if (log.remarks != null && log.remarks!.isNotEmpty)
+          ],
+          if (log.remarks != null && log.remarks!.isNotEmpty) ...[
+            const SizedBox(height: 8),
             Text(
               'systemLog.detail.remarks'.trParams({'value': log.remarks!}),
-              style: subtitleStyle,
+              style: themeData.textTheme.bodySmall?.copyWith(
+                color: themeData.colorScheme.onSurfaceVariant,
+                height: 1.45,
+              ),
             ),
+          ],
         ],
-      ),
-      trailing: Text(
-        formatSystemLogDateTime(log.operationTime),
-        style: themeData.textTheme.bodySmall?.copyWith(
-          color: themeData.colorScheme.onSurfaceVariant,
-        ),
-        textAlign: TextAlign.right,
       ),
     );
   }
 
   Widget _buildErrorView(ThemeData themeData) {
     return Center(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 24.0),
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 460),
+        padding: const EdgeInsets.all(28),
+        decoration: BoxDecoration(
+          color: themeData.colorScheme.surfaceContainer,
+          borderRadius: BorderRadius.circular(28),
+          border: Border.all(
+            color: themeData.colorScheme.outline.withValues(alpha: 0.12),
+          ),
+        ),
         child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
           children: [
             Icon(
               CupertinoIcons.exclamationmark_triangle,
@@ -536,24 +787,38 @@ class _SystemLogPageState extends State<SystemLogPage> {
             ),
             const SizedBox(height: 16),
             Text(
-              _errorMessage,
-              style: themeData.textTheme.titleMedium?.copyWith(
-                color: themeData.colorScheme.error,
-                fontWeight: FontWeight.w600,
+              'systemLog.workspace.errorTitle'.tr,
+              style: themeData.textTheme.titleLarge?.copyWith(
+                fontWeight: FontWeight.w700,
               ),
               textAlign: TextAlign.center,
             ),
-            const SizedBox(height: 16),
-            ElevatedButton(
-              onPressed: () => Get.offAllNamed(Routes.login),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: themeData.colorScheme.primary,
-                foregroundColor: themeData.colorScheme.onPrimary,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12.0),
-                ),
+            const SizedBox(height: 10),
+            Text(
+              _errorMessage,
+              style: themeData.textTheme.bodyMedium?.copyWith(
+                color: themeData.colorScheme.onSurfaceVariant,
+                height: 1.5,
               ),
-              child: Text('systemLog.action.relogin'.tr),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 18),
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              alignment: WrapAlignment.center,
+              children: [
+                FilledButton.tonalIcon(
+                  onPressed: _handleRefresh,
+                  icon: const Icon(Icons.refresh_rounded),
+                  label: Text('page.refreshList'.tr),
+                ),
+                FilledButton.icon(
+                  onPressed: () => Get.offAllNamed(Routes.login),
+                  icon: const Icon(Icons.login_rounded),
+                  label: Text('systemLog.action.relogin'.tr),
+                ),
+              ],
             ),
           ],
         ),
@@ -600,22 +865,276 @@ class _SystemLogPageState extends State<SystemLogPage> {
                       thicknessWhileDragging: 10.0,
                       child: ListView(
                         controller: _scrollController,
-                        padding: const EdgeInsets.all(16.0),
+                        padding: const EdgeInsets.all(20),
                         children: [
+                          _buildHeroSection(themeData),
+                          const SizedBox(height: 24),
                           if (_errorMessage.isNotEmpty && _hasData()) ...[
-                            _buildWarningCard(themeData),
-                            const SizedBox(height: 16),
+                            _buildWarningBanner(themeData),
+                            const SizedBox(height: 24),
                           ],
                           _buildOverviewSection(themeData),
-                          const SizedBox(height: 16),
-                          _buildLoginLogsSection(themeData),
-                          const SizedBox(height: 16),
-                          _buildOperationLogsSection(themeData),
+                          const SizedBox(height: 24),
+                          LayoutBuilder(
+                            builder: (context, constraints) {
+                              final stacked = constraints.maxWidth < 1040;
+                              if (stacked) {
+                                return Column(
+                                  children: [
+                                    _buildLoginLogsSection(themeData),
+                                    const SizedBox(height: 24),
+                                    _buildOperationLogsSection(themeData),
+                                  ],
+                                );
+                              }
+                              return Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Expanded(
+                                    child: _buildLoginLogsSection(themeData),
+                                  ),
+                                  const SizedBox(width: 24),
+                                  Expanded(
+                                    child:
+                                        _buildOperationLogsSection(themeData),
+                                  ),
+                                ],
+                              );
+                            },
+                          ),
                         ],
                       ),
                     ),
                   ),
       );
     });
+  }
+}
+
+class _SystemHeroBadge extends StatelessWidget {
+  const _SystemHeroBadge({
+    required this.label,
+    required this.foregroundColor,
+    this.backgroundColor,
+    this.filled = false,
+  });
+
+  final String label;
+  final Color foregroundColor;
+  final Color? backgroundColor;
+  final bool filled;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color:
+            filled ? backgroundColor : foregroundColor.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(
+          color: filled
+              ? backgroundColor!.withValues(alpha: 0.24)
+              : foregroundColor.withValues(alpha: 0.14),
+        ),
+      ),
+      child: Text(
+        label,
+        style: Theme.of(context).textTheme.labelMedium?.copyWith(
+              color: filled ? Colors.white : foregroundColor,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.6,
+            ),
+      ),
+    );
+  }
+}
+
+class _SystemInlineSignal extends StatelessWidget {
+  const _SystemInlineSignal({
+    required this.icon,
+    required this.label,
+    required this.color,
+  });
+
+  final IconData icon;
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 18, color: color),
+          const SizedBox(width: 8),
+          Text(
+            label,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: color.withValues(alpha: 0.86),
+                ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SystemMetricTile extends StatelessWidget {
+  const _SystemMetricTile({
+    required this.label,
+    required this.value,
+  });
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    final themeData = Theme.of(context);
+    return Container(
+      constraints: const BoxConstraints(minWidth: 132),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      decoration: BoxDecoration(
+        color: themeData.brightness == Brightness.dark
+            ? Colors.white.withValues(alpha: 0.08)
+            : const Color(0xFFF8FBFB),
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            value,
+            style: themeData.textTheme.titleLarge?.copyWith(
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            label,
+            style: themeData.textTheme.bodySmall?.copyWith(
+              color: themeData.colorScheme.onSurface.withValues(alpha: 0.7),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _OverviewSignalTile extends StatelessWidget {
+  const _OverviewSignalTile({
+    required this.label,
+    required this.value,
+    required this.themeData,
+  });
+
+  final String label;
+  final String value;
+  final ThemeData themeData;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      constraints: const BoxConstraints(minWidth: 160, maxWidth: 220),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: themeData.colorScheme.surface,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            value,
+            style: themeData.textTheme.titleLarge?.copyWith(
+              color: themeData.colorScheme.primary,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            label,
+            style: themeData.textTheme.bodySmall?.copyWith(
+              color: themeData.colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _LogStatusBadge extends StatelessWidget {
+  const _LogStatusBadge({
+    required this.label,
+    required this.color,
+  });
+
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        label,
+        style: Theme.of(context).textTheme.labelMedium?.copyWith(
+              color: color,
+              fontWeight: FontWeight.w700,
+            ),
+      ),
+    );
+  }
+}
+
+class _LogMetaChip extends StatelessWidget {
+  const _LogMetaChip({
+    required this.icon,
+    required this.label,
+  });
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final themeData = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: themeData.colorScheme.surfaceContainerHighest
+            .withValues(alpha: 0.45),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 16, color: themeData.colorScheme.primary),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Text(
+              label,
+              style: themeData.textTheme.bodySmall?.copyWith(
+                color: themeData.colorScheme.onSurfaceVariant,
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }

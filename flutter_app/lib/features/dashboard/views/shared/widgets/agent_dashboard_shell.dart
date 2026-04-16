@@ -120,6 +120,7 @@ class AgentDashboardShell extends StatelessWidget {
                   child: Column(
                     children: [
                       _EntranceShift(
+                        delay: const Duration(milliseconds: 40),
                         child: _TopCommandBar(
                           scaffoldKey: scaffoldKey,
                           title: title,
@@ -139,12 +140,14 @@ class AgentDashboardShell extends StatelessWidget {
                               SizedBox(
                                 width: 290,
                                 child: _EntranceShift(
+                                  delay: const Duration(milliseconds: 100),
                                   child: _SidebarPanel(items: navigationItems),
                                 ),
                               ),
                             if (showRail) SizedBox(width: sectionGap),
                             Expanded(
                               child: _EntranceShift(
+                                delay: const Duration(milliseconds: 160),
                                 child: _BodyFrame(child: body),
                               ),
                             ),
@@ -153,6 +156,7 @@ class AgentDashboardShell extends StatelessWidget {
                               SizedBox(
                                 width: 400,
                                 child: _EntranceShift(
+                                  delay: const Duration(milliseconds: 220),
                                   child: _ChatPanelFrame(child: chatPanel),
                                 ),
                               ),
@@ -244,6 +248,8 @@ class _TopCommandBar extends StatelessWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
+                        _TopBarBadge(label: 'shell.workspaceLabel'.tr),
+                        const SizedBox(height: 8),
                         Text(
                           title,
                           maxLines: 1,
@@ -263,10 +269,10 @@ class _TopCommandBar extends StatelessWidget {
                     ),
                   ),
                   if (canOpenChat)
-                    IconButton(
+                    _ShellIconButton(
                       onPressed: () =>
                           scaffoldKey.currentState?.openEndDrawer(),
-                      icon: const Icon(Icons.forum_outlined),
+                      icon: Icons.forum_outlined,
                       tooltip: 'shell.openChat'.tr,
                     ),
                 ],
@@ -279,6 +285,26 @@ class _TopCommandBar extends StatelessWidget {
                     const _StatusChip(
                       icon: Icons.wifi_tethering_rounded,
                       label: 'LIVE',
+                    ),
+                    const SizedBox(width: 10),
+                    _ActionCapsule(
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.grid_view_rounded,
+                            size: 14,
+                            color: theme.colorScheme.primary,
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            'common.workspace'.tr,
+                            style: theme.textTheme.labelLarge?.copyWith(
+                              color: theme.colorScheme.onSurface,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                     const SizedBox(width: 10),
                     PopupMenuButton<Locale>(
@@ -306,9 +332,9 @@ class _TopCommandBar extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(width: 10),
-                    IconButton(
+                    _ShellIconButton(
                       onPressed: onToggleTheme,
-                      icon: const Icon(Icons.contrast_rounded),
+                      icon: Icons.contrast_rounded,
                       tooltip: 'common.toggleTheme'.tr,
                     ),
                     const SizedBox(width: 6),
@@ -356,7 +382,40 @@ class _SidebarPanel extends StatelessWidget {
             'shell.footer'.tr,
             style: theme.textTheme.bodyMedium,
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: 18),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: theme.colorScheme.primary.withValues(alpha: 0.05),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: theme.colorScheme.outlineVariant.withValues(alpha: 0.24),
+              ),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: _SidebarStat(
+                    label: 'common.focus'.tr,
+                    value: 'common.workspace'.tr,
+                  ),
+                ),
+                Container(
+                  width: 1,
+                  height: 28,
+                  color: theme.colorScheme.outlineVariant.withValues(alpha: 0.24),
+                ),
+                Expanded(
+                  child: _SidebarStat(
+                    label: 'common.agent'.tr,
+                    value: 'common.online'.tr,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 20),
           Expanded(
             child: ListView.separated(
               itemCount: items.length,
@@ -387,6 +446,7 @@ class _SidebarEntry extends StatelessWidget {
       borderRadius: BorderRadius.circular(18),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 180),
+        transform: Matrix4.translationValues(item.active ? 4 : 0, 0, 0),
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
         decoration: BoxDecoration(
           color: item.active
@@ -450,15 +510,35 @@ class _BodyFrame extends StatelessWidget {
     final theme = Theme.of(context);
     return Container(
       decoration: BoxDecoration(
-        color: theme.colorScheme.surface.withValues(alpha: 0.76),
+        color: theme.colorScheme.surface.withValues(alpha: 0.74),
         borderRadius: BorderRadius.circular(30),
         border: Border.all(
           color: theme.colorScheme.outlineVariant.withValues(alpha: 0.22),
         ),
+        boxShadow: [
+          BoxShadow(
+            color: theme.colorScheme.shadow.withValues(alpha: 0.05),
+            blurRadius: 26,
+            offset: const Offset(0, 12),
+          ),
+        ],
       ),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(30),
-        child: child,
+        child: Stack(
+          children: [
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: Container(
+                height: 1,
+                color: theme.colorScheme.primary.withValues(alpha: 0.10),
+              ),
+            ),
+            child,
+          ],
+        ),
       ),
     );
   }
@@ -475,14 +555,26 @@ class _ChatPanelFrame extends StatelessWidget {
 
     return Container(
       decoration: BoxDecoration(
-        color: theme.colorScheme.surface.withValues(alpha: 0.76),
+        color: theme.colorScheme.surface.withValues(alpha: 0.74),
         borderRadius: BorderRadius.circular(30),
         border: Border.all(
           color: theme.colorScheme.outlineVariant.withValues(alpha: 0.22),
         ),
+        boxShadow: [
+          BoxShadow(
+            color: theme.colorScheme.shadow.withValues(alpha: 0.05),
+            blurRadius: 26,
+            offset: const Offset(0, 12),
+          ),
+        ],
       ),
       child: Stack(
         children: [
+          Positioned(
+            top: 18,
+            left: 18,
+            child: _TopBarBadge(label: 'common.agent'.tr),
+          ),
           Positioned(
             top: 18,
             right: 18,
@@ -522,7 +614,7 @@ class _ProfilePill extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerLowest.withValues(alpha: 0.8),
+        color: theme.colorScheme.surfaceContainerLowest.withValues(alpha: 0.84),
         borderRadius: BorderRadius.circular(22),
         border: Border.all(
           color: theme.colorScheme.outlineVariant.withValues(alpha: 0.5),
@@ -585,8 +677,111 @@ class _PanelShell extends StatelessWidget {
         border: Border.all(
           color: theme.colorScheme.outlineVariant.withValues(alpha: 0.24),
         ),
+        boxShadow: [
+          BoxShadow(
+            color: theme.colorScheme.shadow.withValues(alpha: 0.04),
+            blurRadius: 24,
+            offset: const Offset(0, 10),
+          ),
+        ],
       ),
       child: child,
+    );
+  }
+}
+
+class _TopBarBadge extends StatelessWidget {
+  const _TopBarBadge({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.primary.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(
+          color: theme.colorScheme.primary.withValues(alpha: 0.14),
+        ),
+      ),
+      child: Text(
+        label,
+        style: theme.textTheme.labelSmall?.copyWith(
+          color: theme.colorScheme.primary,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 0.5,
+        ),
+      ),
+    );
+  }
+}
+
+class _ShellIconButton extends StatelessWidget {
+  const _ShellIconButton({
+    required this.onPressed,
+    required this.icon,
+    required this.tooltip,
+  });
+
+  final VoidCallback? onPressed;
+  final IconData icon;
+  final String tooltip;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.72),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.36),
+        ),
+      ),
+      child: IconButton(
+        onPressed: onPressed,
+        icon: Icon(icon),
+        tooltip: tooltip,
+      ),
+    );
+  }
+}
+
+class _SidebarStat extends StatelessWidget {
+  const _SidebarStat({
+    required this.label,
+    required this.value,
+  });
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            value,
+            style: theme.textTheme.labelLarge?.copyWith(
+              color: theme.colorScheme.onSurface,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -647,21 +842,30 @@ class _StatusChip extends StatelessWidget {
 }
 
 class _EntranceShift extends StatelessWidget {
-  const _EntranceShift({required this.child});
+  const _EntranceShift({
+    required this.child,
+    this.delay = Duration.zero,
+  });
 
   final Widget child;
+  final Duration delay;
 
   @override
   Widget build(BuildContext context) {
     return TweenAnimationBuilder<double>(
-      duration: const Duration(milliseconds: 420),
+      duration: const Duration(milliseconds: 420) + delay,
       curve: Curves.easeOutCubic,
       tween: Tween(begin: 0, end: 1),
       builder: (context, value, widget) {
+        final delayedValue = delay == Duration.zero
+            ? value
+            : ((value * (420 + delay.inMilliseconds) - delay.inMilliseconds) /
+                    420)
+                .clamp(0.0, 1.0);
         return Opacity(
-          opacity: value,
+          opacity: delayedValue,
           child: Transform.translate(
-            offset: Offset(0, (1 - value) * 22),
+            offset: Offset(0, (1 - delayedValue) * 22),
             child: widget,
           ),
         );

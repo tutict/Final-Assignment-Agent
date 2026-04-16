@@ -832,14 +832,10 @@ public class AppealReviewService {
         QueryWrapper<AppealReview> wrapper = new QueryWrapper<>();
         wrapper.eq("appeal_id", appealReview.getAppealId())
                 .eq("review_level", trimToEmpty(appealReview.getReviewLevel()));
-        List<AppealReview> duplicates = appealReviewMapper.selectList(wrapper);
-        for (AppealReview duplicate : duplicates) {
-            if (duplicate == null) {
-                continue;
-            }
-            if (existingReview != null && Objects.equals(existingReview.getReviewId(), duplicate.getReviewId())) {
-                continue;
-            }
+        if (existingReview != null && existingReview.getReviewId() != null) {
+            wrapper.ne("review_id", existingReview.getReviewId());
+        }
+        if (appealReviewMapper.selectCount(wrapper) > 0) {
             throw new IllegalStateException("Only one review per level is allowed for the same appeal");
         }
     }

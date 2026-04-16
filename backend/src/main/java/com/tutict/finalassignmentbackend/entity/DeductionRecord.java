@@ -26,6 +26,18 @@ public class DeductionRecord implements Serializable {
     @TableId(value = "deduction_id", type = IdType.AUTO)
     private Long deductionId;
 
+    @TableField("tenant_id")
+    private String tenantId;
+
+    @TableField("organization_code")
+    private String organizationCode;
+
+    @TableField("region_code")
+    private String regionCode;
+
+    @TableField("department_code")
+    private String departmentCode;
+
     /**
      * 违法记录 ID
      */

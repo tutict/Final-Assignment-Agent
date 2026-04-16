@@ -36,6 +36,10 @@ public class TokenProvider {
     private static final String CLAIM_ROLE_TYPES = "roleTypes";
     private static final String CLAIM_DATA_SCOPE = "dataScope";
     private static final String CLAIM_TOKEN_TYPE = "tokenType";
+    private static final String CLAIM_TENANT_ID = "tenantId";
+    private static final String CLAIM_ORGANIZATION_CODE = "organizationCode";
+    private static final String CLAIM_REGION_CODE = "regionCode";
+    private static final String CLAIM_DEPARTMENT_CODE = "departmentCode";
     private static final String TOKEN_TYPE_ACCESS = "access";
     private static final String TOKEN_TYPE_REFRESH = "refresh";
 
@@ -51,6 +55,11 @@ public class TokenProvider {
         schema.put("USER", new RoleMetadata(RoleType.CUSTOM, DataScope.SELF));
         schema.put("SUPER_ADMIN", new RoleMetadata(RoleType.SYSTEM, DataScope.ALL));
         schema.put("ADMIN", new RoleMetadata(RoleType.SYSTEM, DataScope.ALL));
+        schema.put("CASE_OFFICER", new RoleMetadata(RoleType.BUSINESS, DataScope.DEPARTMENT_AND_SUB));
+        schema.put("REVIEW_OFFICER", new RoleMetadata(RoleType.BUSINESS, DataScope.DEPARTMENT_AND_SUB));
+        schema.put("CASHIER", new RoleMetadata(RoleType.BUSINESS, DataScope.DEPARTMENT));
+        schema.put("AUDITOR", new RoleMetadata(RoleType.BUSINESS, DataScope.ALL));
+        schema.put("OPS_ANALYST", new RoleMetadata(RoleType.BUSINESS, DataScope.ALL));
         schema.put("TRAFFIC_POLICE", new RoleMetadata(RoleType.BUSINESS, DataScope.DEPARTMENT));
         schema.put("FINANCE", new RoleMetadata(RoleType.BUSINESS, DataScope.DEPARTMENT));
         schema.put("APPEAL_REVIEWER", new RoleMetadata(RoleType.BUSINESS, DataScope.DEPARTMENT));
@@ -77,16 +86,40 @@ public class TokenProvider {
     }
 
     public String createToken(String username, String roles) {
+        return createToken(username, roles, null, null, null, null);
+    }
+
+    public String createToken(String username,
+                              String roles,
+                              String tenantId,
+                              String organizationCode,
+                              String regionCode,
+                              String departmentCode) {
         if (!validateRoleCodes(roles)) {
             throw new IllegalArgumentException("Invalid role codes provided for token creation");
         }
         Map<String, Object> claims = new LinkedHashMap<>();
         claims.put(CLAIM_ROLES, String.join(",", normalizeRoleCodes(roles)));
         claims.put(CLAIM_TOKEN_TYPE, TOKEN_TYPE_ACCESS);
+        putOptionalClaim(claims, CLAIM_TENANT_ID, tenantId);
+        putOptionalClaim(claims, CLAIM_ORGANIZATION_CODE, organizationCode);
+        putOptionalClaim(claims, CLAIM_REGION_CODE, regionCode);
+        putOptionalClaim(claims, CLAIM_DEPARTMENT_CODE, departmentCode);
         return buildSignedToken(username, ACCESS_TOKEN_EXPIRATION_MS, claims);
     }
 
     public String createEnhancedToken(String username, String roleCodes, String roleTypes, String dataScope) {
+        return createEnhancedToken(username, roleCodes, roleTypes, dataScope, null, null, null, null);
+    }
+
+    public String createEnhancedToken(String username,
+                                      String roleCodes,
+                                      String roleTypes,
+                                      String dataScope,
+                                      String tenantId,
+                                      String organizationCode,
+                                      String regionCode,
+                                      String departmentCode) {
         if (!validateRoleClaims(roleCodes, roleTypes, dataScope)) {
             throw new IllegalArgumentException("Role claims do not match the database schema");
         }
@@ -95,6 +128,10 @@ public class TokenProvider {
         claims.put(CLAIM_ROLE_TYPES, roleTypes);
         claims.put(CLAIM_DATA_SCOPE, dataScope);
         claims.put(CLAIM_TOKEN_TYPE, TOKEN_TYPE_ACCESS);
+        putOptionalClaim(claims, CLAIM_TENANT_ID, tenantId);
+        putOptionalClaim(claims, CLAIM_ORGANIZATION_CODE, organizationCode);
+        putOptionalClaim(claims, CLAIM_REGION_CODE, regionCode);
+        putOptionalClaim(claims, CLAIM_DEPARTMENT_CODE, departmentCode);
         return buildSignedToken(username, ACCESS_TOKEN_EXPIRATION_MS, claims);
     }
 
@@ -149,6 +186,22 @@ public class TokenProvider {
 
     public String getUsernameFromToken(String token) {
         return parseClaims(token).getSubject();
+    }
+
+    public String getTenantId(String token) {
+        return parseClaims(token).get(CLAIM_TENANT_ID, String.class);
+    }
+
+    public String getOrganizationCode(String token) {
+        return parseClaims(token).get(CLAIM_ORGANIZATION_CODE, String.class);
+    }
+
+    public String getRegionCode(String token) {
+        return parseClaims(token).get(CLAIM_REGION_CODE, String.class);
+    }
+
+    public String getDepartmentCode(String token) {
+        return parseClaims(token).get(CLAIM_DEPARTMENT_CODE, String.class);
     }
 
     public List<RoleType> extractRoleTypes(String token) {
@@ -290,6 +343,13 @@ public class TokenProvider {
                 .map(code -> code.trim().toUpperCase(Locale.ROOT))
                 .filter(code -> !code.isEmpty())
                 .collect(Collectors.toList());
+    }
+
+    private void putOptionalClaim(Map<String, Object> claims, String key, String value) {
+        if (claims == null || key == null || value == null || value.trim().isEmpty()) {
+            return;
+        }
+        claims.put(key, value.trim());
     }
 
     private boolean isRoleDefined(String roleCode) {

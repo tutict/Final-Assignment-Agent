@@ -4,7 +4,10 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.tutict.finalassignmentbackend.config.statemachine.events.PaymentEvent;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.tutict.finalassignmentbackend.config.product.ProductGovernanceProperties;
 import com.tutict.finalassignmentbackend.config.statemachine.states.PaymentState;
+import com.tutict.finalassignmentbackend.config.tenant.TenantIsolationProperties;
+import com.tutict.finalassignmentbackend.config.tenant.TenantAwareSupport;
 import com.tutict.finalassignmentbackend.config.websocket.WsAction;
 import com.tutict.finalassignmentbackend.entity.FineRecord;
 import com.tutict.finalassignmentbackend.entity.PaymentRecord;
@@ -64,6 +67,7 @@ public class PaymentRecordService {
     private final PaymentRecordMapper paymentRecordMapper;
     private final SysRequestHistoryMapper sysRequestHistoryMapper;
     private final PaymentRecordSearchRepository paymentRecordSearchRepository;
+    private final TenantAwareSupport tenantAwareSupport;
     private final FineRecordService fineRecordService;
     private final SysUserService sysUserService;
     private final KafkaTemplate<String, String> kafkaTemplate;
@@ -75,6 +79,7 @@ public class PaymentRecordService {
     public PaymentRecordService(PaymentRecordMapper paymentRecordMapper,
                                 SysRequestHistoryMapper sysRequestHistoryMapper,
                                 PaymentRecordSearchRepository paymentRecordSearchRepository,
+                                TenantAwareSupport tenantAwareSupport,
                                 FineRecordService fineRecordService,
                                 SysUserService sysUserService,
                                 KafkaTemplate<String, String> kafkaTemplate,
@@ -84,6 +89,7 @@ public class PaymentRecordService {
         this.paymentRecordMapper = paymentRecordMapper;
         this.sysRequestHistoryMapper = sysRequestHistoryMapper;
         this.paymentRecordSearchRepository = paymentRecordSearchRepository;
+        this.tenantAwareSupport = tenantAwareSupport;
         this.fineRecordService = fineRecordService;
         this.sysUserService = sysUserService;
         this.kafkaTemplate = kafkaTemplate;
@@ -91,6 +97,27 @@ public class PaymentRecordService {
         this.requiresNewTransactionTemplate = new TransactionTemplate(transactionManager);
         this.requiresNewTransactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
         this.stateMachineService = stateMachineService;
+    }
+
+    public PaymentRecordService(PaymentRecordMapper paymentRecordMapper,
+                                SysRequestHistoryMapper sysRequestHistoryMapper,
+                                PaymentRecordSearchRepository paymentRecordSearchRepository,
+                                FineRecordService fineRecordService,
+                                SysUserService sysUserService,
+                                KafkaTemplate<String, String> kafkaTemplate,
+                                ObjectMapper objectMapper,
+                                PlatformTransactionManager transactionManager,
+                                StateMachineService stateMachineService) {
+        this(paymentRecordMapper,
+                sysRequestHistoryMapper,
+                paymentRecordSearchRepository,
+                defaultTenantAwareSupport(),
+                fineRecordService,
+                sysUserService,
+                kafkaTemplate,
+                objectMapper,
+                transactionManager,
+                stateMachineService);
     }
 
     @Transactional
@@ -166,7 +193,7 @@ public class PaymentRecordService {
         existing.setReceiptNumber(defaultIfBlank(existing.getReceiptNumber(), generateReferenceNumber("RCT")));
         existing.setPaymentTime(confirmationTime);
         existing.setUpdatedAt(confirmationTime);
-        paymentRecordMapper.updateById(existing);
+        updatePaymentByIdScoped(existing);
         syncToIndexAfterCommit(existing);
         return existing;
     }
@@ -210,7 +237,7 @@ public class PaymentRecordService {
             throw new IllegalArgumentException("Review opinion must not be blank when requesting more proof");
         }
 
-        PaymentRecord existing = paymentRecordMapper.selectById(paymentId);
+        PaymentRecord existing = requireExistingPaymentRecord(paymentId);
         if (existing == null) {
             throw new IllegalStateException("PaymentRecord not found for id=" + paymentId);
         }
@@ -230,7 +257,7 @@ public class PaymentRecordService {
                 buildFinanceReviewRemark(normalizedReviewResult, operator, reviewTime, normalizedReviewOpinion)));
         existing.setUpdatedAt(reviewTime);
         existing.setUpdatedBy(operator);
-        paymentRecordMapper.updateById(existing);
+        updatePaymentByIdScoped(existing);
         syncToIndexAfterCommit(existing);
         return existing;
     }
@@ -262,7 +289,7 @@ public class PaymentRecordService {
         existing.setRemarks(appendRemark(existing.getRemarks(), buildUserProofUploadRemark(updateTime, normalizedReceiptUrl)));
         existing.setUpdatedAt(updateTime);
         existing.setUpdatedBy(operator);
-        paymentRecordMapper.updateById(existing);
+        updatePaymentByIdScoped(existing);
         syncToIndexAfterCommit(existing);
         return existing;
     }
@@ -279,6 +306,7 @@ public class PaymentRecordService {
             BigDecimal remaining = refundAmount;
             List<PaymentRecord> paymentRecords = loadRefundCandidatePayments(fineId);
             LocalDateTime refundTime = LocalDateTime.now();
+            List<PaymentRecord> updatedRecords = new java.util.ArrayList<>();
             for (PaymentRecord record : paymentRecords) {
                 if (record == null || !isEffectivePaymentStatus(record.getPaymentStatus())) {
                     continue;
@@ -292,9 +320,9 @@ public class PaymentRecordService {
                 record.setRefundTime(refundTime);
                 record.setRemarks(appendRemark(record.getRemarks(), reason));
                 record.setUpdatedAt(refundTime);
-                paymentRecordMapper.updateById(record);
+                updatePaymentByIdScoped(record);
                 recordRefundAudit(record, actualRefund, reason, "PARTIAL_REFUND");
-                syncToIndexAfterCommit(record);
+                updatedRecords.add(record);
                 remaining = remaining.subtract(actualRefund);
                 if (remaining.signum() <= 0) {
                     break;
@@ -303,6 +331,7 @@ public class PaymentRecordService {
             if (remaining.signum() > 0) {
                 throw new IllegalStateException("Refund amount exceeds the refundable paid amount");
             }
+            syncBatchToIndexAfterCommit(updatedRecords);
             syncFinePaymentSummary(fineId);
         } catch (Exception ex) {
             recordRefundFailureAudit(fineId, refundAmount, reason, "PARTIAL_REFUND_FAILED", ex);
@@ -322,6 +351,7 @@ public class PaymentRecordService {
                 if (paymentRecords == null || paymentRecords.isEmpty()) {
                     break;
                 }
+                List<PaymentRecord> updatedBatch = new java.util.ArrayList<>();
                 for (PaymentRecord record : paymentRecords) {
                     if (record == null) {
                         continue;
@@ -335,13 +365,14 @@ public class PaymentRecordService {
                     record.setPaymentStatus(PaymentState.WAIVED.getCode());
                     record.setRemarks(appendRemark(record.getRemarks(), reason));
                     record.setUpdatedAt(now);
-                    paymentRecordMapper.updateById(record);
+                    updatePaymentByIdScoped(record);
                     BigDecimal refundedDelta = paidAmount.subtract(refundedAmount);
                     if (refundedDelta.signum() > 0) {
                         recordRefundAudit(record, refundedDelta, reason, "WAIVE_AND_REFUND");
                     }
-                    syncToIndexAfterCommit(record);
+                    updatedBatch.add(record);
                 }
+                syncBatchToIndexAfterCommit(updatedBatch);
                 if (paymentRecords.size() < FULL_LOAD_BATCH_SIZE) {
                     break;
                 }
@@ -362,13 +393,16 @@ public class PaymentRecordService {
     }
 
     @Transactional(readOnly = true)
-    @Cacheable(cacheNames = CACHE_NAME, key = "#paymentId", unless = "#result == null")
+    @Cacheable(cacheNames = CACHE_NAME, key = "@tenantCacheKeySupport.scope('payment', #paymentId)", unless = "#result == null")
     public PaymentRecord findById(Long paymentId) {
         requirePositive(paymentId, "Payment ID");
+        if (databaseOnlyForTenantIsolation()) {
+            return findPaymentByIdFromDatabase(paymentId);
+        }
         return paymentRecordSearchRepository.findById(paymentId)
                 .map(PaymentRecordDocument::toEntity)
                 .orElseGet(() -> {
-                    PaymentRecord entity = paymentRecordMapper.selectById(paymentId);
+                    PaymentRecord entity = findPaymentByIdFromDatabase(paymentId);
                     if (entity != null) {
                         paymentRecordSearchRepository.save(PaymentRecordDocument.fromEntity(entity));
                     }
@@ -378,6 +412,9 @@ public class PaymentRecordService {
 
     @Transactional(readOnly = true)
     public List<PaymentRecord> findAll() {
+        if (databaseOnlyForTenantIsolation()) {
+            return loadAllFromDatabase();
+        }
         List<PaymentRecord> fromIndex = StreamSupport.stream(paymentRecordSearchRepository.findAll().spliterator(), false)
                 .map(PaymentRecordDocument::toEntity)
                 .collect(Collectors.toList());
@@ -388,7 +425,7 @@ public class PaymentRecordService {
     }
 
     @Transactional(readOnly = true)
-    @Cacheable(cacheNames = CACHE_NAME, key = "'page:' + #page + ':' + #size", unless = "#result == null || #result.isEmpty()")
+    @Cacheable(cacheNames = CACHE_NAME, key = "@tenantCacheKeySupport.scope('page', #page, #size)", unless = "#result == null || #result.isEmpty()")
     public List<PaymentRecord> listPayments(int page, int size) {
         validatePagination(page, size);
         QueryWrapper<PaymentRecord> wrapper = new QueryWrapper<>();
@@ -398,7 +435,7 @@ public class PaymentRecordService {
         return fetchFromDatabase(wrapper, page, size);
     }
 
-    @Cacheable(cacheNames = CACHE_NAME, key = "'fine:' + #fineId + ':' + #page + ':' + #size", unless = "#result == null || #result.isEmpty()")
+    @Cacheable(cacheNames = CACHE_NAME, key = "@tenantCacheKeySupport.scope('fine', #fineId, #page, #size)", unless = "#result == null || #result.isEmpty()")
     public List<PaymentRecord> findByFineId(Long fineId, int page, int size) {
         requirePositive(fineId, "Fine ID");
         validatePagination(page, size);
@@ -412,8 +449,8 @@ public class PaymentRecordService {
         return fetchFromDatabase(wrapper, page, size);
     }
 
-    @Cacheable(cacheNames = CACHE_NAME, key = "'finePayer:' + #fineId + ':' + #payerIdCard + ':' + #page + ':' + #size",
-            unless = "#result == null || #result.isEmpty()")
+    @Cacheable(cacheNames = CACHE_NAME, key = "@tenantCacheKeySupport.scope('finePayer', #fineId, #payerIdCard, #page, #size)",
+              unless = "#result == null || #result.isEmpty()")
     public List<PaymentRecord> findByFineIdAndPayerIdCard(Long fineId, String payerIdCard, int page, int size) {
         requirePositive(fineId, "Fine ID");
         if (isBlank(payerIdCard)) {
@@ -433,7 +470,7 @@ public class PaymentRecordService {
         return fetchFromDatabase(wrapper, page, size);
     }
 
-    @Cacheable(cacheNames = CACHE_NAME, key = "'payer:' + #payerIdCard + ':' + #page + ':' + #size", unless = "#result == null || #result.isEmpty()")
+    @Cacheable(cacheNames = CACHE_NAME, key = "@tenantCacheKeySupport.scope('payer', #payerIdCard, #page, #size)", unless = "#result == null || #result.isEmpty()")
     public List<PaymentRecord> searchByPayerIdCard(String payerIdCard, int page, int size) {
         if (isBlank(payerIdCard)) {
             return List.of();
@@ -450,7 +487,7 @@ public class PaymentRecordService {
         return fetchFromDatabase(wrapper, page, size);
     }
 
-    @Cacheable(cacheNames = CACHE_NAME, key = "'status:' + #paymentStatus + ':' + #page + ':' + #size", unless = "#result == null || #result.isEmpty()")
+    @Cacheable(cacheNames = CACHE_NAME, key = "@tenantCacheKeySupport.scope('status', #paymentStatus, #page, #size)", unless = "#result == null || #result.isEmpty()")
     public List<PaymentRecord> searchByPaymentStatus(String paymentStatus, int page, int size) {
         if (isBlank(paymentStatus)) {
             return List.of();
@@ -466,7 +503,7 @@ public class PaymentRecordService {
         return fetchFromDatabase(wrapper, page, size);
     }
 
-    @Cacheable(cacheNames = CACHE_NAME, key = "'txn:' + #transactionId + ':' + #page + ':' + #size", unless = "#result == null || #result.isEmpty()")
+    @Cacheable(cacheNames = CACHE_NAME, key = "@tenantCacheKeySupport.scope('txn', #transactionId, #page, #size)", unless = "#result == null || #result.isEmpty()")
     public List<PaymentRecord> searchByTransactionId(String transactionId, int page, int size) {
         if (isBlank(transactionId)) {
             return List.of();
@@ -483,7 +520,7 @@ public class PaymentRecordService {
         return fetchFromDatabase(wrapper, page, size);
     }
 
-    @Cacheable(cacheNames = CACHE_NAME, key = "'number:' + #paymentNumber + ':' + #page + ':' + #size", unless = "#result == null || #result.isEmpty()")
+    @Cacheable(cacheNames = CACHE_NAME, key = "@tenantCacheKeySupport.scope('number', #paymentNumber, #page, #size)", unless = "#result == null || #result.isEmpty()")
     public List<PaymentRecord> searchByPaymentNumber(String paymentNumber, int page, int size) {
         if (isBlank(paymentNumber)) {
             return List.of();
@@ -500,7 +537,7 @@ public class PaymentRecordService {
         return fetchFromDatabase(wrapper, page, size);
     }
 
-    @Cacheable(cacheNames = CACHE_NAME, key = "'payerName:' + #payerName + ':' + #page + ':' + #size", unless = "#result == null || #result.isEmpty()")
+    @Cacheable(cacheNames = CACHE_NAME, key = "@tenantCacheKeySupport.scope('payerName', #payerName, #page, #size)", unless = "#result == null || #result.isEmpty()")
     public List<PaymentRecord> searchByPayerName(String payerName, int page, int size) {
         if (isBlank(payerName)) {
             return List.of();
@@ -516,7 +553,7 @@ public class PaymentRecordService {
         return fetchFromDatabase(wrapper, page, size);
     }
 
-    @Cacheable(cacheNames = CACHE_NAME, key = "'method:' + #paymentMethod + ':' + #page + ':' + #size", unless = "#result == null || #result.isEmpty()")
+    @Cacheable(cacheNames = CACHE_NAME, key = "@tenantCacheKeySupport.scope('method', #paymentMethod, #page, #size)", unless = "#result == null || #result.isEmpty()")
     public List<PaymentRecord> searchByPaymentMethod(String paymentMethod, int page, int size) {
         if (isBlank(paymentMethod)) {
             return List.of();
@@ -532,7 +569,7 @@ public class PaymentRecordService {
         return fetchFromDatabase(wrapper, page, size);
     }
 
-    @Cacheable(cacheNames = CACHE_NAME, key = "'channel:' + #paymentChannel + ':' + #page + ':' + #size", unless = "#result == null || #result.isEmpty()")
+    @Cacheable(cacheNames = CACHE_NAME, key = "@tenantCacheKeySupport.scope('channel', #paymentChannel, #page, #size)", unless = "#result == null || #result.isEmpty()")
     public List<PaymentRecord> searchByPaymentChannel(String paymentChannel, int page, int size) {
         if (isBlank(paymentChannel)) {
             return List.of();
@@ -558,7 +595,7 @@ public class PaymentRecordService {
             return List.of();
         }
         QueryWrapper<PaymentRecord> wrapper = new QueryWrapper<>();
-        wrapper.select("payment_id")
+        tenantScope(wrapper).select("payment_id")
                 .eq("payer_id_card", payerIdCard.trim())
                 .in("fine_id", normalizedFineIds)
                 .orderByDesc("payment_time");
@@ -608,7 +645,7 @@ public class PaymentRecordService {
         return loadPaymentRecordsByIds(pagePaymentIds);
     }
 
-    @Cacheable(cacheNames = CACHE_NAME, key = "'timeRange:' + #startTime + ':' + #endTime + ':' + #page + ':' + #size", unless = "#result == null || #result.isEmpty()")
+    @Cacheable(cacheNames = CACHE_NAME, key = "@tenantCacheKeySupport.scope('timeRange', #startTime, #endTime, #page, #size)", unless = "#result == null || #result.isEmpty()")
     public List<PaymentRecord> searchByPaymentTimeRange(String startTime, String endTime, int page, int size) {
         validatePagination(page, size);
         LocalDateTime start = parseDateTime(startTime, "startTime");
@@ -724,7 +761,7 @@ public class PaymentRecordService {
             return;
         }
         QueryWrapper<PaymentRecord> wrapper = new QueryWrapper<>();
-        wrapper.eq("transaction_id", transactionId.trim());
+        tenantScope(wrapper).eq("transaction_id", transactionId.trim());
         if (currentPaymentId != null) {
             wrapper.ne("payment_id", currentPaymentId);
         }
@@ -761,7 +798,7 @@ public class PaymentRecordService {
 
     // Refresh the Elasticsearch document after the transaction commits so search reads the latest state.
     private void syncToIndexAfterCommit(PaymentRecord paymentRecord) {
-        if (paymentRecord == null) {
+        if (databaseOnlyForTenantIsolation() || paymentRecord == null) {
             return;
         }
         runAfterCommitOrNow(() -> {
@@ -773,6 +810,7 @@ public class PaymentRecordService {
     }
 
     private List<PaymentRecord> fetchFromDatabase(QueryWrapper<PaymentRecord> wrapper, int page, int size) {
+        tenantScope(wrapper);
         Page<PaymentRecord> mpPage = new Page<>(Math.max(page, 1), Math.max(size, 1));
         paymentRecordMapper.selectPage(mpPage, wrapper);
         List<PaymentRecord> records = mpPage.getRecords();
@@ -897,7 +935,7 @@ public class PaymentRecordService {
         requirePositive(paymentRecord.getFineId(), "Fine ID");
         FineRecord existingFineRecord = fineRecord != null ? fineRecord : requireFineRecord(paymentRecord.getFineId());
         if (paymentRecord.getPaymentId() != null) {
-            PaymentRecord existing = paymentRecordMapper.selectById(paymentRecord.getPaymentId());
+            PaymentRecord existing = findPaymentByIdFromDatabase(paymentRecord.getPaymentId());
             if (existing != null
                     && existing.getFineId() != null
                     && !Objects.equals(existing.getFineId(), paymentRecord.getFineId())) {
@@ -1027,7 +1065,7 @@ public class PaymentRecordService {
     }
 
     private PaymentRecord requireExistingPaymentRecord(Long paymentId) {
-        PaymentRecord existing = paymentRecordMapper.selectById(paymentId);
+        PaymentRecord existing = findPaymentByIdFromDatabase(paymentId);
         if (existing == null) {
             throw new IllegalStateException("PaymentRecord not found for id=" + paymentId);
         }
@@ -1077,7 +1115,7 @@ public class PaymentRecordService {
         validatePaymentStateConsistency(existing, effectiveState);
         existing.setPaymentStatus(effectiveState.getCode());
         existing.setUpdatedAt(updateTime == null ? LocalDateTime.now() : updateTime);
-        paymentRecordMapper.updateById(existing);
+        updatePaymentByIdScoped(existing);
         syncFinePaymentSummary(existing.getFineId());
         syncToIndexAfterCommit(existing);
         return existing;
@@ -1318,7 +1356,7 @@ public class PaymentRecordService {
 
     private List<PaymentRecord> loadFinanceReviewTaskCandidateBatch(int page, int size) {
         QueryWrapper<PaymentRecord> wrapper = new QueryWrapper<>();
-        wrapper.select("payment_id", "payment_channel", "payment_status", "remarks", "updated_at", "payment_time")
+        tenantScope(wrapper).select("payment_id", "payment_channel", "payment_status", "remarks", "updated_at", "payment_time")
                 .in("payment_channel", SELF_SERVICE_PAYMENT_CHANNELS)
                 .in("payment_status", PaymentState.PAID.getCode(), PaymentState.PARTIAL.getCode())
                 // Exclude records that have already been approved and never requested more proof.
@@ -1343,7 +1381,9 @@ public class PaymentRecordService {
         if (paymentIds == null || paymentIds.isEmpty()) {
             return List.of();
         }
-        List<PaymentRecord> records = paymentRecordMapper.selectBatchIds(paymentIds);
+        QueryWrapper<PaymentRecord> wrapper = new QueryWrapper<>();
+        tenantScope(wrapper).in("payment_id", paymentIds);
+        List<PaymentRecord> records = paymentRecordMapper.selectList(wrapper);
         if (records == null || records.isEmpty()) {
             return List.of();
         }
@@ -1359,7 +1399,7 @@ public class PaymentRecordService {
 
     private List<PaymentRecord> loadRefundCandidatePayments(Long fineId) {
         QueryWrapper<PaymentRecord> wrapper = new QueryWrapper<>();
-        wrapper.eq("fine_id", fineId)
+        tenantScope(wrapper).eq("fine_id", fineId)
                 .in("payment_status", EFFECTIVE_PAYMENT_STATUSES)
                 .orderByDesc("payment_time")
                 .orderByDesc("payment_id");
@@ -1368,7 +1408,7 @@ public class PaymentRecordService {
 
     private List<PaymentRecord> loadFinePaymentBatch(Long fineId, long pageNumber, int batchSize) {
         QueryWrapper<PaymentRecord> wrapper = new QueryWrapper<>();
-        wrapper.eq("fine_id", fineId)
+        tenantScope(wrapper).eq("fine_id", fineId)
                 .orderByAsc("payment_id");
         Page<PaymentRecord> batchPage = new Page<>(Math.max(pageNumber, 1L), Math.max(batchSize, 1));
         paymentRecordMapper.selectPage(batchPage, wrapper);
@@ -1377,7 +1417,7 @@ public class PaymentRecordService {
 
     private List<PaymentRecord> loadPaymentSummaryRecords(Long fineId) {
         QueryWrapper<PaymentRecord> wrapper = new QueryWrapper<>();
-        wrapper.select("payment_id", "payment_status", "payment_amount", "refund_amount")
+        tenantScope(wrapper).select("payment_id", "payment_status", "payment_amount", "refund_amount")
                 .eq("fine_id", fineId)
                 .orderByDesc("payment_time")
                 .orderByDesc("payment_id");
@@ -1512,7 +1552,7 @@ public class PaymentRecordService {
     }
 
     private void syncBatchToIndexAfterCommit(List<PaymentRecord> records) {
-        if (records == null || records.isEmpty()) {
+        if (databaseOnlyForTenantIsolation() || records == null || records.isEmpty()) {
             return;
         }
         runAfterCommitOrNow(() -> {
@@ -1544,6 +1584,9 @@ public class PaymentRecordService {
     }
 
     private List<PaymentRecord> mapHits(org.springframework.data.elasticsearch.core.SearchHits<PaymentRecordDocument> hits) {
+        if (databaseOnlyForTenantIsolation()) {
+            return List.of();
+        }
         if (hits == null || !hits.hasSearchHits()) {
             return List.of();
         }
@@ -1559,7 +1602,7 @@ public class PaymentRecordService {
 
     private List<PaymentRecord> loadAllFromDatabase() {
         QueryWrapper<PaymentRecord> wrapper = new QueryWrapper<>();
-        wrapper.orderByAsc("payment_id");
+        tenantScope(wrapper).orderByAsc("payment_id");
 
         List<PaymentRecord> allRecords = new java.util.ArrayList<>();
         long pageNumber = 1L;
@@ -1578,5 +1621,40 @@ public class PaymentRecordService {
             pageNumber++;
         }
         return allRecords;
+    }
+
+    private boolean databaseOnlyForTenantIsolation() {
+        return tenantAwareSupport.isIsolationEnabled();
+    }
+
+    private <T> QueryWrapper<T> tenantScope(QueryWrapper<T> wrapper) {
+        return tenantAwareSupport.applyTenantScope(wrapper);
+    }
+
+    private PaymentRecord findPaymentByIdFromDatabase(Long paymentId) {
+        if (paymentId == null) {
+            return null;
+        }
+        QueryWrapper<PaymentRecord> wrapper = new QueryWrapper<>();
+        tenantScope(wrapper).eq("payment_id", paymentId).last("limit 1");
+        return paymentRecordMapper.selectOne(wrapper);
+    }
+
+    private int updatePaymentByIdScoped(PaymentRecord paymentRecord) {
+        if (paymentRecord == null || paymentRecord.getPaymentId() == null) {
+            return 0;
+        }
+        if (!databaseOnlyForTenantIsolation()) {
+            return paymentRecordMapper.updateById(paymentRecord);
+        }
+        QueryWrapper<PaymentRecord> wrapper = new QueryWrapper<>();
+        tenantScope(wrapper).eq("payment_id", paymentRecord.getPaymentId());
+        return paymentRecordMapper.update(paymentRecord, wrapper);
+    }
+
+    private static TenantAwareSupport defaultTenantAwareSupport() {
+        ProductGovernanceProperties productGovernanceProperties = new ProductGovernanceProperties();
+        productGovernanceProperties.setTenantIsolationEnabled(false);
+        return new TenantAwareSupport(productGovernanceProperties, new TenantIsolationProperties());
     }
 }

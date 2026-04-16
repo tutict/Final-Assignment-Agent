@@ -28,6 +28,18 @@ public class SysUser implements Serializable {
     @TableId(value = "user_id", type = IdType.AUTO)
     private Long userId;
 
+    @TableField("tenant_id")
+    private String tenantId;
+
+    @TableField("organization_code")
+    private String organizationCode;
+
+    @TableField("region_code")
+    private String regionCode;
+
+    @TableField("department_code")
+    private String departmentCode;
+
     /**
      * 用户名
      */

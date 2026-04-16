@@ -27,6 +27,18 @@ public class VehicleInformation implements Serializable {
     @TableId(value = "vehicle_id", type = IdType.AUTO)
     private Long vehicleId;
 
+    @TableField("tenant_id")
+    private String tenantId;
+
+    @TableField("organization_code")
+    private String organizationCode;
+
+    @TableField("region_code")
+    private String regionCode;
+
+    @TableField("department_code")
+    private String departmentCode;
+
     /**
      * 车牌号
      */

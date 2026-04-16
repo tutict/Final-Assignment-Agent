@@ -27,6 +27,18 @@ public class PaymentRecord implements Serializable {
     @TableId(value = "payment_id", type = IdType.AUTO)
     private Long paymentId;
 
+    @TableField("tenant_id")
+    private String tenantId;
+
+    @TableField("organization_code")
+    private String organizationCode;
+
+    @TableField("region_code")
+    private String regionCode;
+
+    @TableField("department_code")
+    private String departmentCode;
+
     /**
      * 罚款记录 ID
      */

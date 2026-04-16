@@ -3,7 +3,10 @@ package com.tutict.finalassignmentbackend.service;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.tutict.finalassignmentbackend.config.product.ProductGovernanceProperties;
 import com.tutict.finalassignmentbackend.config.statemachine.states.OffenseProcessState;
+import com.tutict.finalassignmentbackend.config.tenant.TenantIsolationProperties;
+import com.tutict.finalassignmentbackend.config.tenant.TenantAwareSupport;
 import com.tutict.finalassignmentbackend.config.websocket.WsAction;
 import com.tutict.finalassignmentbackend.entity.AppealRecord;
 import com.tutict.finalassignmentbackend.entity.DeductionRecord;
@@ -58,6 +61,7 @@ public class OffenseRecordService {
     private final DeductionRecordMapper deductionRecordMapper;
     private final SysRequestHistoryMapper sysRequestHistoryMapper;
     private final OffenseInformationSearchRepository offenseInformationSearchRepository;
+    private final TenantAwareSupport tenantAwareSupport;
     private final SysUserService sysUserService;
     private final KafkaTemplate<String, String> kafkaTemplate;
     private final ObjectMapper objectMapper;
@@ -69,6 +73,7 @@ public class OffenseRecordService {
                                 DeductionRecordMapper deductionRecordMapper,
                                 SysRequestHistoryMapper sysRequestHistoryMapper,
                                 OffenseInformationSearchRepository offenseInformationSearchRepository,
+                                TenantAwareSupport tenantAwareSupport,
                                 SysUserService sysUserService,
                                 KafkaTemplate<String, String> kafkaTemplate,
                                 ObjectMapper objectMapper) {
@@ -78,9 +83,31 @@ public class OffenseRecordService {
         this.deductionRecordMapper = deductionRecordMapper;
         this.sysRequestHistoryMapper = sysRequestHistoryMapper;
         this.offenseInformationSearchRepository = offenseInformationSearchRepository;
+        this.tenantAwareSupport = tenantAwareSupport;
         this.sysUserService = sysUserService;
         this.kafkaTemplate = kafkaTemplate;
         this.objectMapper = objectMapper;
+    }
+
+    public OffenseRecordService(OffenseRecordMapper offenseRecordMapper,
+                                FineRecordMapper fineRecordMapper,
+                                AppealRecordMapper appealRecordMapper,
+                                DeductionRecordMapper deductionRecordMapper,
+                                SysRequestHistoryMapper sysRequestHistoryMapper,
+                                OffenseInformationSearchRepository offenseInformationSearchRepository,
+                                SysUserService sysUserService,
+                                KafkaTemplate<String, String> kafkaTemplate,
+                                ObjectMapper objectMapper) {
+        this(offenseRecordMapper,
+                fineRecordMapper,
+                appealRecordMapper,
+                deductionRecordMapper,
+                sysRequestHistoryMapper,
+                offenseInformationSearchRepository,
+                defaultTenantAwareSupport(),
+                sysUserService,
+                kafkaTemplate,
+                objectMapper);
     }
 
     @Transactional
@@ -113,14 +140,14 @@ public class OffenseRecordService {
     @CacheEvict(cacheNames = CACHE_NAME, allEntries = true)
     public OffenseRecord updateOffenseRecord(OffenseRecord offenseRecord) {
         requirePositive(offenseRecord.getOffenseId(), "Offense ID");
-        OffenseRecord existing = offenseRecordMapper.selectById(offenseRecord.getOffenseId());
+        OffenseRecord existing = findOffenseByIdFromDatabase(offenseRecord.getOffenseId());
         if (existing == null) {
             throw new IllegalStateException("No OffenseRecord updated for id=" + offenseRecord.getOffenseId());
         }
         offenseRecord.setProcessStatus(existing.getProcessStatus());
         preserveEvidenceFieldsWhenDownstreamRecordsExist(offenseRecord, existing);
         validateOffenseRecord(offenseRecord);
-        int rows = offenseRecordMapper.updateById(offenseRecord);
+        int rows = updateOffenseByIdScoped(offenseRecord);
         if (rows == 0) {
             throw new IllegalStateException("No OffenseRecord updated for id=" + offenseRecord.getOffenseId());
         }
@@ -130,14 +157,14 @@ public class OffenseRecordService {
 
     public OffenseRecord updateProcessStatus(Long offenseId, OffenseProcessState newState) {
         requirePositive(offenseId, "Offense ID");
-        OffenseRecord existing = offenseRecordMapper.selectById(offenseId);
+        OffenseRecord existing = findOffenseByIdFromDatabase(offenseId);
         if (existing == null) {
             throw new IllegalStateException("OffenseRecord not found for id=" + offenseId);
         }
         // 仅允许状态机计算出的状态覆盖数据库的 process_status 字段
         existing.setProcessStatus(newState != null ? newState.getCode() : existing.getProcessStatus());
         existing.setUpdatedAt(LocalDateTime.now());
-        offenseRecordMapper.updateById(existing);
+        updateOffenseByIdScoped(existing);
         syncToIndexAfterCommit(existing);
         return existing;
     }
@@ -149,7 +176,7 @@ public class OffenseRecordService {
                                               Integer deductedPoints,
                                               Integer detentionDays) {
         requirePositive(offenseId, "Offense ID");
-        OffenseRecord existing = offenseRecordMapper.selectById(offenseId);
+        OffenseRecord existing = findOffenseByIdFromDatabase(offenseId);
         if (existing == null) {
             throw new IllegalStateException("OffenseRecord not found for id=" + offenseId);
         }
@@ -166,7 +193,7 @@ public class OffenseRecordService {
             existing.setDetentionDays(detentionDays);
         }
         existing.setUpdatedAt(LocalDateTime.now());
-        int rows = offenseRecordMapper.updateById(existing);
+        int rows = updateOffenseByIdScoped(existing);
         if (rows == 0) {
             throw new IllegalStateException("No OffenseRecord updated for id=" + offenseId);
         }
@@ -181,21 +208,26 @@ public class OffenseRecordService {
         ensureNoDependentFineRecords(offenseId);
         ensureNoDependentDeductions(offenseId);
         ensureNoDependentAppeals(offenseId);
-        int rows = offenseRecordMapper.deleteById(offenseId);
+        int rows = deleteOffenseByIdScoped(offenseId);
         if (rows == 0) {
             throw new IllegalStateException("No OffenseRecord deleted for id=" + offenseId);
         }
-        runAfterCommitOrNow(() -> offenseInformationSearchRepository.deleteById(offenseId));
+        if (!databaseOnlyForTenantIsolation()) {
+            runAfterCommitOrNow(() -> offenseInformationSearchRepository.deleteById(offenseId));
+        }
     }
 
     @Transactional(readOnly = true)
-    @Cacheable(cacheNames = CACHE_NAME, key = "#offenseId", unless = "#result == null")
+    @Cacheable(cacheNames = CACHE_NAME, key = "@tenantCacheKeySupport.scope('offense', #offenseId)", unless = "#result == null")
     public OffenseRecord findById(Long offenseId) {
         requirePositive(offenseId, "Offense ID");
+        if (databaseOnlyForTenantIsolation()) {
+            return findOffenseByIdFromDatabase(offenseId);
+        }
         return offenseInformationSearchRepository.findById(offenseId)
                 .map(OffenseRecordDocument::toEntity)
                 .orElseGet(() -> {
-                    OffenseRecord entity = offenseRecordMapper.selectById(offenseId);
+                    OffenseRecord entity = findOffenseByIdFromDatabase(offenseId);
                     if (entity != null) {
                         offenseInformationSearchRepository.save(OffenseRecordDocument.fromEntity(entity));
                     }
@@ -207,13 +239,16 @@ public class OffenseRecordService {
     public boolean existsById(Long offenseId) {
         requirePositive(offenseId, "Offense ID");
         QueryWrapper<OffenseRecord> wrapper = new QueryWrapper<>();
-        wrapper.eq("offense_id", offenseId).last("limit 1");
+        tenantScope(wrapper).eq("offense_id", offenseId).last("limit 1");
         Long count = offenseRecordMapper.selectCount(wrapper);
         return count != null && count > 0;
     }
 
     @Transactional(readOnly = true)
     public List<OffenseRecord> findAll() {
+        if (databaseOnlyForTenantIsolation()) {
+            return loadAllFromDatabase();
+        }
         List<OffenseRecord> fromIndex = StreamSupport.stream(offenseInformationSearchRepository.findAll().spliterator(), false)
                 .map(OffenseRecordDocument::toEntity)
                 .collect(Collectors.toList());
@@ -224,7 +259,7 @@ public class OffenseRecordService {
     }
 
     @Transactional(readOnly = true)
-    @Cacheable(cacheNames = CACHE_NAME, key = "'page:' + #page + ':' + #size", unless = "#result == null || #result.isEmpty()")
+    @Cacheable(cacheNames = CACHE_NAME, key = "@tenantCacheKeySupport.scope('page', #page, #size)", unless = "#result == null || #result.isEmpty()")
     public List<OffenseRecord> listOffenses(int page, int size) {
         validatePagination(page, size);
         QueryWrapper<OffenseRecord> wrapper = new QueryWrapper<>();
@@ -234,7 +269,7 @@ public class OffenseRecordService {
         return fetchFromDatabase(wrapper, page, size);
     }
 
-    @Cacheable(cacheNames = CACHE_NAME, key = "'driver:' + #driverId + ':' + #page + ':' + #size", unless = "#result == null || #result.isEmpty()")
+    @Cacheable(cacheNames = CACHE_NAME, key = "@tenantCacheKeySupport.scope('driver', #driverId, #page, #size)", unless = "#result == null || #result.isEmpty()")
     public List<OffenseRecord> findByDriverId(Long driverId, int page, int size) {
         requirePositive(driverId, "Driver ID");
         validatePagination(page, size);
@@ -248,7 +283,7 @@ public class OffenseRecordService {
         return fetchFromDatabase(wrapper, page, size);
     }
 
-    @Cacheable(cacheNames = CACHE_NAME, key = "'vehicle:' + #vehicleId + ':' + #page + ':' + #size", unless = "#result == null || #result.isEmpty()")
+    @Cacheable(cacheNames = CACHE_NAME, key = "@tenantCacheKeySupport.scope('vehicle', #vehicleId, #page, #size)", unless = "#result == null || #result.isEmpty()")
     public List<OffenseRecord> findByVehicleId(Long vehicleId, int page, int size) {
         requirePositive(vehicleId, "Vehicle ID");
         validatePagination(page, size);
@@ -262,7 +297,7 @@ public class OffenseRecordService {
         return fetchFromDatabase(wrapper, page, size);
     }
 
-    @Cacheable(cacheNames = CACHE_NAME, key = "'code:' + #offenseCode + ':' + #page + ':' + #size", unless = "#result == null || #result.isEmpty()")
+    @Cacheable(cacheNames = CACHE_NAME, key = "@tenantCacheKeySupport.scope('code', #offenseCode, #page, #size)", unless = "#result == null || #result.isEmpty()")
     public List<OffenseRecord> searchByOffenseCode(String offenseCode, int page, int size) {
         if (isBlank(offenseCode)) {
             return List.of();
@@ -278,7 +313,7 @@ public class OffenseRecordService {
         return fetchFromDatabase(wrapper, page, size);
     }
 
-    @Cacheable(cacheNames = CACHE_NAME, key = "'type:' + #offenseType + ':' + #page + ':' + #size", unless = "#result == null || #result.isEmpty()")
+    @Cacheable(cacheNames = CACHE_NAME, key = "@tenantCacheKeySupport.scope('type', #offenseType, #page, #size)", unless = "#result == null || #result.isEmpty()")
     public List<OffenseRecord> searchByOffenseType(String offenseType, int page, int size) {
         if (isBlank(offenseType)) {
             return List.of();
@@ -294,7 +329,7 @@ public class OffenseRecordService {
         return fetchFromDatabase(wrapper, page, size);
     }
 
-    @Cacheable(cacheNames = CACHE_NAME, key = "'status:' + #processStatus + ':' + #page + ':' + #size", unless = "#result == null || #result.isEmpty()")
+    @Cacheable(cacheNames = CACHE_NAME, key = "@tenantCacheKeySupport.scope('status', #processStatus, #page, #size)", unless = "#result == null || #result.isEmpty()")
     public List<OffenseRecord> searchByProcessStatus(String processStatus, int page, int size) {
         if (isBlank(processStatus)) {
             return List.of();
@@ -310,7 +345,7 @@ public class OffenseRecordService {
         return fetchFromDatabase(wrapper, page, size);
     }
 
-    @Cacheable(cacheNames = CACHE_NAME, key = "'timeRange:' + #startTime + ':' + #endTime + ':' + #page + ':' + #size", unless = "#result == null || #result.isEmpty()")
+    @Cacheable(cacheNames = CACHE_NAME, key = "@tenantCacheKeySupport.scope('timeRange', #startTime, #endTime, #page, #size)", unless = "#result == null || #result.isEmpty()")
     public List<OffenseRecord> searchByOffenseTimeRange(String startTime, String endTime, int page, int size) {
         validatePagination(page, size);
         LocalDateTime start = parseDateTime(startTime, "startTime");
@@ -328,7 +363,7 @@ public class OffenseRecordService {
         return fetchFromDatabase(wrapper, page, size);
     }
 
-    @Cacheable(cacheNames = CACHE_NAME, key = "'number:' + #offenseNumber + ':' + #page + ':' + #size", unless = "#result == null || #result.isEmpty()")
+    @Cacheable(cacheNames = CACHE_NAME, key = "@tenantCacheKeySupport.scope('number', #offenseNumber, #page, #size)", unless = "#result == null || #result.isEmpty()")
     public List<OffenseRecord> searchByOffenseNumber(String offenseNumber, int page, int size) {
         if (isBlank(offenseNumber)) {
             return List.of();
@@ -364,7 +399,7 @@ public class OffenseRecordService {
             return List.of();
         }
         QueryWrapper<OffenseRecord> wrapper = new QueryWrapper<>();
-        wrapper.select("offense_id")
+        tenantScope(wrapper).select("offense_id")
                 .in("driver_id", normalizedIds)
                 .orderByDesc("offense_time");
         return offenseRecordMapper.selectObjs(wrapper).stream()
@@ -375,7 +410,7 @@ public class OffenseRecordService {
                 .collect(Collectors.toList());
     }
 
-    @Cacheable(cacheNames = CACHE_NAME, key = "'location:' + #offenseLocation + ':' + #page + ':' + #size", unless = "#result == null || #result.isEmpty()")
+    @Cacheable(cacheNames = CACHE_NAME, key = "@tenantCacheKeySupport.scope('location', #offenseLocation, #page, #size)", unless = "#result == null || #result.isEmpty()")
     public List<OffenseRecord> searchByOffenseLocation(String offenseLocation, int page, int size) {
         if (isBlank(offenseLocation)) {
             return List.of();
@@ -391,7 +426,7 @@ public class OffenseRecordService {
         return fetchFromDatabase(wrapper, page, size);
     }
 
-    @Cacheable(cacheNames = CACHE_NAME, key = "'province:' + #offenseProvince + ':' + #page + ':' + #size", unless = "#result == null || #result.isEmpty()")
+    @Cacheable(cacheNames = CACHE_NAME, key = "@tenantCacheKeySupport.scope('province', #offenseProvince, #page, #size)", unless = "#result == null || #result.isEmpty()")
     public List<OffenseRecord> searchByOffenseProvince(String offenseProvince, int page, int size) {
         if (isBlank(offenseProvince)) {
             return List.of();
@@ -407,7 +442,7 @@ public class OffenseRecordService {
         return fetchFromDatabase(wrapper, page, size);
     }
 
-    @Cacheable(cacheNames = CACHE_NAME, key = "'city:' + #offenseCity + ':' + #page + ':' + #size", unless = "#result == null || #result.isEmpty()")
+    @Cacheable(cacheNames = CACHE_NAME, key = "@tenantCacheKeySupport.scope('city', #offenseCity, #page, #size)", unless = "#result == null || #result.isEmpty()")
     public List<OffenseRecord> searchByOffenseCity(String offenseCity, int page, int size) {
         if (isBlank(offenseCity)) {
             return List.of();
@@ -423,7 +458,7 @@ public class OffenseRecordService {
         return fetchFromDatabase(wrapper, page, size);
     }
 
-    @Cacheable(cacheNames = CACHE_NAME, key = "'notification:' + #notificationStatus + ':' + #page + ':' + #size", unless = "#result == null || #result.isEmpty()")
+    @Cacheable(cacheNames = CACHE_NAME, key = "@tenantCacheKeySupport.scope('notification', #notificationStatus, #page, #size)", unless = "#result == null || #result.isEmpty()")
     public List<OffenseRecord> searchByNotificationStatus(String notificationStatus, int page, int size) {
         if (isBlank(notificationStatus)) {
             return List.of();
@@ -439,7 +474,7 @@ public class OffenseRecordService {
         return fetchFromDatabase(wrapper, page, size);
     }
 
-    @Cacheable(cacheNames = CACHE_NAME, key = "'agency:' + #enforcementAgency + ':' + #page + ':' + #size", unless = "#result == null || #result.isEmpty()")
+    @Cacheable(cacheNames = CACHE_NAME, key = "@tenantCacheKeySupport.scope('agency', #enforcementAgency, #page, #size)", unless = "#result == null || #result.isEmpty()")
     public List<OffenseRecord> searchByEnforcementAgency(String enforcementAgency, int page, int size) {
         if (isBlank(enforcementAgency)) {
             return List.of();
@@ -455,7 +490,7 @@ public class OffenseRecordService {
         return fetchFromDatabase(wrapper, page, size);
     }
 
-    @Cacheable(cacheNames = CACHE_NAME, key = "'fineRange:' + #minAmount + ':' + #maxAmount + ':' + #page + ':' + #size", unless = "#result == null || #result.isEmpty()")
+    @Cacheable(cacheNames = CACHE_NAME, key = "@tenantCacheKeySupport.scope('fineRange', #minAmount, #maxAmount, #page, #size)", unless = "#result == null || #result.isEmpty()")
     public List<OffenseRecord> searchByFineAmountRange(double minAmount, double maxAmount, int page, int size) {
         validatePagination(page, size);
         if (minAmount > maxAmount) {
@@ -573,7 +608,7 @@ public class OffenseRecordService {
     }
 
     private void syncToIndexAfterCommit(OffenseRecord offenseRecord) {
-        if (offenseRecord == null) {
+        if (databaseOnlyForTenantIsolation() || offenseRecord == null) {
             return;
         }
         OffenseRecordDocument doc = OffenseRecordDocument.fromEntity(offenseRecord);
@@ -584,7 +619,7 @@ public class OffenseRecordService {
     }
 
     private void syncBatchToIndexAfterCommit(List<OffenseRecord> records) {
-        if (records == null || records.isEmpty()) {
+        if (databaseOnlyForTenantIsolation() || records == null || records.isEmpty()) {
             return;
         }
         List<OffenseRecordDocument> documents = records.stream()
@@ -602,6 +637,9 @@ public class OffenseRecordService {
      * 将 ES 命中结果转换成实体列表，供缓存 miss 时快速返回
      */
     private List<OffenseRecord> mapHits(org.springframework.data.elasticsearch.core.SearchHits<OffenseRecordDocument> hits) {
+        if (databaseOnlyForTenantIsolation()) {
+            return List.of();
+        }
         if (hits == null || !hits.hasSearchHits()) {
             return List.of();
         }
@@ -612,6 +650,7 @@ public class OffenseRecordService {
     }
 
     private List<OffenseRecord> fetchFromDatabase(QueryWrapper<OffenseRecord> wrapper, int page, int size) {
+        tenantScope(wrapper);
         Page<OffenseRecord> mpPage = new Page<>(Math.max(page, 1), Math.max(size, 1));
         offenseRecordMapper.selectPage(mpPage, wrapper);
         List<OffenseRecord> records = mpPage.getRecords();
@@ -621,7 +660,7 @@ public class OffenseRecordService {
 
     private List<OffenseRecord> loadAllFromDatabase() {
         QueryWrapper<OffenseRecord> wrapper = new QueryWrapper<>();
-        wrapper.orderByAsc("offense_id");
+        tenantScope(wrapper).orderByAsc("offense_id");
 
         List<OffenseRecord> allRecords = new ArrayList<>();
         long pageNumber = 1L;
@@ -695,19 +734,19 @@ public class OffenseRecordService {
 
     private boolean hasDependentFineRecords(Long offenseId) {
         QueryWrapper<FineRecord> wrapper = new QueryWrapper<>();
-        wrapper.eq("offense_id", offenseId);
+        tenantScope(wrapper).eq("offense_id", offenseId);
         return fineRecordMapper.selectCount(wrapper) > 0;
     }
 
     private boolean hasDependentAppeals(Long offenseId) {
         QueryWrapper<AppealRecord> wrapper = new QueryWrapper<>();
-        wrapper.eq("offense_id", offenseId);
+        tenantScope(wrapper).eq("offense_id", offenseId);
         return appealRecordMapper.selectCount(wrapper) > 0;
     }
 
     private boolean hasDependentDeductions(Long offenseId) {
         QueryWrapper<DeductionRecord> wrapper = new QueryWrapper<>();
-        wrapper.eq("offense_id", offenseId);
+        tenantScope(wrapper).eq("offense_id", offenseId);
         return deductionRecordMapper.selectCount(wrapper) > 0;
     }
 
@@ -862,5 +901,52 @@ public class OffenseRecordService {
             return;
         }
         task.run();
+    }
+
+    private boolean databaseOnlyForTenantIsolation() {
+        return tenantAwareSupport.isIsolationEnabled();
+    }
+
+    private <T> QueryWrapper<T> tenantScope(QueryWrapper<T> wrapper) {
+        return tenantAwareSupport.applyTenantScope(wrapper);
+    }
+
+    private OffenseRecord findOffenseByIdFromDatabase(Long offenseId) {
+        if (offenseId == null) {
+            return null;
+        }
+        QueryWrapper<OffenseRecord> wrapper = new QueryWrapper<>();
+        tenantScope(wrapper).eq("offense_id", offenseId).last("limit 1");
+        return offenseRecordMapper.selectOne(wrapper);
+    }
+
+    private int updateOffenseByIdScoped(OffenseRecord offenseRecord) {
+        if (offenseRecord == null || offenseRecord.getOffenseId() == null) {
+            return 0;
+        }
+        if (!databaseOnlyForTenantIsolation()) {
+            return offenseRecordMapper.updateById(offenseRecord);
+        }
+        QueryWrapper<OffenseRecord> wrapper = new QueryWrapper<>();
+        tenantScope(wrapper).eq("offense_id", offenseRecord.getOffenseId());
+        return offenseRecordMapper.update(offenseRecord, wrapper);
+    }
+
+    private int deleteOffenseByIdScoped(Long offenseId) {
+        if (offenseId == null) {
+            return 0;
+        }
+        if (!databaseOnlyForTenantIsolation()) {
+            return offenseRecordMapper.deleteById(offenseId);
+        }
+        QueryWrapper<OffenseRecord> wrapper = new QueryWrapper<>();
+        tenantScope(wrapper).eq("offense_id", offenseId);
+        return offenseRecordMapper.delete(wrapper);
+    }
+
+    private static TenantAwareSupport defaultTenantAwareSupport() {
+        ProductGovernanceProperties productGovernanceProperties = new ProductGovernanceProperties();
+        productGovernanceProperties.setTenantIsolationEnabled(false);
+        return new TenantAwareSupport(productGovernanceProperties, new TenantIsolationProperties());
     }
 }

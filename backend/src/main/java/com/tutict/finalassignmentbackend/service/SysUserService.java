@@ -2,6 +2,7 @@ package com.tutict.finalassignmentbackend.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.tutict.finalassignmentbackend.config.tenant.TenantAwareSupport;
 import com.tutict.finalassignmentbackend.config.login.jwt.AuthenticationSnapshotService;
 import com.tutict.finalassignmentbackend.config.websocket.WsAction;
 import com.tutict.finalassignmentbackend.entity.SysRequestHistory;
@@ -51,6 +52,7 @@ public class SysUserService {
     private final PasswordEncoder passwordEncoder;
     private final CacheManager cacheManager;
     private final AuthenticationSnapshotService authenticationSnapshotService;
+    private final TenantAwareSupport tenantAwareSupport;
 
     @Autowired
     public SysUserService(SysUserMapper sysUserMapper,
@@ -58,13 +60,15 @@ public class SysUserService {
                           SysUserSearchRepository sysUserSearchRepository,
                           PasswordEncoder passwordEncoder,
                           CacheManager cacheManager,
-                          AuthenticationSnapshotService authenticationSnapshotService) {
+                          AuthenticationSnapshotService authenticationSnapshotService,
+                          TenantAwareSupport tenantAwareSupport) {
         this.sysUserMapper = sysUserMapper;
         this.sysRequestHistoryMapper = sysRequestHistoryMapper;
         this.sysUserSearchRepository = sysUserSearchRepository;
         this.passwordEncoder = passwordEncoder;
         this.cacheManager = cacheManager;
         this.authenticationSnapshotService = authenticationSnapshotService;
+        this.tenantAwareSupport = tenantAwareSupport;
     }
 
     public SysUserService(SysUserMapper sysUserMapper,
@@ -72,7 +76,7 @@ public class SysUserService {
                           SysUserSearchRepository sysUserSearchRepository,
                           PasswordEncoder passwordEncoder,
                           CacheManager cacheManager) {
-        this(sysUserMapper, sysRequestHistoryMapper, sysUserSearchRepository, passwordEncoder, cacheManager, null);
+        this(sysUserMapper, sysRequestHistoryMapper, sysUserSearchRepository, passwordEncoder, cacheManager, null, null);
     }
 
     @Transactional
@@ -197,6 +201,12 @@ public class SysUserService {
     @Cacheable(cacheNames = CACHE_NAME, key = "#userId", unless = "#result == null")
     public SysUser findById(Long userId) {
         requirePositive(userId);
+        if (tenantAwareSupport != null && tenantAwareSupport.isIsolationEnabled()) {
+            QueryWrapper<SysUser> wrapper = new QueryWrapper<>();
+            wrapper.eq("user_id", userId).last("limit 1");
+            tenantAwareSupport.applyTenantScope(wrapper);
+            return sysUserMapper.selectOne(wrapper);
+        }
         return sysUserSearchRepository.findById(userId)
                 .map(SysUserDocument::toEntity)
                 .orElseGet(() -> {
@@ -225,6 +235,9 @@ public class SysUserService {
     public List<SysUser> listUsers(int page, int size) {
         validatePagination(page, size);
         QueryWrapper<SysUser> wrapper = new QueryWrapper<>();
+        if (tenantAwareSupport != null) {
+            tenantAwareSupport.applyTenantScope(wrapper);
+        }
         wrapper.orderByAsc("username")
                 .orderByAsc("user_id");
         return fetchFromDatabase(wrapper, page, size);
@@ -382,6 +395,9 @@ public class SysUserService {
         }
         QueryWrapper<SysUser> wrapper = new QueryWrapper<>();
         wrapper.eq("username", username);
+        if (tenantAwareSupport != null) {
+            tenantAwareSupport.applyTenantScope(wrapper);
+        }
         SysUser entity = sysUserMapper.selectOne(wrapper);
         if (entity != null) {
             syncToIndexAfterCommit(entity);
@@ -395,6 +411,9 @@ public class SysUserService {
         }
         QueryWrapper<SysUser> wrapper = new QueryWrapper<>();
         wrapper.eq("username", username);
+        if (tenantAwareSupport != null) {
+            tenantAwareSupport.applyTenantScope(wrapper);
+        }
         return sysUserMapper.selectCount(wrapper) > 0;
     }
 
@@ -761,6 +780,9 @@ public class SysUserService {
         long currentPage = 1L;
         while (true) {
             QueryWrapper<SysUser> wrapper = new QueryWrapper<>();
+            if (tenantAwareSupport != null) {
+                tenantAwareSupport.applyTenantScope(wrapper);
+            }
             wrapper.orderByAsc("user_id");
             Page<SysUser> mpPage = new Page<>(currentPage, FULL_LOAD_BATCH_SIZE);
             sysUserMapper.selectPage(mpPage, wrapper);

@@ -122,6 +122,7 @@ class _AdminHome extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               _RevealIn(
+                delay: const Duration(milliseconds: 40),
                 child: _WorkspaceOverview(
                   eyebrow: 'common.adminConsole'.tr,
                   title: displayName,
@@ -162,6 +163,7 @@ class _AdminHome extends StatelessWidget {
               ),
               SizedBox(height: metrics.sectionGap + 8),
               _RevealIn(
+                delay: const Duration(milliseconds: 120),
                 child: _SectionTitleBlock(
                   eyebrow: 'common.adminConsole'.tr,
                   title: 'admin.coreEntries'.tr,
@@ -170,6 +172,7 @@ class _AdminHome extends StatelessWidget {
               ),
               SizedBox(height: metrics.sectionGap),
               _RevealIn(
+                delay: const Duration(milliseconds: 180),
                 child: _ActionDeck(
                   actions: [
                     if (canManageUsersAndLogs)
@@ -221,6 +224,7 @@ class _AdminHome extends StatelessWidget {
               ),
               SizedBox(height: metrics.sectionGap + 8),
               _RevealIn(
+                delay: const Duration(milliseconds: 240),
                 child: LayoutBuilder(
                   builder: (context, constraints) {
                     final stacked = constraints.maxWidth < 920;
@@ -359,7 +363,7 @@ class _WorkspaceOverview extends StatelessWidget {
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(26),
+      padding: const EdgeInsets.all(28),
       decoration: BoxDecoration(
         gradient: const LinearGradient(
           begin: Alignment.topLeft,
@@ -376,17 +380,23 @@ class _WorkspaceOverview extends StatelessWidget {
         builder: (context, constraints) {
           final stacked = constraints.maxWidth < 920;
           final narrow = constraints.maxWidth < 420;
+          final signalBand = _SignalBand(metrics: metrics);
           final lead = Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                eyebrow.toUpperCase(),
-                style: theme.textTheme.labelMedium?.copyWith(
-                  color: Colors.white.withValues(alpha: 0.62),
-                  letterSpacing: 1.4,
-                ),
+              Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: [
+                  _ConsoleBadge(label: eyebrow.toUpperCase()),
+                  _ConsoleBadge(
+                    label: 'common.online'.tr.toUpperCase(),
+                    accent: const Color(0xFF2EC48D),
+                    filled: true,
+                  ),
+                ],
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 18),
               Text(
                 title,
                 style: (narrow
@@ -406,15 +416,25 @@ class _WorkspaceOverview extends StatelessWidget {
                   ),
                 ),
               ),
-              const SizedBox(height: 20),
-              Wrap(
-                spacing: 18,
-                runSpacing: 16,
-                children: metrics
-                    .map((metric) => _MetricRail(metric: metric))
-                    .toList(),
+              const SizedBox(height: 18),
+              Text(
+                'common.focus'.tr.toUpperCase(),
+                style: theme.textTheme.labelMedium?.copyWith(
+                  color: Colors.white.withValues(alpha: 0.56),
+                  letterSpacing: 1.1,
+                ),
               ),
-              const SizedBox(height: 22),
+              const SizedBox(height: 10),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 560),
+                child: Text(
+                  'admin.card.progress.subtitle'.tr,
+                  style: theme.textTheme.bodyLarge?.copyWith(
+                    color: Colors.white.withValues(alpha: 0.88),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 24),
               Wrap(
                 spacing: 10,
                 runSpacing: 10,
@@ -439,39 +459,14 @@ class _WorkspaceOverview extends StatelessWidget {
                   ),
                 ],
               ),
+              const SizedBox(height: 24),
+              signalBand,
             ],
           );
-          final side = Container(
-            padding: const EdgeInsets.all(18),
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.08),
-              borderRadius: BorderRadius.circular(24),
-              border: Border.all(
-                color: Colors.white.withValues(alpha: 0.08),
-              ),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'common.today'.tr.toUpperCase(),
-                  style: theme.textTheme.labelMedium?.copyWith(
-                    color: Colors.white.withValues(alpha: 0.62),
-                    letterSpacing: 1.2,
-                  ),
-                ),
-                const SizedBox(height: 14),
-                ...queue.asMap().entries.map(
-                      (entry) => Padding(
-                        padding: const EdgeInsets.only(bottom: 14),
-                        child: _QueueLine(
-                          index: entry.key + 1,
-                          text: entry.value,
-                        ),
-                      ),
-                    ),
-              ],
-            ),
+          final side = _PriorityLane(
+            queue: queue,
+            themeLabel:
+                theme.brightness == Brightness.dark ? 'common.dark' : 'common.light',
           );
 
           if (stacked) {
@@ -488,7 +483,7 @@ class _WorkspaceOverview extends StatelessWidget {
           return Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(flex: 6, child: lead),
+              Expanded(flex: 7, child: lead),
               const SizedBox(width: 28),
               Expanded(flex: 4, child: side),
             ],
@@ -553,8 +548,178 @@ class _MetricRail extends StatelessWidget {
   }
 }
 
-class _QueueLine extends StatelessWidget {
-  const _QueueLine({
+class _SignalBand extends StatelessWidget {
+  const _SignalBand({required this.metrics});
+
+  final List<_OverviewMetric> metrics;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.08),
+        ),
+      ),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final compact = constraints.maxWidth < 520;
+          if (compact) {
+            return Column(
+              children: [
+                for (var i = 0; i < metrics.length; i++) ...[
+                  _MetricRail(metric: metrics[i]),
+                  if (i != metrics.length - 1)
+                    Divider(
+                      color: Colors.white.withValues(alpha: 0.10),
+                      height: 22,
+                    ),
+                ],
+              ],
+            );
+          }
+
+          return Row(
+            children: [
+              for (var i = 0; i < metrics.length; i++) ...[
+                Expanded(child: _MetricRail(metric: metrics[i])),
+                if (i != metrics.length - 1)
+                  Container(
+                    width: 1,
+                    height: 44,
+                    color: Colors.white.withValues(alpha: 0.10),
+                    margin: const EdgeInsets.symmetric(horizontal: 18),
+                  ),
+              ],
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _ConsoleBadge extends StatelessWidget {
+  const _ConsoleBadge({
+    required this.label,
+    this.accent = Colors.white,
+    this.filled = false,
+  });
+
+  final String label;
+  final Color accent;
+  final bool filled;
+
+  @override
+  Widget build(BuildContext context) {
+    final background = filled
+        ? accent.withValues(alpha: 0.18)
+        : Colors.white.withValues(alpha: 0.08);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(
+          color: filled ? accent.withValues(alpha: 0.28) : Colors.white10,
+        ),
+      ),
+      child: Text(
+        label,
+        style: Theme.of(context).textTheme.labelMedium?.copyWith(
+              color: filled ? accent : Colors.white.withValues(alpha: 0.80),
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.8,
+            ),
+      ),
+    );
+  }
+}
+
+class _PriorityLane extends StatelessWidget {
+  const _PriorityLane({
+    required this.queue,
+    required this.themeLabel,
+  });
+
+  final List<String> queue;
+  final String themeLabel;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.08),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'common.today'.tr.toUpperCase(),
+            style: theme.textTheme.labelMedium?.copyWith(
+              color: Colors.white.withValues(alpha: 0.62),
+              letterSpacing: 1.2,
+            ),
+          ),
+          const SizedBox(height: 14),
+          ...queue.asMap().entries.map(
+                (entry) => Padding(
+                  padding: const EdgeInsets.only(bottom: 14),
+                  child: _PriorityEntry(
+                    index: entry.key + 1,
+                    text: entry.value,
+                  ),
+                ),
+              ),
+          const SizedBox(height: 6),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(18),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: _CompactStatus(
+                    label: 'common.agent'.tr,
+                    value: 'common.online'.tr,
+                  ),
+                ),
+                Container(
+                  width: 1,
+                  height: 32,
+                  color: Colors.white.withValues(alpha: 0.10),
+                ),
+                Expanded(
+                  child: _CompactStatus(
+                    label: 'common.theme'.tr,
+                    value: themeLabel.tr,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PriorityEntry extends StatelessWidget {
+  const _PriorityEntry({
     required this.index,
     required this.text,
   });
@@ -565,14 +730,22 @@ class _QueueLine extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          index.toString().padLeft(2, '0'),
-          style: theme.textTheme.labelLarge?.copyWith(
-            color: Colors.white.withValues(alpha: 0.48),
+        Container(
+          width: 28,
+          height: 28,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(999),
+          ),
+          child: Text(
+            index.toString().padLeft(2, '0'),
+            style: theme.textTheme.labelMedium?.copyWith(
+              color: Colors.white.withValues(alpha: 0.80),
+            ),
           ),
         ),
         const SizedBox(width: 12),
@@ -580,11 +753,47 @@ class _QueueLine extends StatelessWidget {
           child: Text(
             text,
             style: theme.textTheme.bodyMedium?.copyWith(
-              color: Colors.white.withValues(alpha: 0.84),
+              color: Colors.white.withValues(alpha: 0.86),
             ),
           ),
         ),
       ],
+    );
+  }
+}
+
+class _CompactStatus extends StatelessWidget {
+  const _CompactStatus({
+    required this.label,
+    required this.value,
+  });
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: Colors.white.withValues(alpha: 0.56),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            value,
+            style: theme.textTheme.labelLarge?.copyWith(
+              color: Colors.white,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -634,7 +843,7 @@ class _ActionDeck extends StatelessWidget {
 
     return Container(
       decoration: BoxDecoration(
-        color: theme.colorScheme.surface.withValues(alpha: 0.78),
+        color: theme.colorScheme.surface.withValues(alpha: 0.72),
         borderRadius: BorderRadius.circular(28),
         border: Border.all(
           color: theme.colorScheme.outlineVariant.withValues(alpha: 0.22),
@@ -702,6 +911,7 @@ class _ActionRowState extends State<_ActionRow> {
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 160),
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+          transform: Matrix4.translationValues(_hovered ? 4 : 0, 0, 0),
           color: _hovered
               ? theme.colorScheme.primary.withValues(alpha: 0.04)
               : Colors.transparent,
@@ -893,21 +1103,30 @@ class _PlainChecklist extends StatelessWidget {
 }
 
 class _RevealIn extends StatelessWidget {
-  const _RevealIn({required this.child});
+  const _RevealIn({
+    required this.child,
+    this.delay = Duration.zero,
+  });
 
   final Widget child;
+  final Duration delay;
 
   @override
   Widget build(BuildContext context) {
     return TweenAnimationBuilder<double>(
-      duration: const Duration(milliseconds: 360),
+      duration: const Duration(milliseconds: 360) + delay,
       curve: Curves.easeOutCubic,
       tween: Tween(begin: 0, end: 1),
       builder: (context, value, widget) {
+        final delayedValue = delay == Duration.zero
+            ? value
+            : ((value * (360 + delay.inMilliseconds) - delay.inMilliseconds) /
+                    360)
+                .clamp(0.0, 1.0);
         return Opacity(
-          opacity: value,
+          opacity: delayedValue,
           child: Transform.translate(
-            offset: Offset(0, (1 - value) * 16),
+            offset: Offset(0, (1 - delayedValue) * 16),
             child: widget,
           ),
         );

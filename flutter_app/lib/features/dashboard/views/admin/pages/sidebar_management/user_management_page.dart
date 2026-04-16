@@ -336,6 +336,222 @@ class _UserManagementPageState extends State<UserManagementPage> {
     );
   }
 
+  bool get _hasActiveFilters =>
+      _searchController.text.trim().isNotEmpty ||
+      _searchType != kUserAdminSearchTypeUsername;
+
+  int _activeUserCount() {
+    return _filteredUsers
+        .where((user) =>
+            normalizeAccountStatusCode(user.status) == kUserAdminStatusActive)
+        .length;
+  }
+
+  int _inactiveUserCount() {
+    return _filteredUsers
+        .where((user) =>
+            normalizeAccountStatusCode(user.status) == kUserAdminStatusInactive)
+        .length;
+  }
+
+  int _departmentCount() {
+    return _filteredUsers
+        .map((user) => user.department?.trim() ?? '')
+        .where((department) => department.isNotEmpty)
+        .toSet()
+        .length;
+  }
+
+  Widget _buildHeroSection(ThemeData themeData) {
+    final onHero = themeData.brightness == Brightness.dark
+        ? Colors.white
+        : const Color(0xFF102530);
+    final muted = onHero.withValues(alpha: 0.72);
+    final queryLabel = _searchController.text.trim().isNotEmpty
+        ? 'userAdmin.workspace.signal.query'.trParams({
+            'value': _searchController.text.trim(),
+          })
+        : 'userAdmin.workspace.signal.queryIdle'.tr;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(28),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: themeData.brightness == Brightness.dark
+              ? const [
+                  Color(0xFF08161E),
+                  Color(0xFF0F2530),
+                  Color(0xFF174557),
+                ]
+              : const [
+                  Color(0xFFF6FAFC),
+                  Color(0xFFEAF2F7),
+                  Color(0xFFDDE8EF),
+                ],
+        ),
+        borderRadius: BorderRadius.circular(30),
+        border: Border.all(
+          color: themeData.colorScheme.outline.withValues(alpha: 0.12),
+        ),
+      ),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final stacked = constraints.maxWidth < 940;
+          final lead = Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: [
+                  _UserHeroBadge(
+                    label: 'userAdmin.workspace.eyebrow'.tr.toUpperCase(),
+                    foregroundColor: onHero,
+                  ),
+                  _UserHeroBadge(
+                    label: userAdminSearchTypeLabelKey(_searchType)
+                        .tr
+                        .toUpperCase(),
+                    foregroundColor: Colors.white,
+                    backgroundColor: _hasActiveFilters
+                        ? const Color(0xFF1F9D68)
+                        : const Color(0xFF2F6FD6),
+                    filled: true,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 18),
+              Text(
+                'userAdmin.workspace.title'.tr,
+                style: themeData.textTheme.headlineMedium?.copyWith(
+                  color: onHero,
+                  fontWeight: FontWeight.w800,
+                  height: 1.05,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'userAdmin.workspace.subtitle'.tr,
+                style: themeData.textTheme.bodyLarge?.copyWith(
+                  color: muted,
+                  height: 1.55,
+                ),
+              ),
+              const SizedBox(height: 18),
+              Wrap(
+                spacing: 12,
+                runSpacing: 12,
+                children: [
+                  _UserInlineSignal(
+                    icon: Icons.search_rounded,
+                    label: queryLabel,
+                    color: onHero,
+                  ),
+                  _UserInlineSignal(
+                    icon: Icons.tune_rounded,
+                    label: 'userAdmin.workspace.signal.mode'.trParams({
+                      'value': userAdminSearchTypeLabelKey(_searchType).tr,
+                    }),
+                    color: onHero,
+                  ),
+                ],
+              ),
+            ],
+          );
+          final metrics = Wrap(
+            spacing: 14,
+            runSpacing: 14,
+            children: [
+              _UserMetricTile(
+                label: 'userAdmin.workspace.metric.loaded'.tr,
+                value: '${_allUsers.length}',
+              ),
+              _UserMetricTile(
+                label: 'userAdmin.workspace.metric.visible'.tr,
+                value: '${_filteredUsers.length}',
+              ),
+              _UserMetricTile(
+                label: 'userAdmin.workspace.metric.active'.tr,
+                value: '${_activeUserCount()}',
+              ),
+              _UserMetricTile(
+                label: 'userAdmin.workspace.metric.inactive'.tr,
+                value: '${_inactiveUserCount()}',
+              ),
+              _UserMetricTile(
+                label: 'userAdmin.workspace.metric.department'.tr,
+                value: '${_departmentCount()}',
+              ),
+            ],
+          );
+
+          if (stacked) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                lead,
+                const SizedBox(height: 22),
+                metrics,
+              ],
+            );
+          }
+
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(flex: 6, child: lead),
+              const SizedBox(width: 24),
+              Expanded(
+                flex: 4,
+                child: Align(alignment: Alignment.topRight, child: metrics),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildSectionHeading(
+    ThemeData themeData, {
+    required String eyebrow,
+    required String title,
+    required String description,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          eyebrow.toUpperCase(),
+          style: themeData.textTheme.labelMedium?.copyWith(
+            color: themeData.colorScheme.primary,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 1.3,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          title,
+          style: themeData.textTheme.headlineSmall?.copyWith(
+            fontWeight: FontWeight.w800,
+            height: 1.1,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          description,
+          style: themeData.textTheme.bodyMedium?.copyWith(
+            color: themeData.colorScheme.onSurfaceVariant,
+            height: 1.5,
+          ),
+        ),
+      ],
+    );
+  }
+
   Future<void> _showCreateUserDialog() async {
     final usernameController = TextEditingController();
     final passwordController = TextEditingController();
@@ -771,84 +987,149 @@ class _UserManagementPageState extends State<UserManagementPage> {
   }
 
   Widget _buildSearchCard(ThemeData themeData) {
-    return Card(
-      elevation: 2,
-      color: themeData.colorScheme.surfaceContainerLowest,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16.0),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(12.0),
-        child: Row(
-          children: [
-            Expanded(
-              child: TextField(
-                controller: _searchController,
-                decoration: InputDecoration(
-                  hintText: userAdminSearchHintKey(_searchType).tr,
-                  prefixIcon: const Icon(Icons.search),
-                  suffixIcon: _searchController.text.trim().isEmpty
-                      ? null
-                      : IconButton(
-                          onPressed: () {
-                            _searchController.clear();
-                            setState(() {});
-                            _refreshUsersWithQuery(query: '');
-                          },
-                          icon: const Icon(Icons.clear),
-                        ),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12.0),
-                    borderSide: BorderSide.none,
-                  ),
-                  filled: true,
-                  fillColor: themeData.colorScheme.surfaceContainer,
-                ),
-                onChanged: (value) {
-                  setState(() {});
-                  _scheduleSearchRefresh(value);
-                },
-                onSubmitted: (value) => _refreshUsersWithQuery(query: value),
-              ),
-            ),
-            const SizedBox(width: 12),
-            ConstrainedBox(
-              constraints: const BoxConstraints(minWidth: 160, maxWidth: 220),
-              child: DropdownButtonFormField<String>(
-                initialValue: _searchType,
-                decoration: InputDecoration(
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12.0),
-                    borderSide: BorderSide.none,
-                  ),
-                  filled: true,
-                  fillColor: themeData.colorScheme.surfaceContainer,
-                ),
-                items: const [
-                  kUserAdminSearchTypeUsername,
-                  kUserAdminSearchTypeStatus,
-                  kUserAdminSearchTypeDepartment,
-                  kUserAdminSearchTypeContactNumber,
-                  kUserAdminSearchTypeEmail,
-                ]
-                    .map(
-                      (type) => DropdownMenuItem<String>(
-                        value: type,
-                        child: Text(userAdminSearchTypeLabelKey(type).tr),
-                      ),
-                    )
-                    .toList(),
-                onChanged: (value) {
-                  if (value == null) return;
-                  setState(() {
-                    _searchType = value;
-                  });
-                  _refreshUsersWithQuery(query: _searchController.text);
-                },
-              ),
-            ),
-          ],
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(22),
+      decoration: BoxDecoration(
+        color: themeData.colorScheme.surfaceContainerLowest,
+        borderRadius: BorderRadius.circular(26),
+        border: Border.all(
+          color: themeData.colorScheme.outline.withValues(alpha: 0.12),
         ),
+      ),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final stacked = constraints.maxWidth < 880;
+          final searchField = TextField(
+            controller: _searchController,
+            decoration: InputDecoration(
+              labelText: 'userAdmin.workspace.filterTitle'.tr,
+              hintText: userAdminSearchHintKey(_searchType).tr,
+              prefixIcon: const Icon(Icons.search_rounded),
+              suffixIcon: _searchController.text.trim().isEmpty
+                  ? null
+                  : IconButton(
+                      onPressed: () {
+                        _searchController.clear();
+                        setState(() {});
+                        _refreshUsersWithQuery(query: '');
+                      },
+                      icon: const Icon(Icons.clear_rounded),
+                    ),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(18.0),
+                borderSide: BorderSide.none,
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(18.0),
+                borderSide: BorderSide(
+                  color: themeData.colorScheme.outline.withValues(alpha: 0.14),
+                ),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(18.0),
+                borderSide: BorderSide(
+                  color: themeData.colorScheme.primary,
+                  width: 1.4,
+                ),
+              ),
+              filled: true,
+              fillColor: themeData.colorScheme.surface,
+            ),
+            onChanged: (value) {
+              setState(() {});
+              _scheduleSearchRefresh(value);
+            },
+            onSubmitted: (value) => _refreshUsersWithQuery(query: value),
+          );
+          final modePicker = DropdownButtonFormField<String>(
+            initialValue: _searchType,
+            decoration: InputDecoration(
+              labelText: 'userAdmin.workspace.filterMode'.tr,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(18.0),
+                borderSide: BorderSide.none,
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(18.0),
+                borderSide: BorderSide(
+                  color: themeData.colorScheme.outline.withValues(alpha: 0.14),
+                ),
+              ),
+              filled: true,
+              fillColor: themeData.colorScheme.surface,
+            ),
+            items: const [
+              kUserAdminSearchTypeUsername,
+              kUserAdminSearchTypeStatus,
+              kUserAdminSearchTypeDepartment,
+              kUserAdminSearchTypeContactNumber,
+              kUserAdminSearchTypeEmail,
+            ]
+                .map(
+                  (type) => DropdownMenuItem<String>(
+                    value: type,
+                    child: Text(userAdminSearchTypeLabelKey(type).tr),
+                  ),
+                )
+                .toList(),
+            onChanged: (value) {
+              if (value == null) return;
+              setState(() {
+                _searchType = value;
+              });
+              _refreshUsersWithQuery(query: _searchController.text);
+            },
+          );
+          final actions = Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            alignment: stacked ? WrapAlignment.start : WrapAlignment.end,
+            children: [
+              if (_hasActiveFilters)
+                OutlinedButton.icon(
+                  onPressed: () {
+                    _searchController.clear();
+                    setState(() {
+                      _searchType = kUserAdminSearchTypeUsername;
+                    });
+                    _refreshUsersWithQuery(query: '');
+                  },
+                  icon: const Icon(Icons.layers_clear_outlined),
+                  label: Text('userAdmin.workspace.filterReset'.tr),
+                ),
+              FilledButton.tonalIcon(
+                onPressed: _refreshUsers,
+                icon: const Icon(Icons.refresh_rounded),
+                label: Text('userAdmin.workspace.filterRefresh'.tr),
+              ),
+            ],
+          );
+
+          if (stacked) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                searchField,
+                const SizedBox(height: 16),
+                modePicker,
+                const SizedBox(height: 16),
+                actions,
+              ],
+            );
+          }
+
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(flex: 5, child: searchField),
+              const SizedBox(width: 16),
+              Expanded(flex: 3, child: modePicker),
+              const SizedBox(width: 16),
+              Expanded(flex: 2, child: actions),
+            ],
+          );
+        },
       ),
     );
   }
@@ -857,29 +1138,61 @@ class _UserManagementPageState extends State<UserManagementPage> {
     ThemeData themeData, {
     required IconData icon,
     required Color color,
+    required String title,
     required String message,
     bool showReloginAction = false,
   }) {
     return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24.0),
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 460),
+        padding: const EdgeInsets.all(28),
+        decoration: BoxDecoration(
+          color: themeData.colorScheme.surfaceContainer,
+          borderRadius: BorderRadius.circular(28),
+          border: Border.all(
+            color: themeData.colorScheme.outline.withValues(alpha: 0.12),
+          ),
+        ),
         child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
           children: [
             Icon(icon, size: 48, color: color),
             const SizedBox(height: 16),
             Text(
-              message,
-              style: themeData.textTheme.titleMedium?.copyWith(color: color),
+              title,
+              style: themeData.textTheme.titleLarge?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
               textAlign: TextAlign.center,
             ),
-            if (showReloginAction) ...[
-              const SizedBox(height: 20),
-              ElevatedButton(
-                onPressed: () => Get.offAllNamed(Routes.login),
-                child: Text('userAdmin.action.relogin'.tr),
+            const SizedBox(height: 10),
+            Text(
+              message,
+              style: themeData.textTheme.bodyMedium?.copyWith(
+                color: themeData.colorScheme.onSurfaceVariant,
+                height: 1.5,
               ),
-            ],
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 18),
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              alignment: WrapAlignment.center,
+              children: [
+                FilledButton.tonalIcon(
+                  onPressed: _refreshUsers,
+                  icon: const Icon(Icons.refresh_rounded),
+                  label: Text('userAdmin.workspace.filterRefresh'.tr),
+                ),
+                if (showReloginAction)
+                  FilledButton.icon(
+                    onPressed: () => Get.offAllNamed(Routes.login),
+                    icon: const Icon(Icons.login_rounded),
+                    label: Text('userAdmin.action.relogin'.tr),
+                  ),
+              ],
+            ),
           ],
         ),
       ),
@@ -909,138 +1222,146 @@ class _UserManagementPageState extends State<UserManagementPage> {
             );
           }
           final user = _filteredUsers[index];
-          return Card(
-            elevation: 2,
-            color: themeData.colorScheme.surfaceContainerLowest,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16.0),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          user.username?.trim().isNotEmpty == true
-                              ? user.username!
-                              : 'userAdmin.value.unknownUser'.tr,
-                          style: themeData.textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 6,
-                        ),
-                        decoration: BoxDecoration(
-                          color: normalizeAccountStatusCode(user.status) ==
-                                  kUserAdminStatusActive
-                              ? themeData.colorScheme.primaryContainer
-                              : themeData.colorScheme.surfaceContainerHighest,
-                          borderRadius: BorderRadius.circular(999),
-                        ),
-                        child: Text(
-                          userAdminStatusKey(user.status).tr,
-                          style: themeData.textTheme.bodySmall?.copyWith(
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  _buildInfoLine(
-                    themeData,
-                    userAdminFieldTranslationKey(kUserAdminFieldDepartment).tr,
-                    userAdminDisplayValue(user.department),
-                  ),
-                  _buildInfoLine(
-                    themeData,
-                    userAdminFieldTranslationKey(kUserAdminFieldContactNumber)
-                        .tr,
-                    userAdminDisplayValue(user.contactNumber),
-                  ),
-                  _buildInfoLine(
-                    themeData,
-                    userAdminFieldTranslationKey(kUserAdminFieldEmail).tr,
-                    userAdminDisplayValue(user.email),
-                  ),
-                  _buildInfoLine(
-                    themeData,
-                    userAdminFieldTranslationKey(kUserAdminFieldCreatedTime).tr,
-                    formatUserAdminDateTime(user.createdTime),
-                  ),
-                  _buildInfoLine(
-                    themeData,
-                    userAdminFieldTranslationKey(kUserAdminFieldModifiedTime)
-                        .tr,
-                    formatUserAdminDateTime(user.modifiedTime),
-                  ),
-                  _buildInfoLine(
-                    themeData,
-                    userAdminFieldTranslationKey(kUserAdminFieldRemarks).tr,
-                    userAdminDisplayValue(user.remarks),
-                  ),
-                  const SizedBox(height: 8),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.end,
-                    children: [
-                      IconButton(
-                        tooltip: 'userAdmin.action.manageRoles'.tr,
-                        onPressed: () => _showManageRolesDialog(user),
-                        icon: Icon(
-                          Icons.admin_panel_settings_outlined,
-                          color: themeData.colorScheme.secondary,
-                        ),
-                      ),
-                      IconButton(
-                        tooltip: 'userAdmin.action.edit'.tr,
-                        onPressed: () => _showEditUserDialog(user),
-                        icon: Icon(
-                          Icons.edit_outlined,
-                          color: themeData.colorScheme.primary,
-                        ),
-                      ),
-                      IconButton(
-                        tooltip: 'userAdmin.action.delete'.tr,
-                        onPressed: () => _deleteUser(user),
-                        icon: Icon(
-                          Icons.delete_outline,
-                          color: themeData.colorScheme.error,
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
+          final isActive =
+              normalizeAccountStatusCode(user.status) == kUserAdminStatusActive;
+          final accent =
+              isActive ? const Color(0xFF1F9D68) : const Color(0xFFC45A4E);
+          return Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(22),
+            decoration: BoxDecoration(
+              color: themeData.colorScheme.surfaceContainerLowest,
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(
+                color: themeData.colorScheme.outline.withValues(alpha: 0.12),
               ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            user.username?.trim().isNotEmpty == true
+                                ? user.username!
+                                : 'userAdmin.value.unknownUser'.tr,
+                            style: themeData.textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          Wrap(
+                            spacing: 12,
+                            runSpacing: 12,
+                            children: [
+                              _UserStatusBadge(
+                                label: userAdminStatusKey(user.status).tr,
+                                color: accent,
+                              ),
+                              _UserMetaChip(
+                                icon: Icons.badge_outlined,
+                                label: user.realName?.trim().isNotEmpty == true
+                                    ? user.realName!
+                                    : 'common.notFilled'.tr,
+                              ),
+                              _UserMetaChip(
+                                icon: Icons.schedule_rounded,
+                                label: formatUserAdminDateTime(
+                                  user.modifiedTime,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                Wrap(
+                  spacing: 16,
+                  runSpacing: 12,
+                  children: [
+                    _UserMetaChip(
+                      icon: Icons.apartment_outlined,
+                      label: userAdminDisplayValue(user.department),
+                    ),
+                    _UserMetaChip(
+                      icon: Icons.call_outlined,
+                      label: userAdminDisplayValue(user.contactNumber),
+                    ),
+                    _UserMetaChip(
+                      icon: Icons.mail_outline_rounded,
+                      label: userAdminDisplayValue(user.email),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: accent.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(18),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        userAdminFieldTranslationKey(kUserAdminFieldRemarks).tr,
+                        style: themeData.textTheme.labelLarge?.copyWith(
+                          color: themeData.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        userAdminDisplayValue(user.remarks),
+                        style: themeData.textTheme.bodyMedium?.copyWith(
+                          height: 1.45,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 14),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    IconButton(
+                      tooltip: 'userAdmin.action.manageRoles'.tr,
+                      onPressed: () => _showManageRolesDialog(user),
+                      icon: Icon(
+                        Icons.admin_panel_settings_outlined,
+                        color: themeData.colorScheme.secondary,
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'userAdmin.action.edit'.tr,
+                      onPressed: () => _showEditUserDialog(user),
+                      icon: Icon(
+                        Icons.edit_outlined,
+                        color: themeData.colorScheme.primary,
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'userAdmin.action.delete'.tr,
+                      onPressed: () => _deleteUser(user),
+                      icon: Icon(
+                        Icons.delete_outline,
+                        color: themeData.colorScheme.error,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
             ),
           );
         },
-      ),
-    );
-  }
-
-  Widget _buildInfoLine(ThemeData themeData, String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 6.0),
-      child: RichText(
-        text: TextSpan(
-          style: themeData.textTheme.bodyMedium?.copyWith(
-            color: themeData.colorScheme.onSurfaceVariant,
-          ),
-          children: [
-            TextSpan(
-              text: 'common.labelWithColon'.trParams({'label': label}),
-              style: const TextStyle(fontWeight: FontWeight.w600),
-            ),
-            TextSpan(text: value),
-          ],
-        ),
       ),
     );
   }
@@ -1359,12 +1680,30 @@ class _UserManagementPageState extends State<UserManagementPage> {
           ),
         ],
         body: Padding(
-          padding: const EdgeInsets.all(16.0),
+          padding: const EdgeInsets.all(20),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              if (_isAdmin) _buildSearchCard(themeData),
-              if (_isAdmin) const SizedBox(height: 16),
+              if (_isAdmin) ...[
+                _buildHeroSection(themeData),
+                const SizedBox(height: 24),
+                _buildSectionHeading(
+                  themeData,
+                  eyebrow: 'userAdmin.workspace.filterEyebrow'.tr,
+                  title: 'userAdmin.workspace.filterTitle'.tr,
+                  description: 'userAdmin.workspace.filterBody'.tr,
+                ),
+                const SizedBox(height: 18),
+                _buildSearchCard(themeData),
+                const SizedBox(height: 24),
+                _buildSectionHeading(
+                  themeData,
+                  eyebrow: 'userAdmin.workspace.listEyebrow'.tr,
+                  title: 'userAdmin.workspace.listTitle'.tr,
+                  description: 'userAdmin.workspace.listBody'.tr,
+                ),
+                const SizedBox(height: 18),
+              ],
               Expanded(
                 child: _isLoading && _allUsers.isEmpty
                     ? Center(
@@ -1378,6 +1717,7 @@ class _UserManagementPageState extends State<UserManagementPage> {
                             themeData,
                             icon: CupertinoIcons.exclamationmark_triangle,
                             color: themeData.colorScheme.error,
+                            title: 'userAdmin.workspace.errorTitle'.tr,
                             message: _statusMessage,
                             showReloginAction: _showReloginAction,
                           )
@@ -1386,6 +1726,7 @@ class _UserManagementPageState extends State<UserManagementPage> {
                                 themeData,
                                 icon: CupertinoIcons.person_2,
                                 color: themeData.colorScheme.onSurfaceVariant,
+                                title: 'userAdmin.workspace.emptyTitle'.tr,
                                 message: _searchController.text.trim().isEmpty
                                     ? 'userAdmin.empty.default'.tr
                                     : 'userAdmin.empty.filtered'.tr,
@@ -1397,5 +1738,190 @@ class _UserManagementPageState extends State<UserManagementPage> {
         ),
       );
     });
+  }
+}
+
+class _UserHeroBadge extends StatelessWidget {
+  const _UserHeroBadge({
+    required this.label,
+    required this.foregroundColor,
+    this.backgroundColor,
+    this.filled = false,
+  });
+
+  final String label;
+  final Color foregroundColor;
+  final Color? backgroundColor;
+  final bool filled;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color:
+            filled ? backgroundColor : foregroundColor.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(
+          color: filled
+              ? backgroundColor!.withValues(alpha: 0.24)
+              : foregroundColor.withValues(alpha: 0.14),
+        ),
+      ),
+      child: Text(
+        label,
+        style: Theme.of(context).textTheme.labelMedium?.copyWith(
+              color: filled ? Colors.white : foregroundColor,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.6,
+            ),
+      ),
+    );
+  }
+}
+
+class _UserInlineSignal extends StatelessWidget {
+  const _UserInlineSignal({
+    required this.icon,
+    required this.label,
+    required this.color,
+  });
+
+  final IconData icon;
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 18, color: color),
+          const SizedBox(width: 8),
+          Text(
+            label,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: color.withValues(alpha: 0.86),
+                ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _UserMetricTile extends StatelessWidget {
+  const _UserMetricTile({
+    required this.label,
+    required this.value,
+  });
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    final themeData = Theme.of(context);
+    return Container(
+      constraints: const BoxConstraints(minWidth: 132),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      decoration: BoxDecoration(
+        color: themeData.brightness == Brightness.dark
+            ? Colors.white.withValues(alpha: 0.08)
+            : const Color(0xFFF8FBFB),
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            value,
+            style: themeData.textTheme.titleLarge?.copyWith(
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            label,
+            style: themeData.textTheme.bodySmall?.copyWith(
+              color: themeData.colorScheme.onSurface.withValues(alpha: 0.7),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _UserStatusBadge extends StatelessWidget {
+  const _UserStatusBadge({
+    required this.label,
+    required this.color,
+  });
+
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        label,
+        style: Theme.of(context).textTheme.labelMedium?.copyWith(
+              color: color,
+              fontWeight: FontWeight.w700,
+            ),
+      ),
+    );
+  }
+}
+
+class _UserMetaChip extends StatelessWidget {
+  const _UserMetaChip({
+    required this.icon,
+    required this.label,
+  });
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final themeData = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: themeData.colorScheme.surfaceContainerHighest
+            .withValues(alpha: 0.45),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 16, color: themeData.colorScheme.primary),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Text(
+              label,
+              style: themeData.textTheme.bodySmall?.copyWith(
+                color: themeData.colorScheme.onSurfaceVariant,
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }

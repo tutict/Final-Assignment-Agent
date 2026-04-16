@@ -23,7 +23,7 @@ public class RunDocker implements ApplicationContextInitializer<ConfigurableAppl
     private static final Logger log = Logger.getLogger(RunDocker.class.getName());
     private static final String PROPERTY_SOURCE_NAME = "docker";
     private static final String DEFAULT_MANTICORE_IMAGE = "manticoresearch/manticore:dev";
-    private static final String DEFAULT_ELASTICSEARCH_IMAGE = "tutict/elasticsearch-with-plugins:9.2.6-for-my-work";
+    private static final String DEFAULT_ELASTICSEARCH_IMAGE = "final-assignment-elasticsearch:9.2.6";
     private static final String DEFAULT_ELASTICSEARCH_COMPATIBLE_IMAGE = "docker.elastic.co/elasticsearch/elasticsearch";
     private static volatile boolean shutdownHookRegistered = false;
 
@@ -34,6 +34,13 @@ public class RunDocker implements ApplicationContextInitializer<ConfigurableAppl
 
     @Override
     public void initialize(ConfigurableApplicationContext applicationContext) {
+        boolean bootstrapContainers = applicationContext.getEnvironment()
+                .getProperty("app.runtime.bootstrap-containers", Boolean.class, false);
+        if (!bootstrapContainers) {
+            log.log(Level.INFO, "Runtime container bootstrap is disabled by app.runtime.bootstrap-containers=false");
+            return;
+        }
+
         startRedis(applicationContext);
         startRedpanda(applicationContext);
         startElasticsearch(applicationContext);

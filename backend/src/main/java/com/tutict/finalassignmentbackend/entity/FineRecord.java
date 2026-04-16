@@ -28,6 +28,18 @@ public class FineRecord implements Serializable {
     @TableId(value = "fine_id", type = IdType.AUTO)
     private Long fineId;
 
+    @TableField("tenant_id")
+    private String tenantId;
+
+    @TableField("organization_code")
+    private String organizationCode;
+
+    @TableField("region_code")
+    private String regionCode;
+
+    @TableField("department_code")
+    private String departmentCode;
+
     /**
      * 违法记录 ID
      */

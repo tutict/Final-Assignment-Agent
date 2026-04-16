@@ -9,6 +9,7 @@ flutter_app/*.log
 
 flutter_app/android/.gradle/
 flutter_app/android/local.properties
+flutter_app/android/key.properties
 
 flutter_app/ios/Flutter/ephemeral/
 flutter_app/ios/Flutter/flutter_export_environment.sh

@@ -1931,17 +1931,7 @@ class BusinessFlowConsistencyTest {
         driver.setDriverId(50L);
         when(driverInformationMapper.selectById(50L)).thenReturn(driver);
 
-        DeductionRecord effective = new DeductionRecord();
-        effective.setDriverId(50L);
-        effective.setStatus("Effective");
-        effective.setDeductedPoints(5);
-
-        DeductionRecord restored = new DeductionRecord();
-        restored.setDriverId(50L);
-        restored.setStatus("Restored");
-        restored.setDeductedPoints(3);
-
-        when(deductionRecordMapper.selectList(any())).thenReturn(List.of(effective, restored));
+        when(deductionRecordMapper.selectObjs(any())).thenReturn(java.util.Arrays.asList(5, 0, null));
 
         service.syncPointsFromDeductionRecords(50L);
 
@@ -2019,17 +2009,7 @@ class BusinessFlowConsistencyTest {
         when(driverInformationMapper.selectById(52L)).thenReturn(existing);
         when(driverInformationMapper.updateById(any(DriverInformation.class))).thenReturn(1);
 
-        DeductionRecord effective = new DeductionRecord();
-        effective.setDriverId(52L);
-        effective.setStatus("Effective");
-        effective.setDeductedPoints(5);
-
-        DeductionRecord restored = new DeductionRecord();
-        restored.setDriverId(52L);
-        restored.setStatus("Restored");
-        restored.setDeductedPoints(3);
-
-        when(deductionRecordMapper.selectList(any())).thenReturn(List.of(effective, restored));
+        when(deductionRecordMapper.selectObjs(any())).thenReturn(java.util.Arrays.asList(5, 0));
 
         DriverInformation request = new DriverInformation();
         request.setDriverId(52L);
@@ -2872,7 +2852,7 @@ class BusinessFlowConsistencyTest {
         existing.setDriverId(91L);
         existing.setDeductedPoints(3);
         when(deductionRecordMapper.selectById(902L)).thenReturn(existing);
-        when(deductionRecordMapper.selectList(any())).thenReturn(List.of(existing));
+        when(deductionRecordMapper.selectCount(any())).thenReturn(0L);
         when(deductionRecordMapper.updateById(any(DeductionRecord.class))).thenReturn(1);
 
         DeductionRecord request = new DeductionRecord();
@@ -2968,10 +2948,7 @@ class BusinessFlowConsistencyTest {
         driver.setDriverId(91L);
         when(driverInformationService.getDriverById(91L)).thenReturn(driver);
 
-        DeductionRecord duplicate = new DeductionRecord();
-        duplicate.setDeductionId(901L);
-        duplicate.setOffenseId(90L);
-        when(deductionRecordMapper.selectList(any())).thenReturn(List.of(duplicate));
+        when(deductionRecordMapper.selectCount(any())).thenReturn(1L);
 
         DeductionRecord request = new DeductionRecord();
         request.setOffenseId(90L);
@@ -4226,7 +4203,7 @@ class BusinessFlowConsistencyTest {
         existing.setReviewLevel("Initial");
         existing.setReviewResult("Approved");
         when(appealReviewMapper.selectById(301L)).thenReturn(existing);
-        when(appealReviewMapper.selectList(any())).thenReturn(List.of(existing));
+        when(appealReviewMapper.selectCount(any())).thenReturn(0L);
 
         AppealReview incoming = new AppealReview();
         incoming.setReviewId(301L);
@@ -4424,11 +4401,7 @@ class BusinessFlowConsistencyTest {
         appealRecord.setProcessStatus(AppealProcessState.UNDER_REVIEW.getCode());
         when(appealRecordService.getAppealById(310L)).thenReturn(appealRecord);
 
-        AppealReview duplicate = new AppealReview();
-        duplicate.setReviewId(311L);
-        duplicate.setAppealId(310L);
-        duplicate.setReviewLevel("Final");
-        when(appealReviewMapper.selectList(any())).thenReturn(List.of(duplicate));
+        when(appealReviewMapper.selectCount(any())).thenReturn(1L);
 
         AppealReview request = new AppealReview();
         request.setAppealId(310L);
@@ -4472,7 +4445,7 @@ class BusinessFlowConsistencyTest {
         appealRecord.setAcceptanceStatus(AppealAcceptanceState.ACCEPTED.getCode());
         appealRecord.setProcessStatus(AppealProcessState.UNDER_REVIEW.getCode());
         when(appealRecordService.getAppealById(309L)).thenReturn(appealRecord);
-        when(appealReviewMapper.selectList(any())).thenReturn(List.of());
+        when(appealReviewMapper.selectCount(any())).thenReturn(0L);
         when(appealReviewMapper.insert(any(AppealReview.class))).thenReturn(1);
 
         AppealReview review = new AppealReview();
@@ -4531,7 +4504,7 @@ class BusinessFlowConsistencyTest {
         when(appealRecordService.updateProcessStatus(310L, AppealProcessState.APPROVED, "Approved"))
                 .thenReturn(approvedAppeal);
 
-        when(appealReviewMapper.selectList(any())).thenReturn(List.of());
+        when(appealReviewMapper.selectCount(any())).thenReturn(0L);
         when(appealReviewMapper.insert(any(AppealReview.class))).thenReturn(1);
 
         FineRecord fineRecord = new FineRecord();
@@ -4748,7 +4721,7 @@ class BusinessFlowConsistencyTest {
         appealRecord.setAcceptanceStatus(AppealAcceptanceState.ACCEPTED.getCode());
         appealRecord.setProcessStatus(AppealProcessState.UNDER_REVIEW.getCode());
         when(appealRecordService.getAppealById(311L)).thenReturn(appealRecord);
-        when(appealReviewMapper.selectList(any())).thenReturn(List.of());
+        when(appealReviewMapper.selectCount(any())).thenReturn(0L);
 
         FineRecord fineRecord = new FineRecord();
         fineRecord.setFineId(511L);
@@ -4800,7 +4773,7 @@ class BusinessFlowConsistencyTest {
         appealRecord.setAcceptanceStatus(AppealAcceptanceState.ACCEPTED.getCode());
         appealRecord.setProcessStatus(AppealProcessState.UNDER_REVIEW.getCode());
         when(appealRecordService.getAppealById(312L)).thenReturn(appealRecord);
-        when(appealReviewMapper.selectList(any())).thenReturn(List.of());
+        when(appealReviewMapper.selectCount(any())).thenReturn(0L);
 
         DeductionRecord deductionRecord = new DeductionRecord();
         deductionRecord.setDeductionId(612L);

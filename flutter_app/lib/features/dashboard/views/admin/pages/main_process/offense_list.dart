@@ -399,6 +399,426 @@ class _OffenseListPageState extends State<OffenseList> {
   bool get _hasActiveFilters =>
       _activeQuery.isNotEmpty || (_startDate != null && _endDate != null);
 
+  int _visiblePoints() {
+    return _filteredOffenseList.fold<int>(
+      0,
+      (sum, offense) => sum + (offense.deductedPoints ?? 0),
+    );
+  }
+
+  double _visibleFines() {
+    return _filteredOffenseList.fold<double>(
+      0,
+      (sum, offense) => sum + (offense.fineAmount ?? 0),
+    );
+  }
+
+  int _pendingCount() {
+    return _filteredOffenseList
+        .where((offense) =>
+            localizeOffenseProcessStatus(
+                  offense.processStatus,
+                  emptyKey: 'common.unknown',
+                ) !=
+                'common.status.approved'.tr &&
+            (offense.processStatus ?? '').trim().isNotEmpty)
+        .length;
+  }
+
+  Widget _buildHeroSection(ThemeData themeData) {
+    final onHero = themeData.brightness == Brightness.dark
+        ? Colors.white
+        : const Color(0xFF102530);
+    final muted = onHero.withValues(alpha: 0.72);
+    final queryLabel = _activeQuery.isNotEmpty
+        ? 'offenseAdmin.workspace.signal.query'
+            .trParams({'value': _activeQuery})
+        : 'offenseAdmin.workspace.signal.queryIdle'.tr;
+    final rangeLabel = _startDate != null && _endDate != null
+        ? 'offenseAdmin.filter.dateRangeLabel'.trParams({
+            'start': formatOffenseDate(_startDate),
+            'end': formatOffenseDate(_endDate),
+          })
+        : 'offenseAdmin.workspace.signal.rangeIdle'.tr;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(28),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: themeData.brightness == Brightness.dark
+              ? const [
+                  Color(0xFF08161E),
+                  Color(0xFF0F2530),
+                  Color(0xFF174557),
+                ]
+              : const [
+                  Color(0xFFF6FAFC),
+                  Color(0xFFEAF2F7),
+                  Color(0xFFDDE8EF),
+                ],
+        ),
+        borderRadius: BorderRadius.circular(30),
+        border: Border.all(
+          color: themeData.colorScheme.outline.withValues(alpha: 0.12),
+        ),
+      ),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final stacked = constraints.maxWidth < 940;
+          final lead = Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: [
+                  _OffenseHeroBadge(
+                    label: 'offenseAdmin.workspace.eyebrow'.tr.toUpperCase(),
+                    foregroundColor: onHero,
+                  ),
+                  _OffenseHeroBadge(
+                    label: offenseSearchTypeLabel(_searchType).toUpperCase(),
+                    foregroundColor: Colors.white,
+                    backgroundColor: _hasActiveFilters
+                        ? const Color(0xFF1F9D68)
+                        : const Color(0xFF2F6FD6),
+                    filled: true,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 18),
+              Text(
+                'offenseAdmin.workspace.title'.tr,
+                style: themeData.textTheme.headlineMedium?.copyWith(
+                  color: onHero,
+                  fontWeight: FontWeight.w800,
+                  height: 1.05,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'offenseAdmin.workspace.subtitle'.tr,
+                style: themeData.textTheme.bodyLarge?.copyWith(
+                  color: muted,
+                  height: 1.55,
+                ),
+              ),
+              const SizedBox(height: 18),
+              Wrap(
+                spacing: 12,
+                runSpacing: 12,
+                children: [
+                  _OffenseInlineSignal(
+                    icon: Icons.search_rounded,
+                    label: queryLabel,
+                    color: onHero,
+                  ),
+                  _OffenseInlineSignal(
+                    icon: Icons.date_range_rounded,
+                    label: rangeLabel,
+                    color: onHero,
+                  ),
+                ],
+              ),
+            ],
+          );
+          final metrics = Wrap(
+            spacing: 14,
+            runSpacing: 14,
+            children: [
+              _OffenseMetricTile(
+                label: 'offenseAdmin.workspace.metric.loaded'.tr,
+                value: '${_offenseList.length}',
+              ),
+              _OffenseMetricTile(
+                label: 'offenseAdmin.workspace.metric.visible'.tr,
+                value: '${_filteredOffenseList.length}',
+              ),
+              _OffenseMetricTile(
+                label: 'offenseAdmin.workspace.metric.pending'.tr,
+                value: '${_pendingCount()}',
+              ),
+              _OffenseMetricTile(
+                label: 'offenseAdmin.workspace.metric.points'.tr,
+                value: '${_visiblePoints()}',
+              ),
+              _OffenseMetricTile(
+                label: 'offenseAdmin.workspace.metric.fine'.tr,
+                value: formatOffenseAmount(_visibleFines()),
+              ),
+            ],
+          );
+
+          if (stacked) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                lead,
+                const SizedBox(height: 22),
+                metrics,
+              ],
+            );
+          }
+
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(flex: 6, child: lead),
+              const SizedBox(width: 24),
+              Expanded(
+                flex: 4,
+                child: Align(alignment: Alignment.topRight, child: metrics),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildSectionHeading(
+    ThemeData themeData, {
+    required String eyebrow,
+    required String title,
+    required String description,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          eyebrow.toUpperCase(),
+          style: themeData.textTheme.labelMedium?.copyWith(
+            color: themeData.colorScheme.primary,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 1.3,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          title,
+          style: themeData.textTheme.headlineSmall?.copyWith(
+            fontWeight: FontWeight.w800,
+            height: 1.1,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          description,
+          style: themeData.textTheme.bodyMedium?.copyWith(
+            color: themeData.colorScheme.onSurfaceVariant,
+            height: 1.5,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildStatePanel(
+    ThemeData themeData, {
+    required IconData icon,
+    required String title,
+    required String message,
+    bool showRelogin = false,
+  }) {
+    return Center(
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 460),
+        padding: const EdgeInsets.all(28),
+        decoration: BoxDecoration(
+          color: themeData.colorScheme.surfaceContainer,
+          borderRadius: BorderRadius.circular(28),
+          border: Border.all(
+            color: themeData.colorScheme.outline.withValues(alpha: 0.12),
+          ),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 40, color: themeData.colorScheme.primary),
+            const SizedBox(height: 16),
+            Text(
+              title,
+              style: themeData.textTheme.titleLarge?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 10),
+            Text(
+              message,
+              style: themeData.textTheme.bodyMedium?.copyWith(
+                color: themeData.colorScheme.onSurfaceVariant,
+                height: 1.5,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 18),
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              alignment: WrapAlignment.center,
+              children: [
+                FilledButton.tonalIcon(
+                  onPressed: () => _refreshOffenses(),
+                  icon: const Icon(Icons.refresh_rounded),
+                  label: Text('offenseAdmin.workspace.filterRefresh'.tr),
+                ),
+                if (showRelogin)
+                  FilledButton.icon(
+                    onPressed: () =>
+                        Navigator.pushReplacementNamed(context, Routes.login),
+                    icon: const Icon(Icons.login_rounded),
+                    label: Text('offenseAdmin.action.relogin'.tr),
+                  ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildOffenseItem(
+    ThemeData themeData,
+    OffenseInformation offense,
+  ) {
+    final statusLabel = localizeOffenseProcessStatus(offense.processStatus);
+    final normalized = statusLabel.toLowerCase();
+    final accent = normalized.contains('reject') || normalized.contains('fail')
+        ? const Color(0xFFC45A4E)
+        : normalized.contains('approve') ||
+                normalized.contains('processed') ||
+                normalized.contains('complete')
+            ? const Color(0xFF1F9D68)
+            : const Color(0xFF2F6FD6);
+
+    return Material(
+      color: themeData.colorScheme.surfaceContainerLowest,
+      borderRadius: BorderRadius.circular(24),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(24),
+        onTap: () => _goToDetailPage(offense),
+        child: Ink(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(
+              color: themeData.colorScheme.outline.withValues(alpha: 0.12),
+            ),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(22),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            offense.offenseType ?? 'common.unknown'.tr,
+                            style: themeData.textTheme.titleLarge?.copyWith(
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          Wrap(
+                            spacing: 12,
+                            runSpacing: 12,
+                            children: [
+                              _OffenseStatusBadge(
+                                label: statusLabel,
+                                color: accent,
+                              ),
+                              _OffenseMetaChip(
+                                icon: Icons.directions_car_outlined,
+                                label:
+                                    offense.licensePlate ?? 'common.unknown'.tr,
+                              ),
+                              _OffenseMetaChip(
+                                icon: Icons.person_outline_rounded,
+                                label:
+                                    offense.driverName ?? 'common.unknown'.tr,
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (_canManageOffenses)
+                      IconButton(
+                        icon: Icon(
+                          Icons.delete_outline,
+                          color: themeData.colorScheme.error,
+                        ),
+                        onPressed: () => _deleteOffense(offense.offenseId ?? 0),
+                        tooltip: 'offenseAdmin.action.delete'.tr,
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                Wrap(
+                  spacing: 16,
+                  runSpacing: 12,
+                  children: [
+                    _OffenseMetaChip(
+                      icon: Icons.qr_code_rounded,
+                      label: offense.offenseCode ?? 'common.none'.tr,
+                    ),
+                    _OffenseMetaChip(
+                      icon: Icons.scoreboard_outlined,
+                      label: formatOffensePoints(offense.deductedPoints),
+                    ),
+                    _OffenseMetaChip(
+                      icon: Icons.payments_outlined,
+                      label: formatOffenseAmount(offense.fineAmount),
+                    ),
+                    _OffenseMetaChip(
+                      icon: Icons.schedule_rounded,
+                      label: formatOffenseDate(offense.offenseTime),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: accent.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(18),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'offenseAdmin.form.offenseLocation'.tr,
+                        style: themeData.textTheme.labelLarge?.copyWith(
+                          color: themeData.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        offense.offenseLocation ?? 'common.notFilled'.tr,
+                        style: themeData.textTheme.bodyMedium?.copyWith(
+                          height: 1.45,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   void _setSearchText(String value) {
     final textValue = TextEditingValue(
       text: value,
@@ -479,90 +899,107 @@ class _OffenseListPageState extends State<OffenseList> {
   }
 
   Widget _buildSearchField(ThemeData themeData) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8.0),
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(22),
+      decoration: BoxDecoration(
+        color: themeData.colorScheme.surfaceContainerLowest,
+        borderRadius: BorderRadius.circular(26),
+        border: Border.all(
+          color: themeData.colorScheme.outline.withValues(alpha: 0.12),
+        ),
+      ),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Expanded(
-                child: Autocomplete<String>(
-                  optionsBuilder: (TextEditingValue textEditingValue) async {
-                    if (textEditingValue.text.isEmpty) {
-                      return const Iterable<String>.empty();
-                    }
-                    return await _fetchAutocompleteSuggestions(
-                        textEditingValue.text);
-                  },
-                  onSelected: (String selection) {
-                    _setSearchText(selection);
-                    _refreshOffenses(query: selection);
-                  },
-                  fieldViewBuilder:
-                      (context, controller, focusNode, onFieldSubmitted) {
-                    _searchFieldController = controller;
-                    if (controller.text != _searchController.text) {
-                      controller.value = TextEditingValue(
-                        text: _searchController.text,
-                        selection: TextSelection.collapsed(
-                          offset: _searchController.text.length,
-                        ),
-                      );
-                    }
-                    return TextField(
-                      controller: controller,
-                      focusNode: focusNode,
-                      style: TextStyle(color: themeData.colorScheme.onSurface),
-                      decoration: InputDecoration(
-                        hintText: offenseSearchHintText(_searchType),
-                        hintStyle: TextStyle(
-                            color: themeData.colorScheme.onSurface
-                                .withValues(alpha: 0.6)),
-                        prefixIcon: Icon(Icons.search,
-                            color: themeData.colorScheme.primary),
-                        suffixIcon: controller.text.isNotEmpty
-                            ? IconButton(
-                                icon: Icon(Icons.clear,
-                                    color:
-                                        themeData.colorScheme.onSurfaceVariant),
-                                onPressed: () {
-                                  _setSearchText('');
-                                  _refreshOffenses(query: '');
-                                },
-                              )
-                            : null,
-                        border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12.0)),
-                        enabledBorder: OutlineInputBorder(
-                          borderSide: BorderSide(
-                              color: themeData.colorScheme.outline
-                                  .withValues(alpha: 0.3)),
-                        ),
-                        focusedBorder: OutlineInputBorder(
-                          borderSide: BorderSide(
-                              color: themeData.colorScheme.primary, width: 1.5),
-                        ),
-                        filled: true,
-                        fillColor: themeData.colorScheme.surfaceContainerLowest,
-                        contentPadding: const EdgeInsets.symmetric(
-                            vertical: 12.0, horizontal: 16.0),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final stacked = constraints.maxWidth < 880;
+              final search = Autocomplete<String>(
+                optionsBuilder: (TextEditingValue textEditingValue) async {
+                  if (textEditingValue.text.isEmpty) {
+                    return const Iterable<String>.empty();
+                  }
+                  return await _fetchAutocompleteSuggestions(
+                      textEditingValue.text);
+                },
+                onSelected: (String selection) {
+                  _setSearchText(selection);
+                  _refreshOffenses(query: selection);
+                },
+                fieldViewBuilder:
+                    (context, controller, focusNode, onFieldSubmitted) {
+                  _searchFieldController = controller;
+                  if (controller.text != _searchController.text) {
+                    controller.value = TextEditingValue(
+                      text: _searchController.text,
+                      selection: TextSelection.collapsed(
+                        offset: _searchController.text.length,
                       ),
-                      onChanged: (value) {
-                        _setSearchText(value);
-                        setState(() {});
-                        _scheduleSearchRefresh(value);
-                      },
-                      onSubmitted: (value) {
-                        _setSearchText(value);
-                        _refreshOffenses(query: value);
-                      },
                     );
-                  },
-                ),
-              ),
-              const SizedBox(width: 8),
-              DropdownButton<String>(
-                value: _searchType,
+                  }
+                  return TextField(
+                    controller: controller,
+                    focusNode: focusNode,
+                    decoration: InputDecoration(
+                      labelText: 'offenseAdmin.workspace.filterTitle'.tr,
+                      hintText: offenseSearchHintText(_searchType),
+                      hintStyle: TextStyle(
+                        color: themeData.colorScheme.onSurface
+                            .withValues(alpha: 0.6),
+                      ),
+                      prefixIcon: Icon(
+                        Icons.search_rounded,
+                        color: themeData.colorScheme.primary,
+                      ),
+                      suffixIcon: controller.text.isNotEmpty
+                          ? IconButton(
+                              icon: Icon(
+                                Icons.clear_rounded,
+                                color: themeData.colorScheme.onSurfaceVariant,
+                              ),
+                              onPressed: () {
+                                _setSearchText('');
+                                _refreshOffenses(query: '');
+                              },
+                            )
+                          : null,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(18.0),
+                        borderSide: BorderSide.none,
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(18.0),
+                        borderSide: BorderSide(
+                            color: themeData.colorScheme.outline
+                                .withValues(alpha: 0.14)),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(18.0),
+                        borderSide: BorderSide(
+                          color: themeData.colorScheme.primary,
+                          width: 1.4,
+                        ),
+                      ),
+                      filled: true,
+                      fillColor: themeData.colorScheme.surface,
+                      contentPadding: const EdgeInsets.symmetric(
+                          vertical: 12.0, horizontal: 16.0),
+                    ),
+                    onChanged: (value) {
+                      _setSearchText(value);
+                      setState(() {});
+                      _scheduleSearchRefresh(value);
+                    },
+                    onSubmitted: (value) {
+                      _setSearchText(value);
+                      _refreshOffenses(query: value);
+                    },
+                  );
+                },
+              );
+              final modePicker = DropdownButtonFormField<String>(
+                initialValue: _searchType,
                 onChanged: (String? newValue) {
                   if (newValue == null || newValue == _searchType) {
                     return;
@@ -575,6 +1012,22 @@ class _OffenseListPageState extends State<OffenseList> {
                   _setSearchText('');
                   _refreshOffenses(query: '');
                 },
+                decoration: InputDecoration(
+                  labelText: 'offenseAdmin.workspace.filterMode'.tr,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(18.0),
+                    borderSide: BorderSide.none,
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(18.0),
+                    borderSide: BorderSide(
+                      color:
+                          themeData.colorScheme.outline.withValues(alpha: 0.14),
+                    ),
+                  ),
+                  filled: true,
+                  fillColor: themeData.colorScheme.surface,
+                ),
                 items: <String>[
                   kOffenseSearchTypeDriverName,
                   kOffenseSearchTypeLicensePlate,
@@ -588,84 +1041,144 @@ class _OffenseListPageState extends State<OffenseList> {
                     ),
                   );
                 }).toList(),
-                dropdownColor: themeData.colorScheme.surfaceContainer,
-                icon: Icon(Icons.arrow_drop_down,
-                    color: themeData.colorScheme.primary),
-              ),
-            ],
+                dropdownColor: themeData.colorScheme.surface,
+                icon: Icon(
+                  Icons.arrow_drop_down_rounded,
+                  color: themeData.colorScheme.primary,
+                ),
+              );
+              final actions = Wrap(
+                spacing: 12,
+                runSpacing: 12,
+                alignment: stacked ? WrapAlignment.start : WrapAlignment.end,
+                children: [
+                  if (_hasActiveFilters)
+                    OutlinedButton.icon(
+                      onPressed: () {
+                        _setStateSafely(() {
+                          _searchType = kOffenseSearchTypeDriverName;
+                          _startDate = null;
+                          _endDate = null;
+                        });
+                        _setSearchText('');
+                        _refreshOffenses(query: '');
+                      },
+                      icon: const Icon(Icons.layers_clear_outlined),
+                      label: Text('offenseAdmin.workspace.filterReset'.tr),
+                    ),
+                  FilledButton.tonalIcon(
+                    onPressed: () => _refreshOffenses(),
+                    icon: const Icon(Icons.refresh_rounded),
+                    label: Text('offenseAdmin.workspace.filterRefresh'.tr),
+                  ),
+                ],
+              );
+
+              if (stacked) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    search,
+                    const SizedBox(height: 16),
+                    modePicker,
+                    const SizedBox(height: 16),
+                    actions,
+                  ],
+                );
+              }
+
+              return Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(flex: 5, child: search),
+                  const SizedBox(width: 16),
+                  Expanded(flex: 3, child: modePicker),
+                  const SizedBox(width: 16),
+                  Expanded(flex: 2, child: actions),
+                ],
+              );
+            },
           ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  _startDate != null && _endDate != null
-                      ? 'offenseAdmin.filter.dateRangeLabel'.trParams({
-                          'start': formatOffenseDate(_startDate),
-                          'end': formatOffenseDate(_endDate),
-                        })
-                      : 'offenseAdmin.filter.selectDateRange'.tr,
-                  style: themeData.textTheme.bodyMedium?.copyWith(
-                    color: _startDate != null && _endDate != null
-                        ? themeData.colorScheme.onSurface
-                        : themeData.colorScheme.onSurfaceVariant,
+          const SizedBox(height: 16),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: themeData.colorScheme.surface,
+              borderRadius: BorderRadius.circular(18),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    _startDate != null && _endDate != null
+                        ? 'offenseAdmin.filter.dateRangeLabel'.trParams({
+                            'start': formatOffenseDate(_startDate),
+                            'end': formatOffenseDate(_endDate),
+                          })
+                        : 'offenseAdmin.filter.selectDateRange'.tr,
+                    style: themeData.textTheme.bodyMedium?.copyWith(
+                      color: _startDate != null && _endDate != null
+                          ? themeData.colorScheme.onSurface
+                          : themeData.colorScheme.onSurfaceVariant,
+                    ),
                   ),
                 ),
-              ),
-              IconButton(
-                icon: Icon(Icons.date_range,
-                    color: themeData.colorScheme.primary),
-                tooltip: 'offenseAdmin.filter.tooltip'.tr,
-                onPressed: () async {
-                  final range = await showDateRangePicker(
-                    context: context,
-                    firstDate: DateTime(1900),
-                    lastDate: DateTime.now(),
-                    locale: Get.locale ?? const Locale('en', 'US'),
-                    helpText: 'offenseAdmin.filter.selectDateRange'.tr,
-                    cancelText: 'common.cancel'.tr,
-                    confirmText: 'common.confirm'.tr,
-                    fieldStartHintText: 'offenseAdmin.filter.startDate'.tr,
-                    fieldEndHintText: 'offenseAdmin.filter.endDate'.tr,
-                    builder: (BuildContext context, Widget? child) {
-                      return Theme(
-                        data: themeData.copyWith(
-                          colorScheme: themeData.colorScheme.copyWith(
-                            primary: themeData.colorScheme.primary,
-                            onPrimary: themeData.colorScheme.onPrimary,
-                          ),
-                          textButtonTheme: TextButtonThemeData(
-                            style: TextButton.styleFrom(
-                              foregroundColor: themeData.colorScheme.primary,
+                IconButton(
+                  icon: Icon(Icons.date_range_rounded,
+                      color: themeData.colorScheme.primary),
+                  tooltip: 'offenseAdmin.filter.tooltip'.tr,
+                  onPressed: () async {
+                    final range = await showDateRangePicker(
+                      context: context,
+                      firstDate: DateTime(1900),
+                      lastDate: DateTime.now(),
+                      locale: Get.locale ?? const Locale('en', 'US'),
+                      helpText: 'offenseAdmin.filter.selectDateRange'.tr,
+                      cancelText: 'common.cancel'.tr,
+                      confirmText: 'common.confirm'.tr,
+                      fieldStartHintText: 'offenseAdmin.filter.startDate'.tr,
+                      fieldEndHintText: 'offenseAdmin.filter.endDate'.tr,
+                      builder: (BuildContext context, Widget? child) {
+                        return Theme(
+                          data: themeData.copyWith(
+                            colorScheme: themeData.colorScheme.copyWith(
+                              primary: themeData.colorScheme.primary,
+                              onPrimary: themeData.colorScheme.onPrimary,
+                            ),
+                            textButtonTheme: TextButtonThemeData(
+                              style: TextButton.styleFrom(
+                                foregroundColor: themeData.colorScheme.primary,
+                              ),
                             ),
                           ),
-                        ),
-                        child: child!,
-                      );
-                    },
-                  );
-                  if (!mounted || range == null) return;
-                  _setStateSafely(() {
-                    _startDate = range.start;
-                    _endDate = range.end;
-                  });
-                  _refreshOffenses(query: _searchController.text.trim());
-                },
-              ),
-              if (_startDate != null && _endDate != null)
-                IconButton(
-                  icon: Icon(Icons.clear,
-                      color: themeData.colorScheme.onSurfaceVariant),
-                  tooltip: 'offenseAdmin.filter.clearDateRange'.tr,
-                  onPressed: () {
+                          child: child!,
+                        );
+                      },
+                    );
+                    if (!mounted || range == null) return;
                     _setStateSafely(() {
-                      _startDate = null;
-                      _endDate = null;
+                      _startDate = range.start;
+                      _endDate = range.end;
                     });
                     _refreshOffenses(query: _searchController.text.trim());
                   },
                 ),
-            ],
+                if (_startDate != null && _endDate != null)
+                  IconButton(
+                    icon: Icon(Icons.clear_rounded,
+                        color: themeData.colorScheme.onSurfaceVariant),
+                    tooltip: 'offenseAdmin.filter.clearDateRange'.tr,
+                    onPressed: () {
+                      _setStateSafely(() {
+                        _startDate = null;
+                        _endDate = null;
+                      });
+                      _refreshOffenses(query: _searchController.text.trim());
+                    },
+                  ),
+              ],
+            ),
           ),
         ],
       ),
@@ -702,17 +1215,33 @@ class _OffenseListPageState extends State<OffenseList> {
           color: themeData.colorScheme.primary,
           backgroundColor: themeData.colorScheme.surfaceContainer,
           child: Padding(
-            padding: const EdgeInsets.all(16.0),
+            padding: const EdgeInsets.all(20),
             child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const SizedBox(height: 12),
+                _buildHeroSection(themeData),
+                const SizedBox(height: 24),
+                _buildSectionHeading(
+                  themeData,
+                  eyebrow: 'offenseAdmin.workspace.filterEyebrow'.tr,
+                  title: 'offenseAdmin.workspace.filterTitle'.tr,
+                  description: 'offenseAdmin.workspace.filterBody'.tr,
+                ),
+                const SizedBox(height: 18),
                 _buildSearchField(themeData),
-                const SizedBox(height: 12),
+                const SizedBox(height: 24),
+                _buildSectionHeading(
+                  themeData,
+                  eyebrow: 'offenseAdmin.workspace.listEyebrow'.tr,
+                  title: 'offenseAdmin.workspace.listTitle'.tr,
+                  description: 'offenseAdmin.workspace.listBody'.tr,
+                ),
+                const SizedBox(height: 18),
                 Expanded(
                   child: NotificationListener<ScrollNotification>(
                     onNotification: (scrollInfo) {
-                      if (scrollInfo.metrics.pixels ==
-                              scrollInfo.metrics.maxScrollExtent &&
+                      if (scrollInfo.metrics.pixels >=
+                              scrollInfo.metrics.maxScrollExtent - 120 &&
                           _hasMore) {
                         _loadMoreOffenses();
                       }
@@ -727,163 +1256,56 @@ class _OffenseListPageState extends State<OffenseList> {
                           )
                         : _errorMessage.isNotEmpty &&
                                 _filteredOffenseList.isEmpty
-                            ? Center(
-                                child: Column(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    Text(
-                                      _errorMessage,
-                                      style: themeData.textTheme.titleMedium
-                                          ?.copyWith(
-                                        color: themeData.colorScheme.error,
-                                        fontWeight: FontWeight.w500,
-                                      ),
-                                      textAlign: TextAlign.center,
-                                    ),
-                                    if (shouldShowOffenseAdminReloginAction(
-                                        _errorMessage))
-                                      Padding(
-                                        padding:
-                                            const EdgeInsets.only(top: 16.0),
-                                        child: ElevatedButton(
-                                          onPressed: () =>
-                                              Navigator.pushReplacementNamed(
-                                                  context, Routes.login),
-                                          style: ElevatedButton.styleFrom(
-                                            backgroundColor:
-                                                themeData.colorScheme.primary,
-                                            foregroundColor:
-                                                themeData.colorScheme.onPrimary,
-                                          ),
-                                          child: Text(
-                                              'offenseAdmin.action.relogin'.tr),
-                                        ),
-                                      ),
-                                  ],
+                            ? _buildStatePanel(
+                                themeData,
+                                icon: Icons.info_outline_rounded,
+                                title: 'offenseAdmin.workspace.errorTitle'.tr,
+                                message: _errorMessage,
+                                showRelogin:
+                                    shouldShowOffenseAdminReloginAction(
+                                  _errorMessage,
                                 ),
                               )
-                            : ListView.builder(
-                                itemCount: _filteredOffenseList.length +
-                                    (_hasMore ? 1 : 0),
-                                itemBuilder: (context, index) {
-                                  if (index == _filteredOffenseList.length &&
-                                      _hasMore) {
-                                    return const Padding(
-                                      padding: EdgeInsets.all(8.0),
-                                      child: Center(
-                                          child: CircularProgressIndicator()),
-                                    );
-                                  }
-                                  final offense = _filteredOffenseList[index];
-                                  return Card(
-                                    margin: const EdgeInsets.symmetric(
-                                        vertical: 8.0),
-                                    elevation: 3,
-                                    color:
-                                        themeData.colorScheme.surfaceContainer,
-                                    shape: RoundedRectangleBorder(
-                                        borderRadius:
-                                            BorderRadius.circular(16.0)),
-                                    child: ListTile(
-                                      contentPadding:
-                                          const EdgeInsets.symmetric(
-                                              horizontal: 16.0, vertical: 12.0),
-                                      title: Text(
-                                        'offenseAdmin.card.type'.trParams({
-                                          'value': offense.offenseType ??
-                                              'common.unknown'.tr,
-                                        }),
-                                        style: themeData.textTheme.titleMedium
-                                            ?.copyWith(
-                                          color:
-                                              themeData.colorScheme.onSurface,
-                                          fontWeight: FontWeight.w600,
+                            : _filteredOffenseList.isEmpty
+                                ? _buildStatePanel(
+                                    themeData,
+                                    icon: Icons.fact_check_outlined,
+                                    title:
+                                        'offenseAdmin.workspace.emptyTitle'.tr,
+                                    message: 'offenseAdmin.empty.default'.tr,
+                                  )
+                                : ListView.builder(
+                                    itemCount: _filteredOffenseList.length +
+                                        (_hasMore ? 1 : 0),
+                                    itemBuilder: (context, index) {
+                                      if (index ==
+                                              _filteredOffenseList.length &&
+                                          _hasMore) {
+                                        return const Padding(
+                                          padding: EdgeInsets.symmetric(
+                                              vertical: 12),
+                                          child: Center(
+                                              child:
+                                                  CircularProgressIndicator()),
+                                        );
+                                      }
+                                      final offense =
+                                          _filteredOffenseList[index];
+                                      return Padding(
+                                        padding: EdgeInsets.only(
+                                          bottom: index ==
+                                                  _filteredOffenseList.length -
+                                                      1
+                                              ? 0
+                                              : 14,
                                         ),
-                                      ),
-                                      subtitle: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          const SizedBox(height: 4),
-                                          Text(
-                                            'offenseAdmin.card.licensePlate'
-                                                .trParams({
-                                              'value': offense.licensePlate ??
-                                                  'common.unknown'.tr,
-                                            }),
-                                            style: themeData
-                                                .textTheme.bodyMedium
-                                                ?.copyWith(
-                                              color: themeData
-                                                  .colorScheme.onSurfaceVariant,
-                                            ),
-                                          ),
-                                          Text(
-                                            'offenseAdmin.card.driverName'
-                                                .trParams({
-                                              'value': offense.driverName ??
-                                                  'common.unknown'.tr,
-                                            }),
-                                            style: themeData
-                                                .textTheme.bodyMedium
-                                                ?.copyWith(
-                                              color: themeData
-                                                  .colorScheme.onSurfaceVariant,
-                                            ),
-                                          ),
-                                          Text(
-                                            'offenseAdmin.card.status'
-                                                .trParams({
-                                              'value':
-                                                  localizeOffenseProcessStatus(
-                                                offense.processStatus,
-                                              ),
-                                            }),
-                                            style: themeData
-                                                .textTheme.bodyMedium
-                                                ?.copyWith(
-                                              color: themeData
-                                                  .colorScheme.onSurfaceVariant,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                      trailing: _canManageOffenses
-                                          ? Row(
-                                              mainAxisSize: MainAxisSize.min,
-                                              children: [
-                                                IconButton(
-                                                  icon: Icon(Icons.delete,
-                                                      size: 18,
-                                                      color: themeData
-                                                          .colorScheme.error),
-                                                  onPressed: () =>
-                                                      _deleteOffense(
-                                                          offense.offenseId ??
-                                                              0),
-                                                  tooltip:
-                                                      'offenseAdmin.action.delete'
-                                                          .tr,
-                                                ),
-                                                Icon(
-                                                  Icons.arrow_forward_ios,
-                                                  color: themeData.colorScheme
-                                                      .onSurfaceVariant,
-                                                  size: 18,
-                                                ),
-                                              ],
-                                            )
-                                          : Icon(
-                                              Icons.arrow_forward_ios,
-                                              color: themeData
-                                                  .colorScheme.onSurfaceVariant,
-                                              size: 18,
-                                            ),
-                                      onTap: () => _goToDetailPage(offense),
-                                    ),
-                                  );
-                                },
-                              ),
+                                        child: _buildOffenseItem(
+                                          themeData,
+                                          offense,
+                                        ),
+                                      );
+                                    },
+                                  ),
                   ),
                 ),
               ],
@@ -892,6 +1314,191 @@ class _OffenseListPageState extends State<OffenseList> {
         ),
       );
     });
+  }
+}
+
+class _OffenseHeroBadge extends StatelessWidget {
+  const _OffenseHeroBadge({
+    required this.label,
+    required this.foregroundColor,
+    this.backgroundColor,
+    this.filled = false,
+  });
+
+  final String label;
+  final Color foregroundColor;
+  final Color? backgroundColor;
+  final bool filled;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color:
+            filled ? backgroundColor : foregroundColor.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(
+          color: filled
+              ? backgroundColor!.withValues(alpha: 0.24)
+              : foregroundColor.withValues(alpha: 0.14),
+        ),
+      ),
+      child: Text(
+        label,
+        style: Theme.of(context).textTheme.labelMedium?.copyWith(
+              color: filled ? Colors.white : foregroundColor,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.6,
+            ),
+      ),
+    );
+  }
+}
+
+class _OffenseInlineSignal extends StatelessWidget {
+  const _OffenseInlineSignal({
+    required this.icon,
+    required this.label,
+    required this.color,
+  });
+
+  final IconData icon;
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 18, color: color),
+          const SizedBox(width: 8),
+          Text(
+            label,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: color.withValues(alpha: 0.86),
+                ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _OffenseMetricTile extends StatelessWidget {
+  const _OffenseMetricTile({
+    required this.label,
+    required this.value,
+  });
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    final themeData = Theme.of(context);
+    return Container(
+      constraints: const BoxConstraints(minWidth: 132),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      decoration: BoxDecoration(
+        color: themeData.brightness == Brightness.dark
+            ? Colors.white.withValues(alpha: 0.08)
+            : const Color(0xFFF8FBFB),
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            value,
+            style: themeData.textTheme.titleLarge?.copyWith(
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            label,
+            style: themeData.textTheme.bodySmall?.copyWith(
+              color: themeData.colorScheme.onSurface.withValues(alpha: 0.7),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _OffenseStatusBadge extends StatelessWidget {
+  const _OffenseStatusBadge({
+    required this.label,
+    required this.color,
+  });
+
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        label,
+        style: Theme.of(context).textTheme.labelMedium?.copyWith(
+              color: color,
+              fontWeight: FontWeight.w700,
+            ),
+      ),
+    );
+  }
+}
+
+class _OffenseMetaChip extends StatelessWidget {
+  const _OffenseMetaChip({
+    required this.icon,
+    required this.label,
+  });
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final themeData = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: themeData.colorScheme.surfaceContainerHighest
+            .withValues(alpha: 0.45),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 16, color: themeData.colorScheme.primary),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Text(
+              label,
+              style: themeData.textTheme.bodySmall?.copyWith(
+                color: themeData.colorScheme.onSurfaceVariant,
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 

@@ -123,11 +123,7 @@ class _LocalCaptchaMainState extends State<LocalCaptchaMain> {
                       fontSize: _configFormData.fontSize,
                       caseSensitive: _configFormData.caseSensitive,
                       codeExpireAfter: _configFormData.codeExpireAfter,
-                      onCaptchaGenerated: (captcha) {
-                        debugPrint('Captcha generated: $captcha');
-                        debugPrint(
-                            'Applied font size: ${_configFormData.fontSize}');
-                      },
+                      onCaptchaGenerated: (_) {},
                     ),
                     const SizedBox(height: 20.0),
                     TextFormField(

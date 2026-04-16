@@ -1,6 +1,7 @@
 package com.tutict.finalassignmentbackend.service;
 
 import com.tutict.finalassignmentbackend.config.login.jwt.TokenProvider;
+import com.tutict.finalassignmentbackend.config.tenant.TenantContextHolder;
 import com.tutict.finalassignmentbackend.config.websocket.WsAction;
 import com.tutict.finalassignmentbackend.entity.AuditLoginLog;
 import com.tutict.finalassignmentbackend.entity.SysRole;
@@ -257,6 +258,10 @@ public class AuthWsService {
         summary.put("email", user.getEmail());
         summary.put("contactNumber", user.getContactNumber());
         summary.put("status", user.getStatus());
+        summary.put("tenantId", user.getTenantId());
+        summary.put("organizationCode", user.getOrganizationCode());
+        summary.put("regionCode", user.getRegionCode());
+        summary.put("departmentCode", user.getDepartmentCode());
         return summary;
     }
 
@@ -264,18 +269,38 @@ public class AuthWsService {
         String roleCodesCsv = String.join(",", aggregation.getRoleCodes());
         String roleTypesCsv = String.join(",", aggregation.getRoleTypes());
         String dataScopeCode = aggregation.getDataScope().getCode();
+        String tenantId = firstNonBlank(user.getTenantId(), TenantContextHolder.getTenantId());
+        String organizationCode = firstNonBlank(user.getOrganizationCode(), TenantContextHolder.getOrganizationCode());
+        String regionCode = firstNonBlank(user.getRegionCode(), TenantContextHolder.getRegionCode());
+        String departmentCode = firstNonBlank(user.getDepartmentCode(), TenantContextHolder.getDepartmentCode());
         boolean claimsSupported = StringUtils.hasText(roleCodesCsv)
                 && StringUtils.hasText(roleTypesCsv)
                 && tokenProvider.validateRoleClaims(roleCodesCsv, roleTypesCsv, dataScopeCode);
 
         String jwtToken;
         if (claimsSupported) {
-            jwtToken = tokenProvider.createEnhancedToken(user.getUsername(), roleCodesCsv, roleTypesCsv, dataScopeCode);
+            jwtToken = tokenProvider.createEnhancedToken(
+                    user.getUsername(),
+                    roleCodesCsv,
+                    roleTypesCsv,
+                    dataScopeCode,
+                    tenantId,
+                    organizationCode,
+                    regionCode,
+                    departmentCode
+            );
         } else {
             logger.warning(() -> String.format(
                     "Role claims are incomplete; falling back to a basic token for user=%s",
                     user.getUsername()));
-            jwtToken = tokenProvider.createToken(user.getUsername(), roleCodesCsv);
+            jwtToken = tokenProvider.createToken(
+                    user.getUsername(),
+                    roleCodesCsv,
+                    tenantId,
+                    organizationCode,
+                    regionCode,
+                    departmentCode
+            );
         }
 
         Map<String, Object> response = new LinkedHashMap<>();
@@ -290,8 +315,19 @@ public class AuthWsService {
         response.put("systemRole", tokenProvider.hasSystemRole(jwtToken));
         response.put("businessRole", tokenProvider.hasBusinessRole(jwtToken));
         response.put("departmentScope", tokenProvider.hasDataScopePermission(jwtToken, DataScope.DEPARTMENT));
+        response.put("tenantId", tenantId);
+        response.put("organizationCode", organizationCode);
+        response.put("regionCode", regionCode);
+        response.put("departmentCode", departmentCode);
         response.put("user", buildUserSummary(user));
         return response;
+    }
+
+    private String firstNonBlank(String primary, String fallback) {
+        if (StringUtils.hasText(primary)) {
+            return primary.trim();
+        }
+        return StringUtils.hasText(fallback) ? fallback.trim() : null;
     }
 
     private void assignRole(SysUser user, SysRole role) {

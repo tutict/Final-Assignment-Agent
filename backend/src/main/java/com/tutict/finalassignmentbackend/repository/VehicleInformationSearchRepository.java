@@ -224,4 +224,59 @@ public interface VehicleInformationSearchRepository extends ElasticsearchReposit
     default SearchHits<VehicleInformationDocument> searchByStatus(String status) {
         return searchByStatus(status, PageRequest.of(0, DEFAULT_PAGE_SIZE));
     }
+
+    @Query("""
+    {
+      "bool": {
+        "should": [
+          {
+            "term": {
+              "licensePlate.keyword": {
+                "value": "?0",
+                "boost": 8.0
+              }
+            }
+          },
+          {
+            "match_phrase_prefix": {
+              "licensePlate": {
+                "query": "?0",
+                "boost": 6.0
+              }
+            }
+          },
+          {
+            "match_phrase_prefix": {
+              "ownerName": {
+                "query": "?0",
+                "boost": 4.0
+              }
+            }
+          },
+          {
+            "match_phrase_prefix": {
+              "vehicleType": {
+                "query": "?0",
+                "boost": 3.0
+              }
+            }
+          },
+          {
+            "match_phrase_prefix": {
+              "brand": {
+                "query": "?0",
+                "boost": 2.0
+              }
+            }
+          }
+        ],
+        "minimum_should_match": 1
+      }
+    }
+    """)
+    SearchHits<VehicleInformationDocument> searchBroadly(String query, Pageable pageable);
+
+    default SearchHits<VehicleInformationDocument> searchBroadly(String query) {
+        return searchBroadly(query, PageRequest.of(0, DEFAULT_PAGE_SIZE));
+    }
 }

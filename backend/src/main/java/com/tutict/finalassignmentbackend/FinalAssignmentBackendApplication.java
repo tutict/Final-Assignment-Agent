@@ -5,6 +5,7 @@ import com.tutict.finalassignmentbackend.config.nativeimage.ApplicationRuntimeHi
 import org.mybatis.spring.annotation.MapperScan;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.builder.SpringApplicationBuilder;
+import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
 import org.springframework.context.annotation.EnableAspectJAutoProxy;
 import org.springframework.context.annotation.ImportRuntimeHints;
 import org.springframework.scheduling.annotation.EnableAsync;
@@ -12,6 +13,7 @@ import org.springframework.scheduling.annotation.EnableAsync;
 @EnableAsync
 @EnableAspectJAutoProxy
 @SpringBootApplication
+@ConfigurationPropertiesScan
 @MapperScan(
         basePackages = "com.tutict.finalassignmentbackend.mapper",
         sqlSessionTemplateRef = "sqlSessionTemplate"

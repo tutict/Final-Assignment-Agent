@@ -150,4 +150,60 @@ public interface DriverInformationSearchRepository extends ElasticsearchReposito
     default SearchHits<DriverInformationDocument> searchByContactNumber(String contactNumber) {
         return searchByContactNumber(contactNumber, PageRequest.of(0, DEFAULT_PAGE_SIZE));
     }
+
+    @Query("""
+            {
+              "bool": {
+                "should": [
+                  {
+                    "term": {
+                      "idCardNumber.keyword": {
+                        "value": "?0",
+                        "boost": 8.0
+                      }
+                    }
+                  },
+                  {
+                    "term": {
+                      "driverLicenseNumber.keyword": {
+                        "value": "?0",
+                        "boost": 8.0
+                      }
+                    }
+                  },
+                  {
+                    "match_phrase_prefix": {
+                      "contactNumber": {
+                        "query": "?0",
+                        "boost": 6.0
+                      }
+                    }
+                  },
+                  {
+                    "match_phrase_prefix": {
+                      "name": {
+                        "query": "?0",
+                        "boost": 4.0
+                      }
+                    }
+                  },
+                  {
+                    "match": {
+                      "name": {
+                        "query": "?0",
+                        "fuzziness": "AUTO",
+                        "boost": 2.0
+                      }
+                    }
+                  }
+                ],
+                "minimum_should_match": 1
+              }
+            }
+            """)
+    SearchHits<DriverInformationDocument> searchBroadly(String query, Pageable pageable);
+
+    default SearchHits<DriverInformationDocument> searchBroadly(String query) {
+        return searchBroadly(query, PageRequest.of(0, DEFAULT_PAGE_SIZE));
+    }
 }

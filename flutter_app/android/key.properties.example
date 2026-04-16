@@ -1,0 +1,4 @@
+storeFile=../keystore/release.keystore
+storePassword=change_me
+keyAlias=release
+keyPassword=change_me

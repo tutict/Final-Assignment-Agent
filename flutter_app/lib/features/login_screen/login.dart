@@ -491,6 +491,7 @@ class _LoginScreenState extends State<LoginScreen> with ValidatorMixin {
                       children: [
                         Positioned.fill(
                           child: _RevealIn(
+                            delay: const Duration(milliseconds: 60),
                             child: _BrandPanel(
                               theme: theme,
                               darkMode: _isDarkMode,
@@ -530,6 +531,7 @@ class _LoginScreenState extends State<LoginScreen> with ValidatorMixin {
                               child: SingleChildScrollView(
                                 padding: EdgeInsets.zero,
                                 child: _RevealIn(
+                                  delay: const Duration(milliseconds: 180),
                                   child: _AuthPanel(state: this, theme: theme),
                                 ),
                               ),
@@ -553,6 +555,7 @@ class _LoginScreenState extends State<LoginScreen> with ValidatorMixin {
                             Expanded(
                               flex: 6,
                               child: _RevealIn(
+                                delay: const Duration(milliseconds: 80),
                                 child: _BrandPanel(
                                   theme: theme,
                                   darkMode: _isDarkMode,
@@ -592,6 +595,8 @@ class _LoginScreenState extends State<LoginScreen> with ValidatorMixin {
                                       alignment: Alignment.center,
                                       child: SingleChildScrollView(
                                         child: _RevealIn(
+                                          delay:
+                                              const Duration(milliseconds: 180),
                                           child: _AuthPanel(
                                             state: this,
                                             theme: theme,
@@ -634,6 +639,7 @@ class _LoginScreenState extends State<LoginScreen> with ValidatorMixin {
                               ),
                               SizedBox(height: metrics.sectionGap),
                               _RevealIn(
+                                delay: const Duration(milliseconds: 80),
                                 child: _BrandPanel(
                                   theme: theme,
                                   darkMode: _isDarkMode,
@@ -645,6 +651,8 @@ class _LoginScreenState extends State<LoginScreen> with ValidatorMixin {
                                 constraints:
                                     const BoxConstraints(maxWidth: 520),
                                 child: _RevealIn(
+                                  delay:
+                                      const Duration(milliseconds: 180),
                                   child: _AuthPanel(state: this, theme: theme),
                                 ),
                               ),
@@ -678,6 +686,7 @@ class _LoginScreenState extends State<LoginScreen> with ValidatorMixin {
                         ),
                         SizedBox(height: metrics.sectionGap),
                         _RevealIn(
+                          delay: const Duration(milliseconds: 80),
                           child: _BrandPanel(
                             theme: theme,
                             darkMode: _isDarkMode,
@@ -687,6 +696,7 @@ class _LoginScreenState extends State<LoginScreen> with ValidatorMixin {
                         ),
                         SizedBox(height: metrics.sectionGap),
                         _RevealIn(
+                          delay: const Duration(milliseconds: 180),
                           child: _AuthPanel(state: this, theme: theme),
                         ),
                       ],
@@ -723,6 +733,18 @@ class _AuthPanel extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              Row(
+                children: [
+                  _PanelTag(label: 'common.workspace'.tr),
+                  const Spacer(),
+                  _ModePill(
+                    label: state._mode == _AuthMode.login
+                        ? 'common.login'.tr
+                        : 'common.register'.tr,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 18),
               Text(
                 'auth.enterWorkspace'.tr,
                 style: theme.textTheme.headlineSmall,
@@ -732,27 +754,85 @@ class _AuthPanel extends StatelessWidget {
                 'auth.enterWorkspaceBody'.tr,
                 style: theme.textTheme.bodyMedium,
               ),
-              const SizedBox(height: 18),
-              SegmentedButton<_AuthMode>(
-                showSelectedIcon: false,
-                segments: [
-                  ButtonSegment(
-                    value: _AuthMode.login,
-                    label: Text('common.login'.tr),
+              const SizedBox(height: 16),
+              Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: [
+                  _StatusTile(
+                    icon: Icons.radio_button_checked_rounded,
+                    label: 'common.workspace'.tr,
+                    value: 'common.online'.tr,
+                    color: const Color(0xFF1F9D68),
                   ),
-                  ButtonSegment(
-                    value: _AuthMode.register,
-                    label: Text('common.register'.tr),
+                  _StatusTile(
+                    icon: Icons.route_rounded,
+                    label: 'auth.metric.flow'.tr,
+                    value: 'auth.metric.flowValue'.tr,
+                    color: theme.colorScheme.primary,
+                  ),
+                  _StatusTile(
+                    icon: Icons.bolt_rounded,
+                    label: 'common.agent'.tr,
+                    value: 'auth.metric.agentValue'.tr,
+                    color: theme.colorScheme.tertiary,
                   ),
                 ],
-                selected: {state._mode},
-                onSelectionChanged: (selection) {
-                  state.setMode(selection.first);
-                },
               ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 18),
+              Container(
+                padding: const EdgeInsets.all(4),
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.surfaceContainerHighest
+                      .withValues(alpha: 0.65),
+                  borderRadius: BorderRadius.circular(22),
+                  border: Border.all(
+                    color: theme.colorScheme.outlineVariant
+                        .withValues(alpha: 0.36),
+                  ),
+                ),
+                child: SegmentedButton<_AuthMode>(
+                  showSelectedIcon: false,
+                  style: ButtonStyle(
+                    visualDensity: VisualDensity.compact,
+                    padding: WidgetStateProperty.all(
+                      const EdgeInsets.symmetric(vertical: 14),
+                    ),
+                  ),
+                  segments: [
+                    ButtonSegment(
+                      value: _AuthMode.login,
+                      label: Text('common.login'.tr),
+                    ),
+                    ButtonSegment(
+                      value: _AuthMode.register,
+                      label: Text('common.register'.tr),
+                    ),
+                  ],
+                  selected: {state._mode},
+                  onSelectionChanged: (selection) {
+                    state.setMode(selection.first);
+                  },
+                ),
+              ),
+              const SizedBox(height: 22),
               AnimatedSwitcher(
-                duration: const Duration(milliseconds: 220),
+                duration: const Duration(milliseconds: 320),
+                switchInCurve: Curves.easeOutCubic,
+                switchOutCurve: Curves.easeInCubic,
+                transitionBuilder: (child, animation) {
+                  final offset = Tween<Offset>(
+                    begin: const Offset(0.04, 0),
+                    end: Offset.zero,
+                  ).animate(animation);
+                  return FadeTransition(
+                    opacity: animation,
+                    child: SlideTransition(
+                      position: offset,
+                      child: child,
+                    ),
+                  );
+                },
                 child: state._mode == _AuthMode.login
                     ? _LoginForm(state: state)
                     : _RegisterForm(state: state),
@@ -808,9 +888,10 @@ class _LoginForm extends StatelessWidget {
           const SizedBox(height: 18),
           SizedBox(
             width: double.infinity,
-            child: FilledButton(
+            child: FilledButton.icon(
               onPressed: state._isSubmitting ? null : state._handleLogin,
-              child: Text(
+              icon: const Icon(Icons.arrow_forward_rounded),
+              label: Text(
                 state._isSubmitting ? 'auth.signingIn'.tr : 'common.login'.tr,
               ),
             ),
@@ -931,9 +1012,10 @@ class _RegisterForm extends StatelessWidget {
           const SizedBox(height: 18),
           SizedBox(
             width: double.infinity,
-            child: FilledButton(
+            child: FilledButton.icon(
               onPressed: state._isSubmitting ? null : state._handleRegister,
-              child: Text(
+              icon: const Icon(Icons.person_add_alt_1_rounded),
+              label: Text(
                 state._isSubmitting ? 'auth.creating'.tr : 'common.register'.tr,
               ),
             ),
@@ -1085,17 +1167,21 @@ class _BrandHero extends StatelessWidget {
               Positioned(
                 top: -40,
                 right: -40,
-                child: Container(
-                  width: compact ? (narrow ? 140 : 180) : 260,
-                  height: compact ? (narrow ? 140 : 180) : 260,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    gradient: RadialGradient(
-                      colors: [
-                        Colors.white.withValues(alpha: 0.22),
-                        Colors.white.withValues(alpha: 0.02),
-                        Colors.transparent,
-                      ],
+                child: _FloatDrift(
+                  offset: const Offset(-12, 12),
+                  duration: const Duration(milliseconds: 5200),
+                  child: Container(
+                    width: compact ? (narrow ? 140 : 180) : 260,
+                    height: compact ? (narrow ? 140 : 180) : 260,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      gradient: RadialGradient(
+                        colors: [
+                          Colors.white.withValues(alpha: 0.22),
+                          Colors.white.withValues(alpha: 0.02),
+                          Colors.transparent,
+                        ],
+                      ),
                     ),
                   ),
                 ),
@@ -1103,16 +1189,20 @@ class _BrandHero extends StatelessWidget {
               Positioned(
                 left: compact ? -80 : -20,
                 bottom: compact ? (narrow ? 104 : 84) : 118,
-                child: Container(
-                  width: compact ? (narrow ? 140 : 180) : 260,
-                  height: compact ? (narrow ? 140 : 180) : 260,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    gradient: RadialGradient(
-                      colors: [
-                        theme.colorScheme.tertiary.withValues(alpha: 0.16),
-                        Colors.transparent,
-                      ],
+                child: _FloatDrift(
+                  offset: const Offset(14, -10),
+                  duration: const Duration(milliseconds: 4800),
+                  child: Container(
+                    width: compact ? (narrow ? 140 : 180) : 260,
+                    height: compact ? (narrow ? 140 : 180) : 260,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      gradient: RadialGradient(
+                        colors: [
+                          theme.colorScheme.tertiary.withValues(alpha: 0.16),
+                          Colors.transparent,
+                        ],
+                      ),
                     ),
                   ),
                 ),
@@ -1121,14 +1211,18 @@ class _BrandHero extends StatelessWidget {
                 right: compact ? (narrow ? -28 : -18) : 24,
                 bottom: compact ? (narrow ? 6 : -6) : 0,
                 child: IgnorePointer(
-                  child: Opacity(
-                    opacity: 0.84,
-                    child: SizedBox(
-                      width: compact ? (narrow ? 148 : 200) : 360,
-                      height: compact ? (narrow ? 112 : 150) : 260,
-                      child: SvgPicture.asset(
-                        ImageVectorPath.wavyBus,
-                        fit: BoxFit.contain,
+                  child: _FloatDrift(
+                    offset: const Offset(0, -10),
+                    duration: const Duration(milliseconds: 4200),
+                    child: Opacity(
+                      opacity: 0.84,
+                      child: SizedBox(
+                        width: compact ? (narrow ? 148 : 200) : 360,
+                        height: compact ? (narrow ? 112 : 150) : 260,
+                        child: SvgPicture.asset(
+                          ImageVectorPath.wavyBus,
+                          fit: BoxFit.contain,
+                        ),
                       ),
                     ),
                   ),
@@ -1141,68 +1235,89 @@ class _BrandHero extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 8,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.10),
-                        borderRadius: BorderRadius.circular(999),
-                        border: Border.all(
-                          color: Colors.white.withValues(alpha: 0.12),
+                    _RevealIn(
+                      delay: const Duration(milliseconds: 80),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
                         ),
-                      ),
-                      child: Text(
-                        'auth.brandBadge'.tr,
-                        style: theme.textTheme.labelLarge?.copyWith(
-                          color: Colors.white,
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.10),
+                          borderRadius: BorderRadius.circular(999),
+                          border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.12),
+                          ),
+                        ),
+                        child: Text(
+                          'auth.brandBadge'.tr,
+                          style: theme.textTheme.labelLarge?.copyWith(
+                            color: Colors.white,
+                          ),
                         ),
                       ),
                     ),
                     SizedBox(height: compact ? (narrow ? 18 : 22) : 30),
-                    Text(
-                      'app.name'.tr,
-                      style: theme.textTheme.labelLarge?.copyWith(
-                        color: Colors.white.withValues(alpha: 0.72),
-                        letterSpacing: 1.6,
+                    _RevealIn(
+                      delay: const Duration(milliseconds: 140),
+                      child: Text(
+                        'app.name'.tr,
+                        style: theme.textTheme.labelLarge?.copyWith(
+                          color: Colors.white.withValues(alpha: 0.72),
+                          letterSpacing: 1.6,
+                        ),
                       ),
                     ),
                     const SizedBox(height: 10),
-                    Text(
-                      'auth.brandTitle'.tr,
-                      style: (compact
-                              ? (narrow
-                                  ? theme.textTheme.headlineLarge
-                                  : theme.textTheme.displaySmall)
-                              : theme.textTheme.displayLarge)
-                          ?.copyWith(
-                        color: Colors.white,
-                        height: 0.94,
+                    _RevealIn(
+                      delay: const Duration(milliseconds: 180),
+                      distance: 26,
+                      child: Text(
+                        'auth.brandTitle'.tr,
+                        style: (compact
+                                ? (narrow
+                                    ? theme.textTheme.headlineLarge
+                                    : theme.textTheme.displaySmall)
+                                : theme.textTheme.displayLarge)
+                            ?.copyWith(
+                          color: Colors.white,
+                          height: 0.94,
+                        ),
                       ),
                     ),
                     const SizedBox(height: 14),
-                    ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 460),
-                      child: Text(
-                        'auth.brandBody'.tr,
-                        style: theme.textTheme.bodyLarge?.copyWith(
-                          color: Colors.white.withValues(alpha: 0.80),
-                          height: 1.45,
+                    _RevealIn(
+                      delay: const Duration(milliseconds: 220),
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 460),
+                        child: Text(
+                          'auth.brandBody'.tr,
+                          style: theme.textTheme.bodyLarge?.copyWith(
+                            color: Colors.white.withValues(alpha: 0.80),
+                            height: 1.45,
+                          ),
                         ),
                       ),
                     ),
                     SizedBox(height: compact ? (narrow ? 18 : 22) : 28),
-                    ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 430),
-                      child: _CommandCard(
-                        theme: theme,
-                        lines: [
-                          'auth.promptLine1'.tr,
-                          'auth.promptLine2'.tr,
-                        ],
-                        darkSurface: true,
+                    _RevealIn(
+                      delay: const Duration(milliseconds: 260),
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 430),
+                        child: _CommandCard(
+                          theme: theme,
+                          lines: [
+                            'auth.promptLine1'.tr,
+                            'auth.promptLine2'.tr,
+                          ],
+                          darkSurface: true,
+                        ),
                       ),
+                    ),
+                    const Spacer(),
+                    _RevealIn(
+                      delay: const Duration(milliseconds: 320),
+                      child: const _HeroSignalBand(),
                     ),
                   ],
                 ),
@@ -1323,6 +1438,212 @@ class _CommandCard extends StatelessWidget {
   }
 }
 
+class _PanelTag extends StatelessWidget {
+  const _PanelTag({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.primary.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(
+          color: theme.colorScheme.primary.withValues(alpha: 0.18),
+        ),
+      ),
+      child: Text(
+        label,
+        style: theme.textTheme.labelMedium?.copyWith(
+          color: theme.colorScheme.primary,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    );
+  }
+}
+
+class _ModePill extends StatelessWidget {
+  const _ModePill({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.9),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        label,
+        style: theme.textTheme.labelMedium?.copyWith(
+          color: theme.colorScheme.onSurface,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    );
+  }
+}
+
+class _StatusTile extends StatelessWidget {
+  const _StatusTile({
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.color,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      constraints: const BoxConstraints(minWidth: 112),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHigh.withValues(alpha: 0.82),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.32),
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 16, color: color),
+          const SizedBox(width: 10),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(label, style: theme.textTheme.labelSmall),
+              const SizedBox(height: 2),
+              Text(
+                value,
+                style: theme.textTheme.labelMedium?.copyWith(
+                  color: theme.colorScheme.onSurface,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HeroSignalBand extends StatelessWidget {
+  const _HeroSignalBand();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.18),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.10),
+        ),
+      ),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final compact = constraints.maxWidth < 420;
+          final items = const [
+            ('common.workspace', 'common.online'),
+            ('common.focus', 'auth.metric.flowValue'),
+            ('common.agent', 'auth.metric.agentValue'),
+          ];
+
+          if (compact) {
+            return Column(
+              children: [
+                for (var i = 0; i < items.length; i++) ...[
+                  _HeroSignalItem(
+                    titleKey: items[i].$1,
+                    valueKey: items[i].$2,
+                  ),
+                  if (i != items.length - 1)
+                    Divider(
+                      color: Colors.white.withValues(alpha: 0.10),
+                      height: 22,
+                    ),
+                ],
+              ],
+            );
+          }
+
+          return Row(
+            children: [
+              for (var i = 0; i < items.length; i++) ...[
+                Expanded(
+                  child: _HeroSignalItem(
+                    titleKey: items[i].$1,
+                    valueKey: items[i].$2,
+                  ),
+                ),
+                if (i != items.length - 1)
+                  Container(
+                    width: 1,
+                    height: 34,
+                    color: Colors.white.withValues(alpha: 0.10),
+                    margin: const EdgeInsets.symmetric(horizontal: 14),
+                  ),
+              ],
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _HeroSignalItem extends StatelessWidget {
+  const _HeroSignalItem({
+    required this.titleKey,
+    required this.valueKey,
+  });
+
+  final String titleKey;
+  final String valueKey;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          titleKey.tr,
+          style: theme.textTheme.labelMedium?.copyWith(
+            color: Colors.white.withValues(alpha: 0.62),
+            letterSpacing: 0.3,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          valueKey.tr,
+          style: theme.textTheme.titleMedium?.copyWith(
+            color: Colors.white,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 class _LoginBackdrop extends StatelessWidget {
   const _LoginBackdrop();
 
@@ -1331,29 +1652,58 @@ class _LoginBackdrop extends StatelessWidget {
     final theme = Theme.of(context);
     return Stack(
       children: [
+        Positioned.fill(
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  theme.scaffoldBackgroundColor,
+                  theme.colorScheme.surfaceContainer
+                      .withValues(alpha: 0.82),
+                  theme.scaffoldBackgroundColor,
+                ],
+              ),
+            ),
+          ),
+        ),
         const Positioned.fill(child: _BackdropGrid()),
         Positioned(
           top: -140,
           left: -90,
-          child: _Blob(
-            size: 320,
-            color: theme.colorScheme.primary.withValues(alpha: 0.14),
+          child: _FloatDrift(
+            offset: const Offset(10, 8),
+            duration: const Duration(milliseconds: 5200),
+            child: _Blob(
+              size: 320,
+              color: theme.colorScheme.primary.withValues(alpha: 0.14),
+            ),
           ),
         ),
         Positioned(
           right: -80,
           top: 120,
-          child: _Blob(
-            size: 260,
-            color: theme.colorScheme.primaryContainer.withValues(alpha: 0.18),
+          child: _FloatDrift(
+            offset: const Offset(-12, 12),
+            duration: const Duration(milliseconds: 5800),
+            child: _Blob(
+              size: 260,
+              color: theme.colorScheme.primaryContainer
+                  .withValues(alpha: 0.18),
+            ),
           ),
         ),
         Positioned(
           bottom: -120,
           right: 120,
-          child: _Blob(
-            size: 360,
-            color: theme.colorScheme.tertiary.withValues(alpha: 0.12),
+          child: _FloatDrift(
+            offset: const Offset(14, -10),
+            duration: const Duration(milliseconds: 5400),
+            child: _Blob(
+              size: 360,
+              color: theme.colorScheme.tertiary.withValues(alpha: 0.12),
+            ),
           ),
         ),
       ],
@@ -1421,26 +1771,87 @@ class _SurfaceFrame extends StatelessWidget {
 }
 
 class _RevealIn extends StatelessWidget {
-  const _RevealIn({required this.child});
+  const _RevealIn({
+    required this.child,
+    this.delay = Duration.zero,
+    this.distance = 18,
+  });
 
   final Widget child;
+  final Duration delay;
+  final double distance;
 
   @override
   Widget build(BuildContext context) {
     return TweenAnimationBuilder<double>(
-      duration: const Duration(milliseconds: 420),
+      duration: const Duration(milliseconds: 420) + delay,
       curve: Curves.easeOutCubic,
       tween: Tween(begin: 0, end: 1),
       builder: (context, value, widget) {
+        final delayedValue = delay == Duration.zero
+            ? value
+            : ((value * (420 + delay.inMilliseconds) - delay.inMilliseconds) /
+                    420)
+                .clamp(0.0, 1.0);
         return Opacity(
-          opacity: value,
+          opacity: delayedValue,
           child: Transform.translate(
-            offset: Offset(0, (1 - value) * 18),
+            offset: Offset(0, (1 - delayedValue) * distance),
             child: widget,
           ),
         );
       },
       child: child,
+    );
+  }
+}
+
+class _FloatDrift extends StatefulWidget {
+  const _FloatDrift({
+    required this.child,
+    required this.offset,
+    required this.duration,
+  });
+
+  final Widget child;
+  final Offset offset;
+  final Duration duration;
+
+  @override
+  State<_FloatDrift> createState() => _FloatDriftState();
+}
+
+class _FloatDriftState extends State<_FloatDrift>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: widget.duration,
+  )..repeat(reverse: true);
+
+  late final Animation<double> _animation = CurvedAnimation(
+    parent: _controller,
+    curve: Curves.easeInOut,
+  );
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _animation,
+      child: widget.child,
+      builder: (context, child) {
+        final dx = widget.offset.dx * _animation.value;
+        final dy = widget.offset.dy * _animation.value;
+        return Transform.translate(
+          offset: Offset(dx, dy),
+          child: child,
+        );
+      },
     );
   }
 }

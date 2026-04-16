@@ -26,6 +26,18 @@ public class AuditOperationLog implements Serializable {
     @TableId(value = "log_id", type = IdType.AUTO)
     private Long logId;
 
+    @TableField("tenant_id")
+    private String tenantId;
+
+    @TableField("organization_code")
+    private String organizationCode;
+
+    @TableField("region_code")
+    private String regionCode;
+
+    @TableField("department_code")
+    private String departmentCode;
+
     /**
      * 操作类型 (INSERT, UPDATE, DELETE, SELECT, EXPORT等)
      */

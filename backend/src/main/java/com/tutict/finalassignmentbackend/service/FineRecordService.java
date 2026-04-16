@@ -3,7 +3,10 @@ package com.tutict.finalassignmentbackend.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.tutict.finalassignmentbackend.config.product.ProductGovernanceProperties;
 import com.tutict.finalassignmentbackend.config.statemachine.states.PaymentState;
+import com.tutict.finalassignmentbackend.config.tenant.TenantIsolationProperties;
+import com.tutict.finalassignmentbackend.config.tenant.TenantAwareSupport;
 import com.tutict.finalassignmentbackend.config.websocket.WsAction;
 import com.tutict.finalassignmentbackend.entity.FineRecord;
 import com.tutict.finalassignmentbackend.entity.SysRequestHistory;
@@ -53,6 +56,7 @@ public class FineRecordService {
     private final PaymentRecordMapper paymentRecordMapper;
     private final SysRequestHistoryMapper sysRequestHistoryMapper;
     private final FineRecordSearchRepository fineRecordSearchRepository;
+    private final TenantAwareSupport tenantAwareSupport;
     private final OffenseRecordService offenseRecordService;
     private final SysUserService sysUserService;
     private final KafkaTemplate<String, String> kafkaTemplate;
@@ -63,6 +67,7 @@ public class FineRecordService {
                              PaymentRecordMapper paymentRecordMapper,
                              SysRequestHistoryMapper sysRequestHistoryMapper,
                              FineRecordSearchRepository fineRecordSearchRepository,
+                             TenantAwareSupport tenantAwareSupport,
                              OffenseRecordService offenseRecordService,
                              SysUserService sysUserService,
                              KafkaTemplate<String, String> kafkaTemplate,
@@ -71,10 +76,30 @@ public class FineRecordService {
         this.paymentRecordMapper = paymentRecordMapper;
         this.sysRequestHistoryMapper = sysRequestHistoryMapper;
         this.fineRecordSearchRepository = fineRecordSearchRepository;
+        this.tenantAwareSupport = tenantAwareSupport;
         this.offenseRecordService = offenseRecordService;
         this.sysUserService = sysUserService;
         this.kafkaTemplate = kafkaTemplate;
         this.objectMapper = objectMapper;
+    }
+
+    public FineRecordService(FineRecordMapper fineRecordMapper,
+                             PaymentRecordMapper paymentRecordMapper,
+                             SysRequestHistoryMapper sysRequestHistoryMapper,
+                             FineRecordSearchRepository fineRecordSearchRepository,
+                             OffenseRecordService offenseRecordService,
+                             SysUserService sysUserService,
+                             KafkaTemplate<String, String> kafkaTemplate,
+                             ObjectMapper objectMapper) {
+        this(fineRecordMapper,
+                paymentRecordMapper,
+                sysRequestHistoryMapper,
+                fineRecordSearchRepository,
+                defaultTenantAwareSupport(),
+                offenseRecordService,
+                sysUserService,
+                kafkaTemplate,
+                objectMapper);
     }
 
     @Transactional
@@ -112,7 +137,7 @@ public class FineRecordService {
     @CacheEvict(cacheNames = CACHE_NAME, allEntries = true)
     public FineRecord updateFineRecordSystemManaged(FineRecord fineRecord) {
         requirePositive(fineRecord.getFineId(), "Fine ID");
-        FineRecord existing = fineRecordMapper.selectById(fineRecord.getFineId());
+        FineRecord existing = findFineByIdFromDatabase(fineRecord.getFineId());
         if (existing == null) {
             throw new IllegalStateException("No FineRecord updated for id=" + fineRecord.getFineId());
         }
@@ -123,7 +148,7 @@ public class FineRecordService {
     }
 
     private FineRecord persistFineRecordUpdate(FineRecord fineRecord) {
-        int rows = fineRecordMapper.updateById(fineRecord);
+        int rows = updateFineByIdScoped(fineRecord);
         if (rows == 0) {
             throw new IllegalStateException("No FineRecord updated for id=" + fineRecord.getFineId());
         }
@@ -138,13 +163,16 @@ public class FineRecordService {
     }
 
     @Transactional(readOnly = true)
-    @Cacheable(cacheNames = CACHE_NAME, key = "#fineId", unless = "#result == null")
+    @Cacheable(cacheNames = CACHE_NAME, key = "@tenantCacheKeySupport.scope('fine', #fineId)", unless = "#result == null")
     public FineRecord findById(Long fineId) {
         requirePositive(fineId, "Fine ID");
+        if (databaseOnlyForTenantIsolation()) {
+            return findFineByIdFromDatabase(fineId);
+        }
         return fineRecordSearchRepository.findById(fineId)
                 .map(FineRecordDocument::toEntity)
                 .orElseGet(() -> {
-                    FineRecord entity = fineRecordMapper.selectById(fineId);
+                    FineRecord entity = findFineByIdFromDatabase(fineId);
                     if (entity != null) {
                         fineRecordSearchRepository.save(FineRecordDocument.fromEntity(entity));
                     }
@@ -154,6 +182,9 @@ public class FineRecordService {
 
     @Transactional(readOnly = true)
     public List<FineRecord> findAll() {
+        if (databaseOnlyForTenantIsolation()) {
+            return loadAllFromDatabase();
+        }
         List<FineRecord> fromIndex = StreamSupport.stream(fineRecordSearchRepository.findAll().spliterator(), false)
                 .map(FineRecordDocument::toEntity)
                 .collect(Collectors.toList());
@@ -164,7 +195,7 @@ public class FineRecordService {
     }
 
     @Transactional(readOnly = true)
-    @Cacheable(cacheNames = CACHE_NAME, key = "'page:' + #page + ':' + #size", unless = "#result == null || #result.isEmpty()")
+    @Cacheable(cacheNames = CACHE_NAME, key = "@tenantCacheKeySupport.scope('page', #page, #size)", unless = "#result == null || #result.isEmpty()")
     public List<FineRecord> listFines(int page, int size) {
         validatePagination(page, size);
         QueryWrapper<FineRecord> wrapper = new QueryWrapper<>();
@@ -174,7 +205,7 @@ public class FineRecordService {
         return fetchFromDatabase(wrapper, page, size);
     }
 
-    @Cacheable(cacheNames = CACHE_NAME, key = "'offense:' + #offenseId + ':' + #page + ':' + #size", unless = "#result == null || #result.isEmpty()")
+    @Cacheable(cacheNames = CACHE_NAME, key = "@tenantCacheKeySupport.scope('offense', #offenseId, #page, #size)", unless = "#result == null || #result.isEmpty()")
     public List<FineRecord> findByOffenseId(Long offenseId, int page, int size) {
         requirePositive(offenseId, "Offense ID");
         validatePagination(page, size);
@@ -209,7 +240,7 @@ public class FineRecordService {
             return List.of();
         }
         QueryWrapper<FineRecord> wrapper = new QueryWrapper<>();
-        wrapper.select("fine_id")
+        tenantScope(wrapper).select("fine_id")
                 .in("offense_id", normalizedIds)
                 .orderByDesc("updated_at")
                 .orderByDesc("fine_date");
@@ -221,7 +252,7 @@ public class FineRecordService {
                 .collect(Collectors.toList());
     }
 
-    @Cacheable(cacheNames = CACHE_NAME, key = "'handlerPrefix:' + #handler + ':' + #page + ':' + #size", unless = "#result == null || #result.isEmpty()")
+    @Cacheable(cacheNames = CACHE_NAME, key = "@tenantCacheKeySupport.scope('handlerPrefix', #handler, #page, #size)", unless = "#result == null || #result.isEmpty()")
     public List<FineRecord> searchByHandlerPrefix(String handler, int page, int size) {
         if (isBlank(handler)) {
             return List.of();
@@ -237,7 +268,7 @@ public class FineRecordService {
         return fetchFromDatabase(wrapper, page, size);
     }
 
-    @Cacheable(cacheNames = CACHE_NAME, key = "'handlerFuzzy:' + #handler + ':' + #page + ':' + #size", unless = "#result == null || #result.isEmpty()")
+    @Cacheable(cacheNames = CACHE_NAME, key = "@tenantCacheKeySupport.scope('handlerFuzzy', #handler, #page, #size)", unless = "#result == null || #result.isEmpty()")
     public List<FineRecord> searchByHandlerFuzzy(String handler, int page, int size) {
         if (isBlank(handler)) {
             return List.of();
@@ -253,7 +284,7 @@ public class FineRecordService {
         return fetchFromDatabase(wrapper, page, size);
     }
 
-    @Cacheable(cacheNames = CACHE_NAME, key = "'status:' + #paymentStatus + ':' + #page + ':' + #size", unless = "#result == null || #result.isEmpty()")
+    @Cacheable(cacheNames = CACHE_NAME, key = "@tenantCacheKeySupport.scope('status', #paymentStatus, #page, #size)", unless = "#result == null || #result.isEmpty()")
     public List<FineRecord> searchByPaymentStatus(String paymentStatus, int page, int size) {
         if (isBlank(paymentStatus)) {
             return List.of();
@@ -269,7 +300,7 @@ public class FineRecordService {
         return fetchFromDatabase(wrapper, page, size);
     }
 
-    @Cacheable(cacheNames = CACHE_NAME, key = "'dateRange:' + #startDate + ':' + #endDate + ':' + #page + ':' + #size", unless = "#result == null || #result.isEmpty()")
+    @Cacheable(cacheNames = CACHE_NAME, key = "@tenantCacheKeySupport.scope('dateRange', #startDate, #endDate, #page, #size)", unless = "#result == null || #result.isEmpty()")
     public List<FineRecord> searchByFineDateRange(String startDate, String endDate, int page, int size) {
         validatePagination(page, size);
         LocalDate start = parseDate(startDate, "startDate");
@@ -383,7 +414,7 @@ public class FineRecordService {
     }
 
     private void syncToIndexAfterCommit(FineRecord fineRecord) {
-        if (fineRecord == null) {
+        if (databaseOnlyForTenantIsolation() || fineRecord == null) {
             return;
         }
         FineRecordDocument doc = FineRecordDocument.fromEntity(fineRecord);
@@ -394,7 +425,7 @@ public class FineRecordService {
     }
 
     private void syncBatchToIndexAfterCommit(List<FineRecord> records) {
-        if (records == null || records.isEmpty()) {
+        if (databaseOnlyForTenantIsolation() || records == null || records.isEmpty()) {
             return;
         }
         List<FineRecordDocument> documents = records.stream()
@@ -409,6 +440,9 @@ public class FineRecordService {
     }
 
     private List<FineRecord> mapHits(org.springframework.data.elasticsearch.core.SearchHits<FineRecordDocument> hits) {
+        if (databaseOnlyForTenantIsolation()) {
+            return List.of();
+        }
         if (hits == null || !hits.hasSearchHits()) {
             return List.of();
         }
@@ -419,6 +453,7 @@ public class FineRecordService {
     }
 
     private List<FineRecord> fetchFromDatabase(QueryWrapper<FineRecord> wrapper, int page, int size) {
+        tenantScope(wrapper);
         Page<FineRecord> mpPage = new Page<>(Math.max(page, 1), Math.max(size, 1));
         fineRecordMapper.selectPage(mpPage, wrapper);
         List<FineRecord> records = mpPage.getRecords();
@@ -431,7 +466,7 @@ public class FineRecordService {
         long currentPage = 1L;
         while (true) {
             QueryWrapper<FineRecord> wrapper = new QueryWrapper<>();
-            wrapper.orderByAsc("fine_id");
+            tenantScope(wrapper).orderByAsc("fine_id");
             Page<FineRecord> mpPage = new Page<>(currentPage, FULL_LOAD_BATCH_SIZE);
             fineRecordMapper.selectPage(mpPage, wrapper);
             List<FineRecord> records = mpPage.getRecords();
@@ -553,7 +588,7 @@ public class FineRecordService {
 
     private void ensureSingleFinePerOffense(FineRecord fineRecord) {
         QueryWrapper<FineRecord> wrapper = new QueryWrapper<>();
-        wrapper.eq("offense_id", fineRecord.getOffenseId());
+        tenantScope(wrapper).eq("offense_id", fineRecord.getOffenseId());
         if (fineRecord.getFineId() != null) {
             wrapper.ne("fine_id", fineRecord.getFineId());
         }
@@ -695,5 +730,40 @@ public class FineRecordService {
             return;
         }
         task.run();
+    }
+
+    private boolean databaseOnlyForTenantIsolation() {
+        return tenantAwareSupport.isIsolationEnabled();
+    }
+
+    private <T> QueryWrapper<T> tenantScope(QueryWrapper<T> wrapper) {
+        return tenantAwareSupport.applyTenantScope(wrapper);
+    }
+
+    private FineRecord findFineByIdFromDatabase(Long fineId) {
+        if (fineId == null) {
+            return null;
+        }
+        QueryWrapper<FineRecord> wrapper = new QueryWrapper<>();
+        tenantScope(wrapper).eq("fine_id", fineId).last("limit 1");
+        return fineRecordMapper.selectOne(wrapper);
+    }
+
+    private int updateFineByIdScoped(FineRecord fineRecord) {
+        if (fineRecord == null || fineRecord.getFineId() == null) {
+            return 0;
+        }
+        if (!databaseOnlyForTenantIsolation()) {
+            return fineRecordMapper.updateById(fineRecord);
+        }
+        QueryWrapper<FineRecord> wrapper = new QueryWrapper<>();
+        tenantScope(wrapper).eq("fine_id", fineRecord.getFineId());
+        return fineRecordMapper.update(fineRecord, wrapper);
+    }
+
+    private static TenantAwareSupport defaultTenantAwareSupport() {
+        ProductGovernanceProperties productGovernanceProperties = new ProductGovernanceProperties();
+        productGovernanceProperties.setTenantIsolationEnabled(false);
+        return new TenantAwareSupport(productGovernanceProperties, new TenantIsolationProperties());
     }
 }

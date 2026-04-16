@@ -42,6 +42,7 @@ class AppTranslations extends Translations {
     'common.success': 'Success',
     'common.failed': 'Failed',
     'common.save': 'Save',
+    'common.create': 'Create',
     'common.submit': 'Submit',
     'common.edit': 'Edit',
     'common.feedback': 'Feedback',
@@ -292,6 +293,66 @@ class AppTranslations extends Translations {
     'settings.theme.basicDark': 'Basic Dark',
     'settings.notifications': 'Notifications',
     'settings.notificationsEnabled': 'Notifications enabled',
+    'settings.controlTitle': 'Product control surface',
+    'settings.controlBody':
+        'Operate product configuration from one place, monitor editable scope, and keep sensitive values out of casual views.',
+    'settings.workspaceTitle': 'Workspace preferences',
+    'settings.workspaceBody':
+        'Keep personal console preferences separate from shared system configuration so operating habits do not leak into product governance.',
+    'settings.registryTitle': 'Configuration registry',
+    'settings.registryBody':
+        'Search, filter, and update real system settings with category, type, editability, and encryption state visible at a glance.',
+    'settings.searchHint':
+        'Search by key, category, type, description, remarks, or value',
+    'settings.filter.all': 'All categories',
+    'settings.metric.total': 'Total settings',
+    'settings.metric.editable': 'Editable',
+    'settings.metric.encrypted': 'Encrypted',
+    'settings.metric.categories': 'Categories',
+    'settings.metric.lastSync': 'Last sync',
+    'settings.metric.neverSynced': 'Not synced yet',
+    'settings.preference.notificationsBody':
+        'Keep non-critical console reminders on this device only.',
+    'settings.preference.themeBody': 'Current display theme: @value',
+    'settings.preference.themeChange': 'Change theme',
+    'settings.preference.localSaveBody':
+        'Persist local console preferences without touching shared product settings.',
+    'settings.preference.logoutBody':
+        'Sign out of the current workspace and clear the local token.',
+    'settings.action.newSetting': 'New setting',
+    'settings.action.editSetting': 'Edit',
+    'settings.action.saveLocal': 'Save local',
+    'settings.action.reload': 'Reload',
+    'settings.message.localSaved': 'Local preferences saved',
+    'settings.message.loadFailed': 'Failed to load settings: @error',
+    'settings.message.createSuccess': 'Setting created',
+    'settings.message.updateSuccess': 'Setting updated',
+    'settings.message.notEditable':
+        'This setting is marked read-only and cannot be edited here.',
+    'settings.state.emptyTitle': 'No settings match the current filter',
+    'settings.state.emptyBody':
+        'Try another search term or category, or create a new setting entry.',
+    'settings.form.createTitle': 'Create setting',
+    'settings.form.editTitle': 'Edit setting',
+    'settings.form.key': 'Setting key',
+    'settings.form.value': 'Setting value',
+    'settings.form.type': 'Setting type',
+    'settings.form.category': 'Category',
+    'settings.form.description': 'Description',
+    'settings.form.remarks': 'Remarks',
+    'settings.form.sortOrder': 'Sort order',
+    'settings.form.isEditable': 'Editable in console',
+    'settings.form.isEncrypted': 'Encrypted value',
+    'settings.form.keyRequired': 'Setting key is required',
+    'settings.form.valueRequired': 'Setting value is required',
+    'settings.value.none': 'Not provided',
+    'settings.value.readOnly': 'Read-only',
+    'settings.value.editable': 'Editable',
+    'settings.value.encrypted': 'Encrypted',
+    'settings.value.plaintext': 'Plain text',
+    'settings.value.notConfigured': 'Not configured',
+    'settings.label.updatedBy': 'Updated by: @value',
+    'settings.label.updatedAt': 'Updated at: @value',
     'shared.profileTile.role.userWelcome':
         'Welcome to the driver workspace of the traffic violation processing system',
     'shared.profileTile.role.adminWelcome':
@@ -460,6 +521,31 @@ class AppTranslations extends Translations {
     'userAdmin.empty.default': 'No user records available.',
     'userAdmin.empty.filtered': 'No users match the current filters.',
     'userAdmin.empty.roles': 'This user has no role bindings yet.',
+    'userAdmin.workspace.eyebrow': 'User control center',
+    'userAdmin.workspace.title': 'User management workspace',
+    'userAdmin.workspace.subtitle':
+        'Search, compare status, and open account actions from one tighter admin surface.',
+    'userAdmin.workspace.signal.query': 'Query: @value',
+    'userAdmin.workspace.signal.queryIdle': 'Query scope: all loaded users',
+    'userAdmin.workspace.signal.mode': 'Search mode: @value',
+    'userAdmin.workspace.metric.loaded': 'Loaded',
+    'userAdmin.workspace.metric.visible': 'Visible',
+    'userAdmin.workspace.metric.active': 'Active',
+    'userAdmin.workspace.metric.inactive': 'Inactive',
+    'userAdmin.workspace.metric.department': 'Departments',
+    'userAdmin.workspace.filterEyebrow': 'Filters',
+    'userAdmin.workspace.filterTitle': 'Search and narrow users',
+    'userAdmin.workspace.filterBody':
+        'Switch search mode, refine the current user set, and refresh the visible list.',
+    'userAdmin.workspace.filterMode': 'Search mode',
+    'userAdmin.workspace.filterReset': 'Reset filters',
+    'userAdmin.workspace.filterRefresh': 'Refresh users',
+    'userAdmin.workspace.listEyebrow': 'Users',
+    'userAdmin.workspace.listTitle': 'User records',
+    'userAdmin.workspace.listBody':
+        'Scan status, owner details, department, and contact data before editing or role changes.',
+    'userAdmin.workspace.emptyTitle': 'No users in the current view',
+    'userAdmin.workspace.errorTitle': 'Could not load user records',
     'userAdmin.search.username': 'Search username',
     'userAdmin.search.status': 'Search status',
     'userAdmin.search.department': 'Search department',
@@ -520,11 +606,39 @@ class AppTranslations extends Translations {
     'userAdmin.status.inactive': 'Inactive',
     'userAdmin.value.unknownUser': 'Unknown user',
     'business.menu.title': 'Business menu',
+    'business.menu.signal': 'Business workspace',
+    'business.menu.subtitle':
+        'Review records, pay fines, submit appeals, and track progress from one focused workspace.',
+    'business.menu.ready': 'Ready',
+    'business.menu.statusReview': 'Needs review',
+    'business.menu.sectionTitle': 'Available actions',
+    'business.menu.sectionBody':
+        'Open the task that matches your current self-service step.',
+    'business.menu.quickStatus': 'Current status',
+    'business.menu.quickStatusBody':
+        'Use this page as the primary entry for routine self-service processing.',
+    'business.menu.tipTitle': 'Today',
+    'business.menu.tip1':
+        'Check offense details before you pay, appeal, or submit follow-up steps.',
+    'business.menu.tip2':
+        'Use progress tracking after each submission to confirm the latest state.',
+    'business.menu.tip3':
+        'Keep vehicle information current to avoid routing and ownership issues.',
     'business.menu.offenseDetail': 'Offense details',
+    'business.menu.offenseDetail.subtitle':
+        'Review current records, evidence, and decision details.',
     'business.menu.finePayment': 'Fine payment',
+    'business.menu.finePayment.subtitle':
+        'Pay open penalties and confirm payment status.',
     'business.menu.userAppeal': 'User appeal',
+    'business.menu.userAppeal.subtitle':
+        'Submit a new appeal or review existing requests.',
     'business.menu.onlineProcessingProgress': 'Processing progress',
+    'business.menu.onlineProcessingProgress.subtitle':
+        'Track workflow state, timestamps, and next actions.',
     'business.menu.vehicleManagement': 'Vehicle registration management',
+    'business.menu.vehicleManagement.subtitle':
+        'Maintain registered vehicle details before processing.',
     'loginLog.page.title': 'Login logs',
     'loginLog.error.unauthorized': 'Unauthorized. Please sign in again.',
     'loginLog.error.expired': 'Your login has expired. Please sign in again.',
@@ -616,6 +730,32 @@ class AppTranslations extends Translations {
     'operationLog.error.duplicateRequest': 'Duplicate request: @message',
     'operationLog.error.server': 'Server error: @message',
     'operationLog.error.operationFailed': 'Operation failed: @error',
+    'operationLog.workspace.eyebrow': 'Operation log center',
+    'operationLog.workspace.title': 'Operation activity stream',
+    'operationLog.workspace.subtitle':
+        'Search by actor, result, or date range and inspect recent backend operations from one focused console.',
+    'operationLog.workspace.signal.query': 'Query: @value',
+    'operationLog.workspace.signal.queryIdle':
+        'Query scope: all loaded operation logs',
+    'operationLog.workspace.signal.rangeIdle': 'No date range selected',
+    'operationLog.workspace.metric.loaded': 'Loaded',
+    'operationLog.workspace.metric.visible': 'Visible',
+    'operationLog.workspace.metric.success': 'Successful',
+    'operationLog.workspace.metric.failed': 'Failed',
+    'operationLog.workspace.filterEyebrow': 'Filters',
+    'operationLog.workspace.filterTitle': 'Search and narrow operations',
+    'operationLog.workspace.filterBody':
+        'Switch search mode, apply date range, and refresh the visible stream.',
+    'operationLog.workspace.filterMode': 'Search mode',
+    'operationLog.workspace.filterReset': 'Reset filters',
+    'operationLog.workspace.filterRefresh': 'Refresh logs',
+    'operationLog.workspace.listEyebrow': 'Stream',
+    'operationLog.workspace.listTitle': 'Operation records',
+    'operationLog.workspace.listBody':
+        'Scan result, actor, time, and content to locate the latest backend action quickly.',
+    'operationLog.workspace.emptyTitle':
+        'No operation logs in the current view',
+    'operationLog.workspace.errorTitle': 'Could not load operation logs',
     'operationLog.error.idMissingEdit':
         'Unable to edit because the log ID is missing.',
     'operationLog.error.idMissingDelete':
@@ -698,6 +838,27 @@ class AppTranslations extends Translations {
     'systemLog.error.duplicateRequest': 'Duplicate request: @message',
     'systemLog.error.server': 'Server error: @message',
     'systemLog.error.operationFailed': 'Operation failed: @error',
+    'systemLog.workspace.eyebrow': 'System log center',
+    'systemLog.workspace.title': 'System activity console',
+    'systemLog.workspace.subtitle':
+        'Monitor overview counts, recent logins, and recent operations from one tighter log surface.',
+    'systemLog.workspace.signal.login': 'Recent logins: @count',
+    'systemLog.workspace.signal.operation': 'Recent operations: @count',
+    'systemLog.workspace.signal.refresh':
+        'Pull to refresh or use top bar actions',
+    'systemLog.workspace.metric.overview': 'Overview blocks',
+    'systemLog.workspace.metric.login': 'Login rows',
+    'systemLog.workspace.metric.operation': 'Operation rows',
+    'systemLog.workspace.metric.alert': 'Attention items',
+    'systemLog.workspace.overviewBody':
+        'Use the overview counts to confirm whether ingestion and log volume look normal.',
+    'systemLog.workspace.loginEyebrow': 'Login stream',
+    'systemLog.workspace.loginBody':
+        'Review recent sign-ins first when validating account access or suspicious activity.',
+    'systemLog.workspace.operationEyebrow': 'Operation stream',
+    'systemLog.workspace.operationBody':
+        'Use recent operation logs to inspect changes, outcomes, and actor traces.',
+    'systemLog.workspace.errorTitle': 'Could not load system logs',
     'systemLog.detail.loginResult': 'Result: @value',
     'systemLog.detail.loginIp': 'IP: @value',
     'systemLog.detail.loginLocation': 'Location: @value',
@@ -962,6 +1123,34 @@ class AppTranslations extends Translations {
     'offense.error.duplicateRequest': 'Duplicate request: @message',
     'offense.error.server': 'Server error: @message',
     'offense.error.operationFailed': 'Operation failed: @error',
+    'offense.workspace.eyebrow': 'Violation workspace',
+    'offense.workspace.live': 'Live feed',
+    'offense.workspace.filtered': 'Filtered view',
+    'offense.workspace.title': 'Records for @name',
+    'offense.workspace.subtitle':
+        'Search, narrow, and open the exact record that needs action.',
+    'offense.workspace.searchIdle': 'Search scope: all loaded records',
+    'offense.workspace.searchActive': 'Search keyword: @value',
+    'offense.workspace.rangeIdle': 'No time range selected',
+    'offense.workspace.metric.loaded': 'Loaded',
+    'offense.workspace.metric.visible': 'Visible',
+    'offense.workspace.metric.pending': 'Needs action',
+    'offense.workspace.metric.points': 'Points in view',
+    'offense.workspace.metric.fine': 'Fines in view',
+    'offense.workspace.filterEyebrow': 'Filters',
+    'offense.workspace.filterTitle': 'Search and narrow records',
+    'offense.workspace.filterBody':
+        'Use violation type, code, and date range to reduce the current record set.',
+    'offense.workspace.filterReset': 'Reset filters',
+    'offense.workspace.filterRefresh': 'Refresh records',
+    'offense.workspace.listEyebrow': 'Records',
+    'offense.workspace.listTitle': 'Violation list',
+    'offense.workspace.listBody':
+        'Open a row to inspect status, timing, amount, and location.',
+    'offense.workspace.emptyTitle': 'No records in the current view',
+    'offense.workspace.emptyBody':
+        'Change the keyword or date range, or refresh the records.',
+    'offense.workspace.errorTitle': 'Could not load records',
     'offense.search.hint': 'Search violation type or code',
     'offense.filter.rangeLabel': 'Time range: @start to @end',
     'offense.filter.select': 'Select a time range',
@@ -1025,6 +1214,33 @@ class AppTranslations extends Translations {
         'No violation records matched the current filters.',
     'offenseAdmin.error.notFound': 'No violation records were found.',
     'offenseAdmin.empty.default': 'There are no violation records right now.',
+    'offenseAdmin.workspace.eyebrow': 'Violation control center',
+    'offenseAdmin.workspace.title': 'Violation management workspace',
+    'offenseAdmin.workspace.subtitle':
+        'Search by driver, plate, or violation type and review current records from one focused admin surface.',
+    'offenseAdmin.workspace.signal.query': 'Query: @value',
+    'offenseAdmin.workspace.signal.queryIdle':
+        'Query scope: all loaded violation records',
+    'offenseAdmin.workspace.signal.rangeIdle': 'No date range selected',
+    'offenseAdmin.workspace.metric.loaded': 'Loaded',
+    'offenseAdmin.workspace.metric.visible': 'Visible',
+    'offenseAdmin.workspace.metric.pending': 'Pending',
+    'offenseAdmin.workspace.metric.points': 'Points in view',
+    'offenseAdmin.workspace.metric.fine': 'Fines in view',
+    'offenseAdmin.workspace.filterEyebrow': 'Filters',
+    'offenseAdmin.workspace.filterTitle': 'Search and narrow violations',
+    'offenseAdmin.workspace.filterBody':
+        'Switch search mode, apply date range, and refresh the current violation stream.',
+    'offenseAdmin.workspace.filterMode': 'Search mode',
+    'offenseAdmin.workspace.filterReset': 'Reset filters',
+    'offenseAdmin.workspace.filterRefresh': 'Refresh records',
+    'offenseAdmin.workspace.listEyebrow': 'Records',
+    'offenseAdmin.workspace.listTitle': 'Violation records',
+    'offenseAdmin.workspace.listBody':
+        'Scan status, owner, timing, points, and location before opening details or deleting a record.',
+    'offenseAdmin.workspace.emptyTitle':
+        'No violation records in the current view',
+    'offenseAdmin.workspace.errorTitle': 'Could not load violation records',
     'offenseAdmin.error.loadFailed': 'Failed to load violation records: @error',
     'offenseAdmin.error.suggestionFailed': 'Failed to load suggestions: @error',
     'offenseAdmin.error.deleteFailed': 'Failed to delete violation: @error',
@@ -1756,6 +1972,31 @@ class AppTranslations extends Translations {
     'vehicle.filter.endDate': 'End date',
     'vehicle.filter.clearDateRange': 'Clear date range',
     'vehicle.page.title': 'Vehicle management',
+    'vehicle.workspace.eyebrow': 'Vehicle workspace',
+    'vehicle.workspace.title': 'Vehicle operations and registration overview',
+    'vehicle.workspace.subtitle':
+        'Monitor loaded vehicles, active availability, and registration coverage while keeping search and cleanup actions in one place.',
+    'vehicle.workspace.signal.query': 'Search active: @value',
+    'vehicle.workspace.signal.queryIdle': 'Search is currently idle',
+    'vehicle.workspace.signal.rangeIdle': 'No registration date range selected',
+    'vehicle.workspace.metric.loaded': 'Loaded',
+    'vehicle.workspace.metric.visible': 'Visible',
+    'vehicle.workspace.metric.active': 'Active',
+    'vehicle.workspace.metric.inactive': 'Inactive',
+    'vehicle.workspace.metric.type': 'Types',
+    'vehicle.workspace.filterEyebrow': 'Filters',
+    'vehicle.workspace.filterTitle': 'Refine the vehicle workspace',
+    'vehicle.workspace.filterBody':
+        'Switch search mode, review autocomplete results, and narrow the list by first registration date range.',
+    'vehicle.workspace.filterMode': 'Search mode',
+    'vehicle.workspace.filterReset': 'Clear filters',
+    'vehicle.workspace.filterRefresh': 'Refresh list',
+    'vehicle.workspace.listEyebrow': 'Records',
+    'vehicle.workspace.listTitle': 'Vehicle records',
+    'vehicle.workspace.listBody':
+        'Review current status, ownership details, and registration signals before opening a detailed record.',
+    'vehicle.workspace.emptyTitle': 'No vehicles available',
+    'vehicle.workspace.errorTitle': 'Vehicle workspace unavailable',
     'vehicle.card.plate': 'Plate number: @value',
     'vehicle.card.type': 'Type: @value',
     'vehicle.card.owner': 'Owner: @value',
@@ -2125,6 +2366,7 @@ class AppTranslations extends Translations {
     'common.success': '\u6210\u529f',
     'common.failed': '\u5931\u8d25',
     'common.save': '\u4fdd\u5b58',
+    'common.create': '\u521b\u5efa',
     'common.submit': '\u63d0\u4ea4',
     'common.edit': '\u7f16\u8f91',
     'common.feedback': '\u53cd\u9988',
@@ -2408,6 +2650,69 @@ class AppTranslations extends Translations {
     'settings.theme.basicDark': '\u57fa\u7840\u6df1\u8272',
     'settings.notifications': '\u901a\u77e5',
     'settings.notificationsEnabled': '\u542f\u7528\u901a\u77e5',
+    'settings.controlTitle': '\u4ea7\u54c1\u63a7\u5236\u53f0',
+    'settings.controlBody':
+        '\u5728\u540c\u4e00\u4e2a\u5de5\u4f5c\u9762\u4e2d\u7ba1\u7406\u4ea7\u54c1\u914d\u7f6e\uff0c\u76f4\u89c2\u67e5\u770b\u53ef\u7f16\u8f91\u8303\u56f4\uff0c\u5e76\u907f\u514d\u5728\u5217\u8868\u4e2d\u66b4\u9732\u654f\u611f\u503c\u3002',
+    'settings.workspaceTitle': '\u672c\u5730\u63a7\u5236\u53f0\u504f\u597d',
+    'settings.workspaceBody':
+        '\u5c06\u4e2a\u4eba\u63a7\u5236\u53f0\u504f\u597d\u4e0e\u5171\u4eab\u7cfb\u7edf\u914d\u7f6e\u5206\u79bb\uff0c\u907f\u514d\u4e2a\u4eba\u64cd\u4f5c\u4e60\u60ef\u5f71\u54cd\u4ea7\u54c1\u6cbb\u7406\u3002',
+    'settings.registryTitle': '\u914d\u7f6e\u6ce8\u518c\u8868',
+    'settings.registryBody':
+        '\u6309\u952e\u3001\u5206\u7c7b\u3001\u7c7b\u578b\u3001\u63cf\u8ff0\u548c\u72b6\u6001\u7b5b\u9009\u771f\u5b9e\u7cfb\u7edf\u914d\u7f6e\uff0c\u5e76\u76f4\u63a5\u7ef4\u62a4\u3002',
+    'settings.searchHint':
+        '\u6309\u952e\u3001\u5206\u7c7b\u3001\u7c7b\u578b\u3001\u63cf\u8ff0\u3001\u5907\u6ce8\u6216\u503c\u8fdb\u884c\u641c\u7d22',
+    'settings.filter.all': '\u5168\u90e8\u5206\u7c7b',
+    'settings.metric.total': '\u603b\u914d\u7f6e\u6570',
+    'settings.metric.editable': '\u53ef\u7f16\u8f91',
+    'settings.metric.encrypted': '\u5df2\u52a0\u5bc6',
+    'settings.metric.categories': '\u5206\u7c7b\u6570',
+    'settings.metric.lastSync': '\u6700\u540e\u540c\u6b65',
+    'settings.metric.neverSynced': '\u5c1a\u672a\u540c\u6b65',
+    'settings.preference.notificationsBody':
+        '\u4ec5\u5728\u672c\u8bbe\u5907\u4fdd\u7559\u63a7\u5236\u53f0\u63d0\u9192\uff0c\u4e0d\u5199\u5165\u5171\u4eab\u4ea7\u54c1\u914d\u7f6e\u3002',
+    'settings.preference.themeBody':
+        '\u5f53\u524d\u663e\u793a\u4e3b\u9898\uff1a@value',
+    'settings.preference.themeChange': '\u5207\u6362\u4e3b\u9898',
+    'settings.preference.localSaveBody':
+        '\u4fdd\u5b58\u672c\u5730\u63a7\u5236\u53f0\u504f\u597d\uff0c\u4e0d\u6539\u52a8\u5171\u4eab\u4ea7\u54c1\u914d\u7f6e\u3002',
+    'settings.preference.logoutBody':
+        '\u9000\u51fa\u5f53\u524d\u5de5\u4f5c\u533a\u5e76\u6e05\u7406\u672c\u5730\u4ee4\u724c\u3002',
+    'settings.action.newSetting': '\u65b0\u5efa\u914d\u7f6e',
+    'settings.action.editSetting': '\u7f16\u8f91',
+    'settings.action.saveLocal': '\u4fdd\u5b58\u672c\u5730',
+    'settings.action.reload': '\u91cd\u65b0\u52a0\u8f7d',
+    'settings.message.localSaved': '\u672c\u5730\u504f\u597d\u5df2\u4fdd\u5b58',
+    'settings.message.loadFailed':
+        '\u52a0\u8f7d\u914d\u7f6e\u5931\u8d25\uff1a@error',
+    'settings.message.createSuccess': '\u914d\u7f6e\u5df2\u521b\u5efa',
+    'settings.message.updateSuccess': '\u914d\u7f6e\u5df2\u66f4\u65b0',
+    'settings.message.notEditable':
+        '\u8be5\u914d\u7f6e\u5df2\u6807\u8bb0\u4e3a\u53ea\u8bfb\uff0c\u65e0\u6cd5\u5728\u6b64\u9875\u7f16\u8f91\u3002',
+    'settings.state.emptyTitle':
+        '\u5f53\u524d\u7b5b\u9009\u6761\u4ef6\u4e0b\u6682\u65e0\u914d\u7f6e',
+    'settings.state.emptyBody':
+        '\u8bf7\u5c1d\u8bd5\u66f4\u6362\u641c\u7d22\u8bcd\u6216\u5206\u7c7b\uff0c\u4e5f\u53ef\u4ee5\u65b0\u5efa\u4e00\u6761\u914d\u7f6e\u3002',
+    'settings.form.createTitle': '\u65b0\u5efa\u914d\u7f6e',
+    'settings.form.editTitle': '\u7f16\u8f91\u914d\u7f6e',
+    'settings.form.key': '\u914d\u7f6e\u952e',
+    'settings.form.value': '\u914d\u7f6e\u503c',
+    'settings.form.type': '\u914d\u7f6e\u7c7b\u578b',
+    'settings.form.category': '\u5206\u7c7b',
+    'settings.form.description': '\u63cf\u8ff0',
+    'settings.form.remarks': '\u5907\u6ce8',
+    'settings.form.sortOrder': '\u6392\u5e8f',
+    'settings.form.isEditable': '\u63a7\u5236\u53f0\u53ef\u7f16\u8f91',
+    'settings.form.isEncrypted': '\u503c\u5df2\u52a0\u5bc6',
+    'settings.form.keyRequired': '\u8bf7\u586b\u5199\u914d\u7f6e\u952e',
+    'settings.form.valueRequired': '\u8bf7\u586b\u5199\u914d\u7f6e\u503c',
+    'settings.value.none': '\u672a\u586b\u5199',
+    'settings.value.readOnly': '\u53ea\u8bfb',
+    'settings.value.editable': '\u53ef\u7f16\u8f91',
+    'settings.value.encrypted': '\u5df2\u52a0\u5bc6',
+    'settings.value.plaintext': '\u660e\u6587',
+    'settings.value.notConfigured': '\u672a\u914d\u7f6e',
+    'settings.label.updatedBy': '\u66f4\u65b0\u4eba\uff1a@value',
+    'settings.label.updatedAt': '\u66f4\u65b0\u65f6\u95f4\uff1a@value',
     'shared.profileTile.role.userWelcome':
         '\u6b22\u8fce\u4f7f\u7528\u4ea4\u901a\u8fdd\u6cd5\u884c\u4e3a\u5904\u7406\u7ba1\u7406\u7cfb\u7edf\u9a7e\u9a76\u5458\u7aef',
     'shared.profileTile.role.adminWelcome':
@@ -2576,6 +2881,28 @@ class AppTranslations extends Translations {
     'userAdmin.empty.default': '当前暂无用户记录。',
     'userAdmin.empty.filtered': '没有匹配当前筛选条件的用户。',
     'userAdmin.empty.roles': '该用户当前还没有角色绑定。',
+    'userAdmin.workspace.eyebrow': '用户控制中心',
+    'userAdmin.workspace.title': '用户管理工作台',
+    'userAdmin.workspace.subtitle': '在一个更集中的管理界面中搜索、比对状态，并快速进入账号操作。',
+    'userAdmin.workspace.signal.query': '搜索：@value',
+    'userAdmin.workspace.signal.queryIdle': '搜索范围：所有已加载用户',
+    'userAdmin.workspace.signal.mode': '搜索模式：@value',
+    'userAdmin.workspace.metric.loaded': '已加载',
+    'userAdmin.workspace.metric.visible': '当前可见',
+    'userAdmin.workspace.metric.active': '启用',
+    'userAdmin.workspace.metric.inactive': '停用',
+    'userAdmin.workspace.metric.department': '部门数',
+    'userAdmin.workspace.filterEyebrow': '筛选',
+    'userAdmin.workspace.filterTitle': '搜索与缩小用户范围',
+    'userAdmin.workspace.filterBody': '切换搜索模式，收敛当前用户集，并刷新当前列表。',
+    'userAdmin.workspace.filterMode': '搜索模式',
+    'userAdmin.workspace.filterReset': '重置筛选',
+    'userAdmin.workspace.filterRefresh': '刷新用户',
+    'userAdmin.workspace.listEyebrow': '用户',
+    'userAdmin.workspace.listTitle': '用户记录',
+    'userAdmin.workspace.listBody': '先查看状态、负责人、部门和联系方式，再决定编辑或角色调整。',
+    'userAdmin.workspace.emptyTitle': '当前视图没有用户',
+    'userAdmin.workspace.errorTitle': '用户记录加载失败',
     'userAdmin.search.username': '搜索账号',
     'userAdmin.search.status': '搜索状态',
     'userAdmin.search.department': '搜索部门',
@@ -2629,11 +2956,39 @@ class AppTranslations extends Translations {
     'userAdmin.status.inactive': '禁用',
     'userAdmin.value.unknownUser': '未知用户',
     'business.menu.title': '\u4e1a\u52a1\u529e\u7406\u83dc\u5355',
+    'business.menu.signal': '\u4e1a\u52a1\u5de5\u4f5c\u53f0',
+    'business.menu.subtitle':
+        '\u5728\u4e00\u4e2a\u96c6\u4e2d\u7684\u5de5\u4f5c\u53f0\u4e2d\u67e5\u770b\u8fdd\u6cd5\u8bb0\u5f55\u3001\u7f34\u7eb3\u7f5a\u6b3e\u3001\u63d0\u4ea4\u7533\u8bc9\u5e76\u8ddf\u8fdb\u529e\u7406\u8fdb\u5ea6\u3002',
+    'business.menu.ready': '\u5c31\u7eea',
+    'business.menu.statusReview': '\u5f85\u68c0\u67e5',
+    'business.menu.sectionTitle': '\u53ef\u7528\u64cd\u4f5c',
+    'business.menu.sectionBody':
+        '\u6309\u7167\u5f53\u524d\u81ea\u52a9\u529e\u7406\u9636\u6bb5\u9009\u62e9\u5bf9\u5e94\u4efb\u52a1\u3002',
+    'business.menu.quickStatus': '\u5f53\u524d\u72b6\u6001',
+    'business.menu.quickStatusBody':
+        '\u5c06\u6b64\u9875\u4f5c\u4e3a\u65e5\u5e38\u81ea\u52a9\u4e1a\u52a1\u529e\u7406\u7684\u4e3b\u5165\u53e3\u3002',
+    'business.menu.tipTitle': '\u4eca\u65e5\u63d0\u793a',
+    'business.menu.tip1':
+        '\u5728\u7f34\u6b3e\u3001\u7533\u8bc9\u6216\u63d0\u4ea4\u540e\u7eed\u6b65\u9aa4\u524d\uff0c\u5148\u6838\u5bf9\u8fdd\u6cd5\u8be6\u60c5\u3002',
+    'business.menu.tip2':
+        '\u6bcf\u6b21\u63d0\u4ea4\u540e\uff0c\u90fd\u53ef\u5728\u8fdb\u5ea6\u9875\u786e\u8ba4\u6700\u65b0\u72b6\u6001\u3002',
+    'business.menu.tip3':
+        '\u4fdd\u6301\u8f66\u8f86\u4fe1\u606f\u6700\u65b0\uff0c\u53ef\u51cf\u5c11\u529e\u7406\u8def\u7531\u548c\u5f52\u5c5e\u95ee\u9898\u3002',
     'business.menu.offenseDetail': '\u8fdd\u6cd5\u8be6\u60c5',
+    'business.menu.offenseDetail.subtitle':
+        '\u67e5\u770b\u5f53\u524d\u8bb0\u5f55\u3001\u8bc1\u636e\u548c\u5904\u7f5a\u7ed3\u8bba\u3002',
     'business.menu.finePayment': '\u7f5a\u6b3e\u7f34\u7eb3',
+    'business.menu.finePayment.subtitle':
+        '\u7f34\u7eb3\u672a\u5b8c\u6210\u7f5a\u6b3e\u5e76\u786e\u8ba4\u7f34\u8d39\u72b6\u6001\u3002',
     'business.menu.userAppeal': '\u7528\u6237\u7533\u8bc9',
+    'business.menu.userAppeal.subtitle':
+        '\u53d1\u8d77\u65b0\u7533\u8bc9\u6216\u67e5\u770b\u5df2\u63d0\u4ea4\u7533\u8bc9\u3002',
     'business.menu.onlineProcessingProgress': '\u529e\u7406\u8fdb\u5ea6',
+    'business.menu.onlineProcessingProgress.subtitle':
+        '\u8ddf\u8e2a\u6d41\u7a0b\u72b6\u6001\u3001\u65f6\u95f4\u8282\u70b9\u548c\u4e0b\u4e00\u6b65\u64cd\u4f5c\u3002',
     'business.menu.vehicleManagement': '\u8f66\u8f86\u767b\u8bb0\u7ba1\u7406',
+    'business.menu.vehicleManagement.subtitle':
+        '\u5728\u529e\u7406\u524d\u7ef4\u62a4\u5df2\u767b\u8bb0\u8f66\u8f86\u4fe1\u606f\u3002',
     'loginLog.page.title': '\u767b\u5f55\u65e5\u5fd7',
     'loginLog.error.unauthorized':
         '\u672a\u6388\u6743\uff0c\u8bf7\u91cd\u65b0\u767b\u5f55',
@@ -2742,6 +3097,35 @@ class AppTranslations extends Translations {
     'operationLog.error.duplicateRequest': '\u91cd\u590d\u8bf7\u6c42: @message',
     'operationLog.error.server': '\u670d\u52a1\u5668\u9519\u8bef: @message',
     'operationLog.error.operationFailed': '\u64cd\u4f5c\u5931\u8d25: @error',
+    'operationLog.workspace.eyebrow': '\u64cd\u4f5c\u65e5\u5fd7\u4e2d\u5fc3',
+    'operationLog.workspace.title': '\u64cd\u4f5c\u6d3b\u52a8\u6d41',
+    'operationLog.workspace.subtitle':
+        '\u6309\u64cd\u4f5c\u4eba\u3001\u7ed3\u679c\u6216\u65f6\u95f4\u8303\u56f4\u641c\u7d22\uff0c\u5728\u4e00\u4e2a\u96c6\u4e2d\u63a7\u5236\u53f0\u4e2d\u67e5\u770b\u8fd1\u671f\u540e\u7aef\u64cd\u4f5c\u3002',
+    'operationLog.workspace.signal.query': '\u641c\u7d22\uff1a@value',
+    'operationLog.workspace.signal.queryIdle':
+        '\u641c\u7d22\u8303\u56f4\uff1a\u6240\u6709\u5df2\u52a0\u8f7d\u64cd\u4f5c\u65e5\u5fd7',
+    'operationLog.workspace.signal.rangeIdle':
+        '\u672a\u9009\u62e9\u65f6\u95f4\u8303\u56f4',
+    'operationLog.workspace.metric.loaded': '\u5df2\u52a0\u8f7d',
+    'operationLog.workspace.metric.visible': '\u5f53\u524d\u53ef\u89c1',
+    'operationLog.workspace.metric.success': '\u6210\u529f',
+    'operationLog.workspace.metric.failed': '\u5931\u8d25',
+    'operationLog.workspace.filterEyebrow': '\u7b5b\u9009',
+    'operationLog.workspace.filterTitle':
+        '\u641c\u7d22\u4e0e\u7f29\u5c0f\u64cd\u4f5c\u8303\u56f4',
+    'operationLog.workspace.filterBody':
+        '\u5207\u6362\u641c\u7d22\u6a21\u5f0f\uff0c\u5e94\u7528\u65f6\u95f4\u8303\u56f4\uff0c\u5e76\u5237\u65b0\u5f53\u524d\u65e5\u5fd7\u6d41\u3002',
+    'operationLog.workspace.filterMode': '\u641c\u7d22\u6a21\u5f0f',
+    'operationLog.workspace.filterReset': '\u91cd\u7f6e\u7b5b\u9009',
+    'operationLog.workspace.filterRefresh': '\u5237\u65b0\u65e5\u5fd7',
+    'operationLog.workspace.listEyebrow': '\u65e5\u5fd7\u6d41',
+    'operationLog.workspace.listTitle': '\u64cd\u4f5c\u8bb0\u5f55',
+    'operationLog.workspace.listBody':
+        '\u901a\u8fc7\u7ed3\u679c\u3001\u64cd\u4f5c\u4eba\u3001\u65f6\u95f4\u548c\u5185\u5bb9\u5feb\u901f\u5b9a\u4f4d\u6700\u65b0\u64cd\u4f5c\u3002',
+    'operationLog.workspace.emptyTitle':
+        '\u5f53\u524d\u89c6\u56fe\u6ca1\u6709\u64cd\u4f5c\u65e5\u5fd7',
+    'operationLog.workspace.errorTitle':
+        '\u64cd\u4f5c\u65e5\u5fd7\u52a0\u8f7d\u5931\u8d25',
     'operationLog.error.idMissingEdit':
         '\u65e0\u6cd5\u7f16\u8f91\uff1a\u65e5\u5fd7 ID \u7f3a\u5931\u3002',
     'operationLog.error.idMissingDelete':
@@ -2841,6 +3225,29 @@ class AppTranslations extends Translations {
     'systemLog.error.duplicateRequest': '\u91cd\u590d\u8bf7\u6c42: @message',
     'systemLog.error.server': '\u670d\u52a1\u5668\u9519\u8bef: @message',
     'systemLog.error.operationFailed': '\u64cd\u4f5c\u5931\u8d25: @error',
+    'systemLog.workspace.eyebrow': '\u7cfb\u7edf\u65e5\u5fd7\u4e2d\u5fc3',
+    'systemLog.workspace.title': '\u7cfb\u7edf\u6d3b\u52a8\u63a7\u5236\u53f0',
+    'systemLog.workspace.subtitle':
+        '\u5728\u4e00\u4e2a\u66f4\u96c6\u4e2d\u7684\u65e5\u5fd7\u89c6\u56fe\u4e2d\u76d1\u63a7\u6982\u89c8\u8ba1\u6570\u3001\u8fd1\u671f\u767b\u5f55\u548c\u8fd1\u671f\u64cd\u4f5c\u3002',
+    'systemLog.workspace.signal.login': '\u8fd1\u671f\u767b\u5f55\uff1a@count',
+    'systemLog.workspace.signal.operation':
+        '\u8fd1\u671f\u64cd\u4f5c\uff1a@count',
+    'systemLog.workspace.signal.refresh':
+        '\u53ef\u4e0b\u62c9\u5237\u65b0\u6216\u4f7f\u7528\u9876\u90e8\u64cd\u4f5c',
+    'systemLog.workspace.metric.overview': '\u6982\u89c8\u5757',
+    'systemLog.workspace.metric.login': '\u767b\u5f55\u8bb0\u5f55',
+    'systemLog.workspace.metric.operation': '\u64cd\u4f5c\u8bb0\u5f55',
+    'systemLog.workspace.metric.alert': '\u9700\u5173\u6ce8',
+    'systemLog.workspace.overviewBody':
+        '\u901a\u8fc7\u6982\u89c8\u8ba1\u6570\u5feb\u901f\u5224\u65ad\u65e5\u5fd7\u63a5\u5165\u548c\u6570\u91cf\u662f\u5426\u6b63\u5e38\u3002',
+    'systemLog.workspace.loginEyebrow': '\u767b\u5f55\u6d41',
+    'systemLog.workspace.loginBody':
+        '\u5728\u6392\u67e5\u8d26\u53f7\u8bbf\u95ee\u6216\u53ef\u7591\u6d3b\u52a8\u65f6\uff0c\u5148\u67e5\u8fd1\u671f\u767b\u5f55\u3002',
+    'systemLog.workspace.operationEyebrow': '\u64cd\u4f5c\u6d41',
+    'systemLog.workspace.operationBody':
+        '\u901a\u8fc7\u8fd1\u671f\u64cd\u4f5c\u65e5\u5fd7\u67e5\u770b\u53d8\u66f4\u3001\u7ed3\u679c\u548c\u64cd\u4f5c\u4eba\u8f68\u8ff9\u3002',
+    'systemLog.workspace.errorTitle':
+        '\u7cfb\u7edf\u65e5\u5fd7\u52a0\u8f7d\u5931\u8d25',
     'systemLog.detail.loginResult': '\u7ed3\u679c\uff1a@value',
     'systemLog.detail.loginIp': 'IP\uff1a@value',
     'systemLog.detail.loginLocation': '\u4f4d\u7f6e\uff1a@value',
@@ -3154,6 +3561,38 @@ class AppTranslations extends Translations {
     'offense.error.duplicateRequest': '\u91cd\u590d\u8bf7\u6c42: @message',
     'offense.error.server': '\u670d\u52a1\u5668\u9519\u8bef: @message',
     'offense.error.operationFailed': '\u64cd\u4f5c\u5931\u8d25: @error',
+    'offense.workspace.eyebrow': '\u8fdd\u7ae0\u5de5\u4f5c\u53f0',
+    'offense.workspace.live': '\u5b9e\u65f6\u5217\u8868',
+    'offense.workspace.filtered': '\u7b5b\u9009\u89c6\u56fe',
+    'offense.workspace.title': '@name \u7684\u8fdd\u7ae0\u8bb0\u5f55',
+    'offense.workspace.subtitle':
+        '\u7528\u641c\u7d22\u3001\u65f6\u95f4\u8303\u56f4\u548c\u8be6\u7ec6\u4fe1\u606f\u5feb\u901f\u5b9a\u4f4d\u9700\u8981\u5904\u7406\u7684\u8bb0\u5f55\u3002',
+    'offense.workspace.searchIdle':
+        '\u641c\u7d22\u8303\u56f4\uff1a\u6240\u6709\u5df2\u52a0\u8f7d\u8bb0\u5f55',
+    'offense.workspace.searchActive':
+        '\u641c\u7d22\u5173\u952e\u8bcd\uff1a@value',
+    'offense.workspace.rangeIdle': '\u672a\u9009\u62e9\u65f6\u95f4\u8303\u56f4',
+    'offense.workspace.metric.loaded': '\u5df2\u52a0\u8f7d',
+    'offense.workspace.metric.visible': '\u5f53\u524d\u53ef\u89c1',
+    'offense.workspace.metric.pending': '\u5f85\u5904\u7406',
+    'offense.workspace.metric.points': '\u5f53\u524d\u6263\u5206',
+    'offense.workspace.metric.fine': '\u5f53\u524d\u7f5a\u6b3e',
+    'offense.workspace.filterEyebrow': '\u7b5b\u9009',
+    'offense.workspace.filterTitle':
+        '\u641c\u7d22\u4e0e\u7f29\u5c0f\u8bb0\u5f55\u8303\u56f4',
+    'offense.workspace.filterBody':
+        '\u901a\u8fc7\u8fdd\u7ae0\u7c7b\u578b\u3001\u4ee3\u7801\u548c\u65f6\u95f4\u8303\u56f4\u5feb\u901f\u5b9a\u4f4d\u8bb0\u5f55\u3002',
+    'offense.workspace.filterReset': '\u91cd\u7f6e\u7b5b\u9009',
+    'offense.workspace.filterRefresh': '\u5237\u65b0\u8bb0\u5f55',
+    'offense.workspace.listEyebrow': '\u8bb0\u5f55',
+    'offense.workspace.listTitle': '\u8fdd\u7ae0\u5217\u8868',
+    'offense.workspace.listBody':
+        '\u6253\u5f00\u5355\u6761\u8bb0\u5f55\u53ef\u67e5\u770b\u72b6\u6001\u3001\u65f6\u95f4\u3001\u7f5a\u6b3e\u4e0e\u5730\u70b9\u3002',
+    'offense.workspace.emptyTitle':
+        '\u5f53\u524d\u89c6\u56fe\u6ca1\u6709\u8bb0\u5f55',
+    'offense.workspace.emptyBody':
+        '\u53ef\u4ee5\u66f4\u6362\u5173\u952e\u8bcd\u3001\u8c03\u6574\u65f6\u95f4\u8303\u56f4\u6216\u5237\u65b0\u8bb0\u5f55\u3002',
+    'offense.workspace.errorTitle': '\u8bb0\u5f55\u52a0\u8f7d\u5931\u8d25',
     'offense.search.hint':
         '\u641c\u7d22\u8fdd\u6cd5\u7c7b\u578b\u6216\u4ee3\u7801',
     'offense.filter.rangeLabel': '\u65f6\u95f4\u8303\u56f4: @start \u81f3 @end',
@@ -3226,6 +3665,37 @@ class AppTranslations extends Translations {
     'offenseAdmin.error.notFound': '\u672a\u627e\u5230\u8fdd\u6cd5\u8bb0\u5f55',
     'offenseAdmin.empty.default':
         '\u5f53\u524d\u6ca1\u6709\u8fdd\u6cd5\u8bb0\u5f55',
+    'offenseAdmin.workspace.eyebrow': '\u8fdd\u7ae0\u63a7\u5236\u4e2d\u5fc3',
+    'offenseAdmin.workspace.title':
+        '\u8fdd\u7ae0\u7ba1\u7406\u5de5\u4f5c\u53f0',
+    'offenseAdmin.workspace.subtitle':
+        '\u6309\u9a7e\u9a76\u4eba\u3001\u8f66\u724c\u6216\u8fdd\u7ae0\u7c7b\u578b\u641c\u7d22\uff0c\u5728\u4e00\u4e2a\u96c6\u4e2d\u7684\u7ba1\u7406\u754c\u9762\u4e2d\u67e5\u770b\u5f53\u524d\u8bb0\u5f55\u3002',
+    'offenseAdmin.workspace.signal.query': '\u641c\u7d22\uff1a@value',
+    'offenseAdmin.workspace.signal.queryIdle':
+        '\u641c\u7d22\u8303\u56f4\uff1a\u6240\u6709\u5df2\u52a0\u8f7d\u8fdd\u7ae0\u8bb0\u5f55',
+    'offenseAdmin.workspace.signal.rangeIdle':
+        '\u672a\u9009\u62e9\u65f6\u95f4\u8303\u56f4',
+    'offenseAdmin.workspace.metric.loaded': '\u5df2\u52a0\u8f7d',
+    'offenseAdmin.workspace.metric.visible': '\u5f53\u524d\u53ef\u89c1',
+    'offenseAdmin.workspace.metric.pending': '\u5f85\u5904\u7406',
+    'offenseAdmin.workspace.metric.points': '\u5f53\u524d\u6263\u5206',
+    'offenseAdmin.workspace.metric.fine': '\u5f53\u524d\u7f5a\u6b3e',
+    'offenseAdmin.workspace.filterEyebrow': '\u7b5b\u9009',
+    'offenseAdmin.workspace.filterTitle':
+        '\u641c\u7d22\u4e0e\u7f29\u5c0f\u8fdd\u7ae0\u8303\u56f4',
+    'offenseAdmin.workspace.filterBody':
+        '\u5207\u6362\u641c\u7d22\u6a21\u5f0f\uff0c\u5e94\u7528\u65f6\u95f4\u8303\u56f4\uff0c\u5e76\u5237\u65b0\u5f53\u524d\u8fdd\u7ae0\u6d41\u3002',
+    'offenseAdmin.workspace.filterMode': '\u641c\u7d22\u6a21\u5f0f',
+    'offenseAdmin.workspace.filterReset': '\u91cd\u7f6e\u7b5b\u9009',
+    'offenseAdmin.workspace.filterRefresh': '\u5237\u65b0\u8bb0\u5f55',
+    'offenseAdmin.workspace.listEyebrow': '\u8bb0\u5f55',
+    'offenseAdmin.workspace.listTitle': '\u8fdd\u7ae0\u8bb0\u5f55',
+    'offenseAdmin.workspace.listBody':
+        '\u5728\u6253\u5f00\u8be6\u60c5\u6216\u5220\u9664\u8bb0\u5f55\u524d\uff0c\u5148\u67e5\u770b\u72b6\u6001\u3001\u5f52\u5c5e\u4eba\u3001\u65f6\u95f4\u3001\u6263\u5206\u548c\u5730\u70b9\u3002',
+    'offenseAdmin.workspace.emptyTitle':
+        '\u5f53\u524d\u89c6\u56fe\u6ca1\u6709\u8fdd\u7ae0\u8bb0\u5f55',
+    'offenseAdmin.workspace.errorTitle':
+        '\u8fdd\u7ae0\u8bb0\u5f55\u52a0\u8f7d\u5931\u8d25',
     'offenseAdmin.error.loadFailed':
         '\u83b7\u53d6\u8fdd\u6cd5\u4fe1\u606f\u5931\u8d25: @error',
     'offenseAdmin.error.suggestionFailed':
@@ -4010,6 +4480,36 @@ class AppTranslations extends Translations {
     'vehicle.filter.endDate': '\u7ed3\u675f\u65e5\u671f',
     'vehicle.filter.clearDateRange': '\u6e05\u9664\u65e5\u671f\u8303\u56f4',
     'vehicle.page.title': '\u8f66\u8f86\u7ba1\u7406',
+    'vehicle.workspace.eyebrow': '\u8f66\u8f86\u5de5\u4f5c\u53f0',
+    'vehicle.workspace.title':
+        '\u8f66\u8f86\u8fd0\u8425\u4e0e\u6ce8\u518c\u603b\u89c8',
+    'vehicle.workspace.subtitle':
+        '\u96c6\u4e2d\u67e5\u770b\u5df2\u52a0\u8f7d\u8f66\u8f86\u3001\u53ef\u7528\u72b6\u6001\u4e0e\u6ce8\u518c\u8986\u76d6\u60c5\u51b5\uff0c\u540c\u65f6\u5728\u540c\u4e00\u5de5\u4f5c\u533a\u5b8c\u6210\u641c\u7d22\u4e0e\u5237\u65b0\u3002',
+    'vehicle.workspace.signal.query': '\u5f53\u524d\u641c\u7d22\uff1a@value',
+    'vehicle.workspace.signal.queryIdle':
+        '\u5f53\u524d\u672a\u542f\u7528\u641c\u7d22',
+    'vehicle.workspace.signal.rangeIdle':
+        '\u5f53\u524d\u672a\u8bbe\u7f6e\u9996\u6b21\u6ce8\u518c\u65e5\u671f\u8303\u56f4',
+    'vehicle.workspace.metric.loaded': '\u5df2\u52a0\u8f7d',
+    'vehicle.workspace.metric.visible': '\u53ef\u89c1',
+    'vehicle.workspace.metric.active': '\u6b63\u5e38',
+    'vehicle.workspace.metric.inactive': '\u975e\u6d3b\u8dc3',
+    'vehicle.workspace.metric.type': '\u7c7b\u578b\u6570',
+    'vehicle.workspace.filterEyebrow': '\u7b5b\u9009',
+    'vehicle.workspace.filterTitle':
+        '\u7ec6\u5316\u8f66\u8f86\u5de5\u4f5c\u533a',
+    'vehicle.workspace.filterBody':
+        '\u5207\u6362\u641c\u7d22\u6a21\u5f0f\uff0c\u5229\u7528\u81ea\u52a8\u8865\u5168\u5feb\u901f\u5b9a\u4f4d\u8f66\u8f86\uff0c\u5e76\u6309\u9996\u6b21\u6ce8\u518c\u65e5\u671f\u8303\u56f4\u7f29\u5c0f\u7ed3\u679c\u3002',
+    'vehicle.workspace.filterMode': '\u641c\u7d22\u6a21\u5f0f',
+    'vehicle.workspace.filterReset': '\u6e05\u7a7a\u7b5b\u9009',
+    'vehicle.workspace.filterRefresh': '\u5237\u65b0\u5217\u8868',
+    'vehicle.workspace.listEyebrow': '\u8bb0\u5f55',
+    'vehicle.workspace.listTitle': '\u8f66\u8f86\u8bb0\u5f55',
+    'vehicle.workspace.listBody':
+        '\u5148\u5feb\u901f\u67e5\u770b\u5f53\u524d\u72b6\u6001\u3001\u8f66\u4e3b\u4fe1\u606f\u548c\u6ce8\u518c\u4fe1\u53f7\uff0c\u518d\u8fdb\u5165\u8be6\u60c5\u64cd\u4f5c\u3002',
+    'vehicle.workspace.emptyTitle': '\u6682\u65e0\u8f66\u8f86',
+    'vehicle.workspace.errorTitle':
+        '\u8f66\u8f86\u5de5\u4f5c\u53f0\u4e0d\u53ef\u7528',
     'vehicle.card.plate': '\u8f66\u724c\u53f7: @value',
     'vehicle.card.type': '\u7c7b\u578b: @value',
     'vehicle.card.owner': '\u8f66\u4e3b: @value',

@@ -3,6 +3,7 @@ import 'dart:developer' as developer;
 import 'dart:io';
 import 'dart:math';
 
+import 'package:final_assignment_front/config/app_config.dart';
 import 'package:final_assignment_front/config/routes/app_routes.dart';
 import 'package:final_assignment_front/features/api/operation_log_controller_api.dart';
 import 'package:final_assignment_front/features/api/user_management_controller_api.dart';
@@ -351,7 +352,7 @@ class LogController extends GetxController with WidgetsBindingObserver {
     try {
       final response = await http
           .post(
-            Uri.parse('http://localhost:8080/api/auth/refresh'),
+            AppConfig.apiUri('/api/auth/refresh'),
             headers: {'Content-Type': 'application/json'},
             body: jsonEncode({'refreshToken': refreshToken}),
           )

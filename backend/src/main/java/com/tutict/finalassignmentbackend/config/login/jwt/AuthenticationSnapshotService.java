@@ -1,6 +1,7 @@
 package com.tutict.finalassignmentbackend.config.login.jwt;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.tutict.finalassignmentbackend.config.tenant.TenantAwareSupport;
 import com.tutict.finalassignmentbackend.entity.SysRole;
 import com.tutict.finalassignmentbackend.entity.SysUser;
 import com.tutict.finalassignmentbackend.entity.SysUserRole;
@@ -29,15 +30,18 @@ public class AuthenticationSnapshotService {
     private final SysUserRoleMapper sysUserRoleMapper;
     private final SysRoleMapper sysRoleMapper;
     private final CacheManager caffeineCacheManager;
+    private final TenantAwareSupport tenantAwareSupport;
 
     public AuthenticationSnapshotService(SysUserMapper sysUserMapper,
                                          SysUserRoleMapper sysUserRoleMapper,
                                          SysRoleMapper sysRoleMapper,
-                                         @Qualifier("caffeineCacheManager") CacheManager caffeineCacheManager) {
+                                         @Qualifier("caffeineCacheManager") CacheManager caffeineCacheManager,
+                                         TenantAwareSupport tenantAwareSupport) {
         this.sysUserMapper = sysUserMapper;
         this.sysUserRoleMapper = sysUserRoleMapper;
         this.sysRoleMapper = sysRoleMapper;
         this.caffeineCacheManager = caffeineCacheManager;
+        this.tenantAwareSupport = tenantAwareSupport;
     }
 
     @Transactional(readOnly = true)
@@ -50,6 +54,9 @@ public class AuthenticationSnapshotService {
 
         QueryWrapper<SysUser> userQuery = new QueryWrapper<>();
         userQuery.eq("username", normalizedUsername).last("limit 1");
+        if (tenantAwareSupport != null) {
+            tenantAwareSupport.applyTenantScope(userQuery);
+        }
         SysUser user = sysUserMapper.selectOne(userQuery);
         if (user == null || !isUserActive(user)) {
             return null;

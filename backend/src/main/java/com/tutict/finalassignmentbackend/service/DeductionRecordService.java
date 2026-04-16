@@ -652,11 +652,10 @@ public class DeductionRecordService {
     private void ensureSingleDeductionPerOffense(DeductionRecord deductionRecord) {
         QueryWrapper<DeductionRecord> wrapper = new QueryWrapper<>();
         wrapper.eq("offense_id", deductionRecord.getOffenseId());
-        List<DeductionRecord> existingRecords = deductionRecordMapper.selectList(wrapper);
-        for (DeductionRecord existing : existingRecords) {
-            if (existing == null || Objects.equals(existing.getDeductionId(), deductionRecord.getDeductionId())) {
-                continue;
-            }
+        if (deductionRecord.getDeductionId() != null) {
+            wrapper.ne("deduction_id", deductionRecord.getDeductionId());
+        }
+        if (deductionRecordMapper.selectCount(wrapper) > 0) {
             throw new IllegalStateException("Only one deduction record is allowed for each offense");
         }
     }

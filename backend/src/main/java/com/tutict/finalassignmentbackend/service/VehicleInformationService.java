@@ -2,6 +2,9 @@ package com.tutict.finalassignmentbackend.service;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.tutict.finalassignmentbackend.config.product.ProductGovernanceProperties;
+import com.tutict.finalassignmentbackend.config.tenant.TenantIsolationProperties;
+import com.tutict.finalassignmentbackend.config.tenant.TenantAwareSupport;
 import com.tutict.finalassignmentbackend.config.websocket.WsAction;
 import com.tutict.finalassignmentbackend.entity.DriverVehicle;
 import com.tutict.finalassignmentbackend.entity.OffenseRecord;
@@ -45,6 +48,7 @@ public class VehicleInformationService {
     private static final Logger log = Logger.getLogger(VehicleInformationService.class.getName());
     private static final String CACHE_NAME = "vehicleCache";
     private static final int FULL_LOAD_BATCH_SIZE = 500;
+    private static final int MAX_SEARCH_CANDIDATES = 500;
 
     private final VehicleInformationMapper vehicleInformationMapper;
     private final DriverVehicleMapper driverVehicleMapper;
@@ -52,6 +56,7 @@ public class VehicleInformationService {
     private final SysRequestHistoryMapper sysRequestHistoryMapper;
     private final KafkaTemplate<String, VehicleInformation> kafkaTemplate;
     private final VehicleInformationSearchRepository vehicleInformationSearchRepository;
+    private final TenantAwareSupport tenantAwareSupport;
 
     @Autowired
     public VehicleInformationService(VehicleInformationMapper vehicleInformationMapper,
@@ -59,13 +64,30 @@ public class VehicleInformationService {
                                      OffenseRecordMapper offenseRecordMapper,
                                      SysRequestHistoryMapper sysRequestHistoryMapper,
                                      KafkaTemplate<String, VehicleInformation> kafkaTemplate,
-                                     VehicleInformationSearchRepository vehicleInformationSearchRepository) {
+                                     VehicleInformationSearchRepository vehicleInformationSearchRepository,
+                                     TenantAwareSupport tenantAwareSupport) {
         this.vehicleInformationMapper = vehicleInformationMapper;
         this.driverVehicleMapper = driverVehicleMapper;
         this.offenseRecordMapper = offenseRecordMapper;
         this.sysRequestHistoryMapper = sysRequestHistoryMapper;
         this.kafkaTemplate = kafkaTemplate;
         this.vehicleInformationSearchRepository = vehicleInformationSearchRepository;
+        this.tenantAwareSupport = tenantAwareSupport;
+    }
+
+    public VehicleInformationService(VehicleInformationMapper vehicleInformationMapper,
+                                     DriverVehicleMapper driverVehicleMapper,
+                                     OffenseRecordMapper offenseRecordMapper,
+                                     SysRequestHistoryMapper sysRequestHistoryMapper,
+                                     KafkaTemplate<String, VehicleInformation> kafkaTemplate,
+                                     VehicleInformationSearchRepository vehicleInformationSearchRepository) {
+        this(vehicleInformationMapper,
+                driverVehicleMapper,
+                offenseRecordMapper,
+                sysRequestHistoryMapper,
+                kafkaTemplate,
+                vehicleInformationSearchRepository,
+                defaultTenantAwareSupport());
     }
 
     @Transactional
@@ -99,7 +121,7 @@ public class VehicleInformationService {
     @WsAction(service = "VehicleInformationService", action = "updateVehicleInformation")
     public VehicleInformation updateVehicleInformation(VehicleInformation vehicleInformation) {
         validateVehicleId(vehicleInformation);
-        int rows = vehicleInformationMapper.updateById(vehicleInformation);
+        int rows = updateVehicleByIdScoped(vehicleInformation);
         if (rows == 0) {
             throw new IllegalStateException("Vehicle not found with ID: " + vehicleInformation.getVehicleId());
         }
@@ -112,7 +134,7 @@ public class VehicleInformationService {
     public void deleteVehicleInformation(long vehicleId) {
         validateVehicleId(vehicleId);
         ensureVehicleCanBeDeleted(vehicleId);
-        int rows = vehicleInformationMapper.deleteById(vehicleId);
+        int rows = deleteVehicleByIdScoped(vehicleId);
         if (rows == 0) {
             throw new IllegalStateException("Vehicle not found with ID: " + vehicleId);
         }
@@ -124,7 +146,7 @@ public class VehicleInformationService {
     public void deleteVehicleInformationByLicensePlate(String licensePlate) {
         validateInput(licensePlate, "Invalid license plate");
         QueryWrapper<VehicleInformation> wrapper = new QueryWrapper<>();
-        wrapper.eq("license_plate", licensePlate);
+        tenantScope(wrapper).eq("license_plate", licensePlate);
         List<VehicleInformation> vehicles = vehicleInformationMapper.selectList(wrapper);
         if (vehicles.isEmpty()) {
             return;
@@ -135,20 +157,25 @@ public class VehicleInformationService {
             }
         }
         vehicleInformationMapper.delete(wrapper);
-        runAfterCommitOrNow(() -> vehicles.stream()
-                .map(VehicleInformation::getVehicleId)
-                .filter(Objects::nonNull)
-                .forEach(vehicleInformationSearchRepository::deleteById));
+        if (!databaseOnlyForTenantIsolation()) {
+            runAfterCommitOrNow(() -> vehicles.stream()
+                    .map(VehicleInformation::getVehicleId)
+                    .filter(Objects::nonNull)
+                    .forEach(vehicleInformationSearchRepository::deleteById));
+        }
     }
 
-    @Cacheable(cacheNames = CACHE_NAME, key = "#vehicleId", unless = "#result == null")
+    @Cacheable(cacheNames = CACHE_NAME, key = "@tenantCacheKeySupport.scope('vehicle', #vehicleId)", unless = "#result == null")
     @WsAction(service = "VehicleInformationService", action = "getVehicleInformationById")
     public VehicleInformation getVehicleInformationById(long vehicleId) {
         validateVehicleId(vehicleId);
+        if (databaseOnlyForTenantIsolation()) {
+            return findVehicleByIdFromDatabase(vehicleId);
+        }
         return vehicleInformationSearchRepository.findById(vehicleId)
                 .map(VehicleInformationDocument::toEntity)
                 .orElseGet(() -> {
-                    VehicleInformation entity = vehicleInformationMapper.selectById(vehicleId);
+                    VehicleInformation entity = findVehicleByIdFromDatabase(vehicleId);
                     if (entity != null) {
                         vehicleInformationSearchRepository.save(VehicleInformationDocument.fromEntity(entity));
                     }
@@ -158,6 +185,9 @@ public class VehicleInformationService {
 
     @WsAction(service = "VehicleInformationService", action = "getAllVehicleInformation")
     public List<VehicleInformation> getAllVehicleInformation() {
+        if (databaseOnlyForTenantIsolation()) {
+            return loadAllFromDatabase();
+        }
         List<VehicleInformation> fromIndex = StreamSupport.stream(
                         vehicleInformationSearchRepository.findAll().spliterator(), false)
                 .map(VehicleInformationDocument::toEntity)
@@ -168,7 +198,7 @@ public class VehicleInformationService {
         return loadAllFromDatabase();
     }
 
-    @Cacheable(cacheNames = CACHE_NAME, key = "'page:' + #page + ':' + #size")
+    @Cacheable(cacheNames = CACHE_NAME, key = "@tenantCacheKeySupport.scope('page', #page, #size)")
     public List<VehicleInformation> listVehicles(int page, int size) {
         validatePagination(page, size);
         QueryWrapper<VehicleInformation> wrapper = new QueryWrapper<>();
@@ -209,28 +239,31 @@ public class VehicleInformationService {
         sysRequestHistoryMapper.updateById(history);
     }
 
-    @Cacheable(cacheNames = CACHE_NAME, key = "'plate:' + #licensePlate")
+    @Cacheable(cacheNames = CACHE_NAME, key = "@tenantCacheKeySupport.scope('plate', #licensePlate)")
     public VehicleInformation getVehicleInformationByLicensePlate(String licensePlate) {
         validateInput(licensePlate, "Invalid license plate");
         QueryWrapper<VehicleInformation> wrapper = new QueryWrapper<>();
-        wrapper.eq("license_plate", licensePlate);
+        tenantScope(wrapper).eq("license_plate", licensePlate);
         VehicleInformation entity = vehicleInformationMapper.selectOne(wrapper);
-        if (entity != null) {
+        if (entity != null && !databaseOnlyForTenantIsolation()) {
             vehicleInformationSearchRepository.save(VehicleInformationDocument.fromEntity(entity));
         }
         return entity;
     }
 
-    @Cacheable(cacheNames = CACHE_NAME, key = "'license:global:' + #prefix + ':' + #maxSuggestions")
+    @Cacheable(cacheNames = CACHE_NAME, key = "@tenantCacheKeySupport.scope('licenseGlobal', #prefix, #maxSuggestions)")
     public List<String> getVehicleInformationByLicensePlateGlobally(String prefix, int maxSuggestions) {
         validateInput(prefix, "Invalid license plate prefix");
+        if (databaseOnlyForTenantIsolation()) {
+            return selectDistinctVehicleFieldValues("license_plate", prefix, maxSuggestions, null);
+        }
         Pageable pageable = PageRequest.of(0, Math.max(maxSuggestions, 1));
         SearchHits<VehicleInformationDocument> hits = vehicleInformationSearchRepository
                 .findCompletionSuggestionsGlobally(prefix, pageable);
         return mapLicensePlateSuggestions(hits);
     }
 
-    @Cacheable(cacheNames = CACHE_NAME, key = "'type:' + #vehicleType")
+    @Cacheable(cacheNames = CACHE_NAME, key = "@tenantCacheKeySupport.scope('type', #vehicleType)")
     public List<VehicleInformation> getVehicleInformationByType(String vehicleType) {
         validateInput(vehicleType, "Invalid vehicle type");
         QueryWrapper<VehicleInformation> wrapper = new QueryWrapper<>();
@@ -240,7 +273,7 @@ public class VehicleInformationService {
         return loadMatchingFromDatabase(wrapper);
     }
 
-    @Cacheable(cacheNames = CACHE_NAME, key = "'typeSearch:' + #vehicleType + ':' + #page + ':' + #size")
+    @Cacheable(cacheNames = CACHE_NAME, key = "@tenantCacheKeySupport.scope('typeSearch', #vehicleType, #page, #size)")
     public List<VehicleInformation> searchByVehicleType(String vehicleType, int page, int size) {
         validateInput(vehicleType, "Invalid vehicle type");
         validatePagination(page, size);
@@ -251,7 +284,7 @@ public class VehicleInformationService {
         return fetchFromDatabase(wrapper, page, size);
     }
 
-    @Cacheable(cacheNames = CACHE_NAME, key = "'owner:' + #ownerName")
+    @Cacheable(cacheNames = CACHE_NAME, key = "@tenantCacheKeySupport.scope('owner', #ownerName)")
     public List<VehicleInformation> getVehicleInformationByOwnerName(String ownerName) {
         validateInput(ownerName, "Invalid owner name");
         QueryWrapper<VehicleInformation> wrapper = new QueryWrapper<>();
@@ -261,7 +294,7 @@ public class VehicleInformationService {
         return loadMatchingFromDatabase(wrapper);
     }
 
-    @Cacheable(cacheNames = CACHE_NAME, key = "'idcard:' + #idCardNumber")
+    @Cacheable(cacheNames = CACHE_NAME, key = "@tenantCacheKeySupport.scope('idCard', #idCardNumber)")
     public List<VehicleInformation> getVehicleInformationByIdCardNumber(String idCardNumber) {
         validateInput(idCardNumber, "Invalid ID card number");
         QueryWrapper<VehicleInformation> wrapper = new QueryWrapper<>();
@@ -283,7 +316,7 @@ public class VehicleInformationService {
             return;
         }
         QueryWrapper<VehicleInformation> wrapper = new QueryWrapper<>();
-        wrapper.eq("owner_id_card", previousIdCardNumber.trim())
+        tenantScope(wrapper).eq("owner_id_card", previousIdCardNumber.trim())
                 .orderByDesc("updated_at")
                 .orderByDesc("vehicle_id");
         List<VehicleInformation> vehicles = vehicleInformationMapper.selectList(wrapper);
@@ -304,13 +337,18 @@ public class VehicleInformationService {
                 vehicle.setOwnerContact(ownerContact.trim());
             }
             vehicle.setUpdatedAt(now);
-            vehicleInformationMapper.updateById(vehicle);
             updatedVehicles.add(vehicle);
+        }
+        if (updatedVehicles.isEmpty()) {
+            return;
+        }
+        for (VehicleInformation updatedVehicle : updatedVehicles) {
+            updateVehicleByIdScoped(updatedVehicle);
         }
         syncBatchToIndexAfterCommit(updatedVehicles);
     }
 
-    @Cacheable(cacheNames = CACHE_NAME, key = "'status:' + #status")
+    @Cacheable(cacheNames = CACHE_NAME, key = "@tenantCacheKeySupport.scope('status', #status)")
     public List<VehicleInformation> getVehicleInformationByStatus(String status) {
         validateInput(status, "Invalid status");
         QueryWrapper<VehicleInformation> wrapper = new QueryWrapper<>();
@@ -320,7 +358,7 @@ public class VehicleInformationService {
         return loadMatchingFromDatabase(wrapper);
     }
 
-    @Cacheable(cacheNames = CACHE_NAME, key = "'ownerNameSearch:' + #ownerName + ':' + #page + ':' + #size")
+    @Cacheable(cacheNames = CACHE_NAME, key = "@tenantCacheKeySupport.scope('ownerNameSearch', #ownerName, #page, #size)")
     public List<VehicleInformation> searchByOwnerName(String ownerName, int page, int size) {
         validateInput(ownerName, "Invalid owner name");
         validatePagination(page, size);
@@ -337,7 +375,7 @@ public class VehicleInformationService {
         return fetchFromDatabase(wrapper, page, size);
     }
 
-    @Cacheable(cacheNames = CACHE_NAME, key = "'ownerIdCardSearch:' + #ownerIdCard + ':' + #page + ':' + #size")
+    @Cacheable(cacheNames = CACHE_NAME, key = "@tenantCacheKeySupport.scope('ownerIdCardSearch', #ownerIdCard, #page, #size)")
     public List<VehicleInformation> searchByOwnerIdCard(String ownerIdCard, int page, int size) {
         validateInput(ownerIdCard, "Invalid owner id card");
         validatePagination(page, size);
@@ -358,7 +396,7 @@ public class VehicleInformationService {
     public List<Long> findIdsByOwnerIdCard(String ownerIdCard) {
         validateInput(ownerIdCard, "Invalid owner id card");
         QueryWrapper<VehicleInformation> wrapper = new QueryWrapper<>();
-        wrapper.select("vehicle_id")
+        tenantScope(wrapper).select("vehicle_id")
                 .eq("owner_id_card", ownerIdCard.trim())
                 .orderByDesc("updated_at")
                 .orderByDesc("vehicle_id");
@@ -370,7 +408,7 @@ public class VehicleInformationService {
                 .collect(Collectors.toList());
     }
 
-    @Cacheable(cacheNames = CACHE_NAME, key = "'statusSearch:' + #status + ':' + #page + ':' + #size")
+    @Cacheable(cacheNames = CACHE_NAME, key = "@tenantCacheKeySupport.scope('statusSearch', #status, #page, #size)")
     public List<VehicleInformation> searchByStatus(String status, int page, int size) {
         validateInput(status, "Invalid status");
         validatePagination(page, size);
@@ -387,12 +425,21 @@ public class VehicleInformationService {
         return fetchFromDatabase(wrapper, page, size);
     }
 
-    @Cacheable(cacheNames = CACHE_NAME, key = "'search:' + #query + ':' + #page + ':' + #size")
+    @Cacheable(cacheNames = CACHE_NAME, key = "@tenantCacheKeySupport.scope('search', #query, #page, #size)")
     public List<VehicleInformation> searchVehicles(String query, int page, int size) {
         validatePagination(page, size);
         String normalizedQuery = query == null ? null : query.trim();
         if (normalizedQuery == null || normalizedQuery.isEmpty()) {
             return Collections.emptyList();
+        }
+        int fetchSize = resolveCandidateFetchSize(page, size);
+        List<VehicleInformation> fromIndex = searchIndexedVehicles(normalizedQuery, fetchSize);
+        if (!fromIndex.isEmpty()) {
+            return fromIndex.stream()
+                    .sorted(vehicleSearchComparator())
+                    .skip((long) (page - 1) * size)
+                    .limit(size)
+                    .collect(Collectors.toList());
         }
         QueryWrapper<VehicleInformation> wrapper = new QueryWrapper<>();
         wrapper.lambda()
@@ -408,49 +455,47 @@ public class VehicleInformationService {
         return fetchFromDatabase(wrapper, page, size);
     }
 
-    @Cacheable(cacheNames = CACHE_NAME, key = "'autocomplete:me:' + #idCardNumber + ':' + #prefix + ':' + #maxSuggestions")
+    @Cacheable(cacheNames = CACHE_NAME, key = "@tenantCacheKeySupport.scope('autocompleteMe', #idCardNumber, #prefix, #maxSuggestions)")
     public List<String> getLicensePlateAutocompleteSuggestions(String prefix, int maxSuggestions, String idCardNumber) {
         validateInput(idCardNumber, "Invalid ID card number");
         validateInput(prefix, "Invalid license plate prefix");
+        if (databaseOnlyForTenantIsolation()) {
+            QueryWrapper<VehicleInformation> wrapper = new QueryWrapper<>();
+            wrapper.eq("owner_id_card", idCardNumber.trim());
+            return selectDistinctVehicleFieldValues("license_plate", prefix, maxSuggestions, wrapper);
+        }
         Pageable pageable = PageRequest.of(0, Math.max(maxSuggestions, 1));
         SearchHits<VehicleInformationDocument> hits = vehicleInformationSearchRepository
                 .findCompletionSuggestions(idCardNumber, prefix, pageable);
         return mapLicensePlateSuggestions(hits);
     }
 
-    @Cacheable(cacheNames = CACHE_NAME, key = "'autocomplete:type:me:' + #idCardNumber + ':' + #prefix + ':' + #maxSuggestions")
+    @Cacheable(cacheNames = CACHE_NAME, key = "@tenantCacheKeySupport.scope('autocompleteTypeMe', #idCardNumber, #prefix, #maxSuggestions)")
     public List<String> getVehicleTypeAutocompleteSuggestions(String idCardNumber, String prefix, int maxSuggestions) {
         validateInput(idCardNumber, "Invalid ID card number");
         validateInput(prefix, "Invalid vehicle type prefix");
+        if (databaseOnlyForTenantIsolation()) {
+            QueryWrapper<VehicleInformation> wrapper = new QueryWrapper<>();
+            wrapper.eq("owner_id_card", idCardNumber.trim());
+            return selectDistinctVehicleFieldValues("vehicle_type", prefix, maxSuggestions, wrapper);
+        }
         Pageable pageable = PageRequest.of(0, Math.max(maxSuggestions, 1));
         SearchHits<VehicleInformationDocument> hits = vehicleInformationSearchRepository
                 .searchByVehicleTypePrefix(prefix, idCardNumber, pageable);
         return mapVehicleTypeSuggestions(hits);
     }
 
-    @Cacheable(cacheNames = CACHE_NAME, key = "'autocomplete:type:global:' + #prefix + ':' + #maxSuggestions")
+    @Cacheable(cacheNames = CACHE_NAME, key = "@tenantCacheKeySupport.scope('autocompleteTypeGlobal', #prefix, #maxSuggestions)")
     public List<String> getVehicleTypesByPrefixGlobally(String prefix, int maxSuggestions) {
         validateInput(prefix, "Invalid vehicle type prefix");
-        int normalizedLimit = Math.max(maxSuggestions, 1);
-        QueryWrapper<VehicleInformation> wrapper = new QueryWrapper<>();
-        wrapper.select("DISTINCT vehicle_type")
-                .likeRight("vehicle_type", prefix)
-                .orderByAsc("vehicle_type")
-                .last("limit " + normalizedLimit);
-        List<VehicleInformation> result = vehicleInformationMapper.selectList(wrapper);
-        return result.stream()
-                .map(VehicleInformation::getVehicleType)
-                .filter(Objects::nonNull)
-                .map(type -> URLDecoder.decode(type, StandardCharsets.UTF_8))
-                .limit(normalizedLimit)
-                .collect(Collectors.toList());
+        return selectDistinctVehicleFieldValues("vehicle_type", prefix, maxSuggestions, null);
     }
 
-    @Cacheable(cacheNames = CACHE_NAME, key = "'exists:' + #licensePlate")
+    @Cacheable(cacheNames = CACHE_NAME, key = "@tenantCacheKeySupport.scope('exists', #licensePlate)")
     public boolean isLicensePlateExists(String licensePlate) {
         validateInput(licensePlate, "Invalid license plate");
         QueryWrapper<VehicleInformation> wrapper = new QueryWrapper<>();
-        wrapper.eq("license_plate", licensePlate);
+        tenantScope(wrapper).eq("license_plate", licensePlate);
         return vehicleInformationMapper.selectCount(wrapper) > 0;
     }
 
@@ -481,20 +526,57 @@ public class VehicleInformationService {
     }
 
     private List<VehicleInformation> mapVehicleHits(SearchHits<VehicleInformationDocument> hits) {
+        if (databaseOnlyForTenantIsolation()) {
+            return Collections.emptyList();
+        }
         if (hits == null || !hits.hasSearchHits()) {
             return Collections.emptyList();
         }
         return hits.getSearchHits().stream()
                 .map(SearchHit::getContent)
+                .filter(Objects::nonNull)
                 .map(VehicleInformationDocument::toEntity)
+                .filter(Objects::nonNull)
                 .collect(Collectors.toList());
+    }
+
+    private List<VehicleInformation> searchIndexedVehicles(String query, int fetchSize) {
+        if (isBlank(query)) {
+            return List.of();
+        }
+        if (databaseOnlyForTenantIsolation()) {
+            return List.of();
+        }
+        try {
+            SearchHits<VehicleInformationDocument> hits =
+                    vehicleInformationSearchRepository.searchBroadly(query, pageable(1, fetchSize));
+            return mapVehicleHits(hits);
+        } catch (Exception e) {
+            log.log(Level.WARNING, "Failed to execute aggregated vehicle search", e);
+            return List.of();
+        }
     }
 
     private Pageable pageable(int page, int size) {
         return PageRequest.of(Math.max(page - 1, 0), Math.max(size, 1));
     }
 
+    private int resolveCandidateFetchSize(int page, int size) {
+        long requested = (long) Math.max(page, 1) * Math.max(size, 1);
+        long normalized = Math.max(requested, size);
+        return (int) Math.min(normalized, MAX_SEARCH_CANDIDATES);
+    }
+
+    private Comparator<VehicleInformation> vehicleSearchComparator() {
+        Comparator<LocalDateTime> timestampComparator = Comparator.nullsLast(Comparator.reverseOrder());
+        Comparator<Long> idComparator = Comparator.nullsLast(Comparator.reverseOrder());
+        return Comparator
+                .comparing(VehicleInformation::getUpdatedAt, timestampComparator)
+                .thenComparing(VehicleInformation::getVehicleId, idComparator);
+    }
+
     private List<VehicleInformation> fetchFromDatabase(QueryWrapper<VehicleInformation> wrapper, int page, int size) {
+        tenantScope(wrapper);
         Page<VehicleInformation> mpPage = new Page<>(Math.max(page, 1), Math.max(size, 1));
         vehicleInformationMapper.selectPage(mpPage, wrapper);
         List<VehicleInformation> records = mpPage.getRecords();
@@ -503,6 +585,7 @@ public class VehicleInformationService {
     }
 
     private List<VehicleInformation> loadMatchingFromDatabase(QueryWrapper<VehicleInformation> wrapper) {
+        tenantScope(wrapper);
         List<VehicleInformation> allRecords = new ArrayList<>();
         long pageNumber = 1L;
         while (true) {
@@ -524,7 +607,7 @@ public class VehicleInformationService {
 
     private List<VehicleInformation> loadAllFromDatabase() {
         QueryWrapper<VehicleInformation> wrapper = new QueryWrapper<>();
-        wrapper.orderByAsc("vehicle_id");
+        tenantScope(wrapper).orderByAsc("vehicle_id");
 
         List<VehicleInformation> allRecords = new ArrayList<>();
         long pageNumber = 1L;
@@ -603,7 +686,7 @@ public class VehicleInformationService {
     }
 
     private void syncToIndexAfterCommit(VehicleInformation vehicleInformation) {
-        if (vehicleInformation == null) {
+        if (databaseOnlyForTenantIsolation() || vehicleInformation == null) {
             return;
         }
         runAfterCommitOrNow(() -> {
@@ -615,7 +698,7 @@ public class VehicleInformationService {
     }
 
     private void syncBatchToIndexAfterCommit(List<VehicleInformation> vehicles) {
-        if (vehicles == null || vehicles.isEmpty()) {
+        if (databaseOnlyForTenantIsolation() || vehicles == null || vehicles.isEmpty()) {
             return;
         }
         runAfterCommitOrNow(() -> {
@@ -631,6 +714,9 @@ public class VehicleInformationService {
     }
 
     private void syncDeleteAfterCommit(Long vehicleId) {
+        if (databaseOnlyForTenantIsolation()) {
+            return;
+        }
         runAfterCommitOrNow(() -> vehicleInformationSearchRepository.deleteById(vehicleId));
     }
 
@@ -764,7 +850,7 @@ public class VehicleInformationService {
 
     private void ensureUniqueLicensePlate(VehicleInformation vehicleInformation) {
         QueryWrapper<VehicleInformation> wrapper = new QueryWrapper<>();
-        wrapper.eq("license_plate", vehicleInformation.getLicensePlate().trim());
+        tenantScope(wrapper).eq("license_plate", vehicleInformation.getLicensePlate().trim());
         if (vehicleInformation.getVehicleId() != null) {
             wrapper.ne("vehicle_id", vehicleInformation.getVehicleId());
         }
@@ -780,7 +866,7 @@ public class VehicleInformationService {
             return;
         }
         QueryWrapper<VehicleInformation> wrapper = new QueryWrapper<>();
-        wrapper.eq("engine_number", vehicleInformation.getEngineNumber().trim());
+        tenantScope(wrapper).eq("engine_number", vehicleInformation.getEngineNumber().trim());
         if (vehicleInformation.getVehicleId() != null) {
             wrapper.ne("vehicle_id", vehicleInformation.getVehicleId());
         }
@@ -796,7 +882,7 @@ public class VehicleInformationService {
             return;
         }
         QueryWrapper<VehicleInformation> wrapper = new QueryWrapper<>();
-        wrapper.eq("frame_number", vehicleInformation.getFrameNumber().trim());
+        tenantScope(wrapper).eq("frame_number", vehicleInformation.getFrameNumber().trim());
         if (vehicleInformation.getVehicleId() != null) {
             wrapper.ne("vehicle_id", vehicleInformation.getVehicleId());
         }
@@ -807,15 +893,83 @@ public class VehicleInformationService {
 
     private void ensureVehicleCanBeDeleted(Long vehicleId) {
         QueryWrapper<DriverVehicle> bindingWrapper = new QueryWrapper<>();
-        bindingWrapper.eq("vehicle_id", vehicleId);
+        tenantScope(bindingWrapper).eq("vehicle_id", vehicleId);
         if (driverVehicleMapper.selectCount(bindingWrapper) > 0) {
             throw new IllegalStateException("Cannot delete vehicle while driver bindings still exist");
         }
 
         QueryWrapper<OffenseRecord> offenseWrapper = new QueryWrapper<>();
-        offenseWrapper.eq("vehicle_id", vehicleId);
+        tenantScope(offenseWrapper).eq("vehicle_id", vehicleId);
         if (offenseRecordMapper.selectCount(offenseWrapper) > 0) {
             throw new IllegalStateException("Cannot delete vehicle while offense records still exist");
         }
+    }
+
+    private boolean databaseOnlyForTenantIsolation() {
+        return tenantAwareSupport.isIsolationEnabled();
+    }
+
+    private <T> QueryWrapper<T> tenantScope(QueryWrapper<T> wrapper) {
+        return tenantAwareSupport.applyTenantScope(wrapper);
+    }
+
+    private VehicleInformation findVehicleByIdFromDatabase(Long vehicleId) {
+        if (vehicleId == null) {
+            return null;
+        }
+        QueryWrapper<VehicleInformation> wrapper = new QueryWrapper<>();
+        tenantScope(wrapper).eq("vehicle_id", vehicleId).last("limit 1");
+        return vehicleInformationMapper.selectOne(wrapper);
+    }
+
+    private int updateVehicleByIdScoped(VehicleInformation vehicleInformation) {
+        if (vehicleInformation == null || vehicleInformation.getVehicleId() == null) {
+            return 0;
+        }
+        if (!databaseOnlyForTenantIsolation()) {
+            return vehicleInformationMapper.updateById(vehicleInformation);
+        }
+        QueryWrapper<VehicleInformation> wrapper = new QueryWrapper<>();
+        tenantScope(wrapper).eq("vehicle_id", vehicleInformation.getVehicleId());
+        return vehicleInformationMapper.update(vehicleInformation, wrapper);
+    }
+
+    private int deleteVehicleByIdScoped(Long vehicleId) {
+        if (vehicleId == null) {
+            return 0;
+        }
+        if (!databaseOnlyForTenantIsolation()) {
+            return vehicleInformationMapper.deleteById(vehicleId);
+        }
+        QueryWrapper<VehicleInformation> wrapper = new QueryWrapper<>();
+        tenantScope(wrapper).eq("vehicle_id", vehicleId);
+        return vehicleInformationMapper.delete(wrapper);
+    }
+
+    private List<String> selectDistinctVehicleFieldValues(String columnName,
+                                                          String prefix,
+                                                          int maxSuggestions,
+                                                          QueryWrapper<VehicleInformation> wrapper) {
+        int normalizedLimit = Math.max(maxSuggestions, 1);
+        QueryWrapper<VehicleInformation> effectiveWrapper = wrapper == null ? new QueryWrapper<>() : wrapper;
+        tenantScope(effectiveWrapper);
+        effectiveWrapper.select("DISTINCT " + columnName)
+                .likeRight(columnName, prefix)
+                .orderByAsc(columnName)
+                .last("limit " + normalizedLimit);
+        List<VehicleInformation> result = vehicleInformationMapper.selectList(effectiveWrapper);
+        return result.stream()
+                .map(vehicle -> "vehicle_type".equals(columnName) ? vehicle.getVehicleType() : vehicle.getLicensePlate())
+                .filter(Objects::nonNull)
+                .map(value -> URLDecoder.decode(value, StandardCharsets.UTF_8))
+                .distinct()
+                .limit(normalizedLimit)
+                .collect(Collectors.toList());
+    }
+
+    private static TenantAwareSupport defaultTenantAwareSupport() {
+        ProductGovernanceProperties productGovernanceProperties = new ProductGovernanceProperties();
+        productGovernanceProperties.setTenantIsolationEnabled(false);
+        return new TenantAwareSupport(productGovernanceProperties, new TenantIsolationProperties());
     }
 }
