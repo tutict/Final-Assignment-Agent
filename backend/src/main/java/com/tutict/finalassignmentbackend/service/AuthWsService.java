@@ -132,22 +132,29 @@ public class AuthWsService {
         validateRegisterRequest(registerRequest);
         logger.info(() -> String.format("Attempting to register user: %s", registerRequest.getUsername()));
 
+        String idempotencyKey = registerRequest.getIdempotencyKey();
+        boolean useIdempotency = StringUtils.hasText(idempotencyKey);
+        if (useIdempotency && sysUserService.shouldSkipProcessing(idempotencyKey)) {
+            logger.info(() -> String.format("Registration replay acknowledged for idempotency key: %s", idempotencyKey));
+            return "CREATED";
+        }
+
         if (sysUserService.isUsernameExists(registerRequest.getUsername())) {
             logger.severe(() -> String.format("Username already exists: %s", registerRequest.getUsername()));
             throw new RuntimeException("Username already exists: " + registerRequest.getUsername());
         }
 
-        String idempotencyKey = registerRequest.getIdempotencyKey();
-        boolean useIdempotency = StringUtils.hasText(idempotencyKey);
         if (useIdempotency) {
             SysUser probe = new SysUser();
             probe.setUsername(registerRequest.getUsername());
             try {
                 sysUserService.checkAndInsertIdempotency(idempotencyKey, probe, "create");
+            } catch (RuntimeException e) {
                 if (sysUserService.shouldSkipProcessing(idempotencyKey)) {
+                    logger.info(() -> String.format("Registration replay completed during idempotency check for key: %s",
+                            idempotencyKey));
                     return "CREATED";
                 }
-            } catch (RuntimeException e) {
                 logger.log(Level.WARNING, "Idempotency check failed for key {0}: {1}",
                         new Object[]{idempotencyKey, e.getMessage()});
                 throw new RuntimeException("Registration failed: duplicate request", e);
@@ -279,7 +286,8 @@ public class AuthWsService {
 
         String jwtToken;
         if (claimsSupported) {
-            jwtToken = tokenProvider.createEnhancedToken(
+            jwtToken = hasTenantClaims(tenantId, organizationCode, regionCode, departmentCode)
+                    ? tokenProvider.createEnhancedToken(
                     user.getUsername(),
                     roleCodesCsv,
                     roleTypesCsv,
@@ -288,18 +296,29 @@ public class AuthWsService {
                     organizationCode,
                     regionCode,
                     departmentCode
+            )
+                    : tokenProvider.createEnhancedToken(
+                    user.getUsername(),
+                    roleCodesCsv,
+                    roleTypesCsv,
+                    dataScopeCode
             );
         } else {
             logger.warning(() -> String.format(
                     "Role claims are incomplete; falling back to a basic token for user=%s",
                     user.getUsername()));
-            jwtToken = tokenProvider.createToken(
+            jwtToken = hasTenantClaims(tenantId, organizationCode, regionCode, departmentCode)
+                    ? tokenProvider.createToken(
                     user.getUsername(),
                     roleCodesCsv,
                     tenantId,
                     organizationCode,
                     regionCode,
                     departmentCode
+            )
+                    : tokenProvider.createToken(
+                    user.getUsername(),
+                    roleCodesCsv
             );
         }
 
@@ -328,6 +347,16 @@ public class AuthWsService {
             return primary.trim();
         }
         return StringUtils.hasText(fallback) ? fallback.trim() : null;
+    }
+
+    private boolean hasTenantClaims(String tenantId,
+                                    String organizationCode,
+                                    String regionCode,
+                                    String departmentCode) {
+        return StringUtils.hasText(tenantId)
+                || StringUtils.hasText(organizationCode)
+                || StringUtils.hasText(regionCode)
+                || StringUtils.hasText(departmentCode);
     }
 
     private void assignRole(SysUser user, SysRole role) {

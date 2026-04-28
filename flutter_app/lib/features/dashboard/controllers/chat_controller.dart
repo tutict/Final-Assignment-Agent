@@ -74,7 +74,7 @@ class ChatController extends GetxController {
   ];
 
   List<String> get suggestions =>
-      (userRole.value == 'ADMIN' ? _adminSuggestionKeys : _userSuggestionKeys)
+      (userRole.value == 'USER' ? _userSuggestionKeys : _adminSuggestionKeys)
           .map((key) => key.tr)
           .toList();
 

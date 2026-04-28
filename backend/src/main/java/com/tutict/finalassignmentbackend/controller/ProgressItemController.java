@@ -27,6 +27,7 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.function.IntFunction;
 import java.util.logging.Level;
@@ -180,8 +181,10 @@ public class ProgressItemController {
                     .limit(Math.max(size, 1))
                     .toList();
             return ResponseEntity.ok(ordered);
+        } catch (IllegalArgumentException ex) {
+            return handleCurrentUserProgressArgument(ex);
         } catch (IllegalStateException ex) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+            return handleCurrentUserProgressState(ex);
         } catch (Exception ex) {
             LOG.log(Level.WARNING, "List current user progress failed", ex);
             return ResponseEntity.status(resolveStatus(ex)).build();
@@ -453,6 +456,29 @@ public class ProgressItemController {
             return "";
         }
         return businessType.trim().toUpperCase();
+    }
+
+    private <T> ResponseEntity<T> handleCurrentUserProgressArgument(IllegalArgumentException ex) {
+        String message = ex == null || ex.getMessage() == null
+                ? ""
+                : ex.getMessage().trim().toLowerCase(Locale.ROOT);
+        if (message.contains("outside the current user scope")) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).build();
+    }
+
+    private <T> ResponseEntity<T> handleCurrentUserProgressState(IllegalStateException ex) {
+        String message = ex == null || ex.getMessage() == null
+                ? ""
+                : ex.getMessage().trim().toLowerCase(Locale.ROOT);
+        if (message.contains("current user is not authenticated") || message.contains("current user not found")) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+        if (message.contains("current user profile has no id card number")) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).build();
+        }
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).build();
     }
 
     private HttpStatus resolveStatus(Exception ex) {

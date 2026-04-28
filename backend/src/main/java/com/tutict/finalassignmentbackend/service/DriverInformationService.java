@@ -977,6 +977,9 @@ public class DriverInformationService {
         if (driverId == null) {
             return null;
         }
+        if (!databaseOnlyForTenantIsolation()) {
+            return driverInformationMapper.selectById(driverId);
+        }
         QueryWrapper<DriverInformation> wrapper = new QueryWrapper<>();
         tenantScope(wrapper).eq("driver_id", driverId).last("limit 1");
         return driverInformationMapper.selectOne(wrapper);

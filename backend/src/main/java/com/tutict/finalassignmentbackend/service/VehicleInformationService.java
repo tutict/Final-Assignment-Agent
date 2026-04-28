@@ -2,6 +2,7 @@ package com.tutict.finalassignmentbackend.service;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.tutict.finalassignmentbackend.config.product.ProductGovernanceProperties;
 import com.tutict.finalassignmentbackend.config.tenant.TenantIsolationProperties;
 import com.tutict.finalassignmentbackend.config.tenant.TenantAwareSupport;
@@ -342,9 +343,18 @@ public class VehicleInformationService {
         if (updatedVehicles.isEmpty()) {
             return;
         }
-        for (VehicleInformation updatedVehicle : updatedVehicles) {
-            updateVehicleByIdScoped(updatedVehicle);
+        UpdateWrapper<VehicleInformation> updateWrapper = new UpdateWrapper<>();
+        updateWrapper.eq("owner_id_card", previousIdCardNumber.trim())
+                .set("owner_id_card", nextIdCardNumber.trim())
+                .set("updated_at", now);
+        if (!isBlank(ownerName)) {
+            updateWrapper.set("owner_name", ownerName.trim());
         }
+        if (!isBlank(ownerContact)) {
+            updateWrapper.set("owner_contact", ownerContact.trim());
+        }
+        applyTenantScope(updateWrapper);
+        vehicleInformationMapper.update(null, updateWrapper);
         syncBatchToIndexAfterCommit(updatedVehicles);
     }
 
@@ -779,6 +789,7 @@ public class VehicleInformationService {
             throw new IllegalArgumentException("Vehicle information cannot be null");
         }
         validateInput(vehicleInformation.getLicensePlate(), "License plate cannot be empty");
+        validateVehicleFieldLengths(vehicleInformation);
         ensureUniqueLicensePlate(vehicleInformation);
         ensureUniqueEngineNumber(vehicleInformation);
         ensureUniqueFrameNumber(vehicleInformation);
@@ -891,6 +902,33 @@ public class VehicleInformationService {
         }
     }
 
+    private void validateVehicleFieldLengths(VehicleInformation vehicleInformation) {
+        if (vehicleInformation == null) {
+            return;
+        }
+        validateMaxLength(vehicleInformation.getLicensePlate(), 32, "License plate");
+        validateMaxLength(vehicleInformation.getPlateColor(), 32, "Plate color");
+        validateMaxLength(vehicleInformation.getVehicleType(), 64, "Vehicle type");
+        validateMaxLength(vehicleInformation.getBrand(), 64, "Brand");
+        validateMaxLength(vehicleInformation.getModel(), 64, "Model");
+        validateMaxLength(vehicleInformation.getVehicleColor(), 32, "Vehicle color");
+        validateMaxLength(vehicleInformation.getEngineNumber(), 64, "Engine number");
+        validateMaxLength(vehicleInformation.getFrameNumber(), 64, "Frame number");
+        validateMaxLength(vehicleInformation.getOwnerName(), 128, "Owner name");
+        validateMaxLength(vehicleInformation.getOwnerIdCard(), 32, "Owner ID card");
+        validateMaxLength(vehicleInformation.getOwnerContact(), 64, "Owner contact");
+        validateMaxLength(vehicleInformation.getOwnerAddress(), 255, "Owner address");
+        validateMaxLength(vehicleInformation.getIssuingAuthority(), 128, "Issuing authority");
+        validateMaxLength(vehicleInformation.getStatus(), 32, "Status");
+        validateMaxLength(vehicleInformation.getRemarks(), 255, "Remarks");
+    }
+
+    private void validateMaxLength(String value, int maxLength, String fieldName) {
+        if (value != null && value.length() > maxLength) {
+            throw new IllegalArgumentException(fieldName + " must be at most " + maxLength + " characters");
+        }
+    }
+
     private void ensureVehicleCanBeDeleted(Long vehicleId) {
         QueryWrapper<DriverVehicle> bindingWrapper = new QueryWrapper<>();
         tenantScope(bindingWrapper).eq("vehicle_id", vehicleId);
@@ -913,9 +951,23 @@ public class VehicleInformationService {
         return tenantAwareSupport.applyTenantScope(wrapper);
     }
 
+    private <T> UpdateWrapper<T> applyTenantScope(UpdateWrapper<T> wrapper) {
+        if (wrapper == null || !databaseOnlyForTenantIsolation()) {
+            return wrapper;
+        }
+        String tenantId = tenantAwareSupport.currentTenantId();
+        if (!isBlank(tenantId)) {
+            wrapper.eq("tenant_id", tenantId.trim());
+        }
+        return wrapper;
+    }
+
     private VehicleInformation findVehicleByIdFromDatabase(Long vehicleId) {
         if (vehicleId == null) {
             return null;
+        }
+        if (!databaseOnlyForTenantIsolation()) {
+            return vehicleInformationMapper.selectById(vehicleId);
         }
         QueryWrapper<VehicleInformation> wrapper = new QueryWrapper<>();
         tenantScope(wrapper).eq("vehicle_id", vehicleId).last("limit 1");

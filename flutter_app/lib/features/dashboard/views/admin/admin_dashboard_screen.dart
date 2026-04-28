@@ -10,7 +10,32 @@ import 'package:final_assignment_front/utils/helpers/role_utils.dart';
 import 'package:final_assignment_front/utils/navigation/page_resolver.dart';
 
 class AdminDashboardScreen extends GetView<DashboardController> {
-  const AdminDashboardScreen({super.key});
+  const AdminDashboardScreen({
+    super.key,
+    this.titleKey = 'admin.title',
+    this.subtitleKey = 'admin.subtitle',
+    this.pageTitleKey = 'admin.pageTitle',
+    this.workspaceEyebrowKey = 'common.adminConsole',
+    this.summaryKey = 'admin.metric.modeDetail',
+    this.modeValueKey = 'admin.metric.modeValue',
+    this.coreEntriesTitleKey = 'admin.coreEntries',
+    this.secondaryActionLabelKey = 'admin.hero.secondary',
+    this.businessRoute = Routes.adminBusinessProcessing,
+    this.profileRoute = Routes.adminPersonalPage,
+    this.settingsRoute = Routes.adminSetting,
+  });
+
+  final String titleKey;
+  final String subtitleKey;
+  final String pageTitleKey;
+  final String workspaceEyebrowKey;
+  final String summaryKey;
+  final String modeValueKey;
+  final String coreEntriesTitleKey;
+  final String secondaryActionLabelKey;
+  final String businessRoute;
+  final String profileRoute;
+  final String settingsRoute;
 
   @override
   Widget build(BuildContext context) {
@@ -23,21 +48,29 @@ class AdminDashboardScreen extends GetView<DashboardController> {
       return AgentDashboardShell(
         scaffoldKey: controller.scaffoldKey,
         theme: theme,
-        title: 'admin.title'.tr,
-        subtitle: 'admin.subtitle'.tr,
+        title: titleKey.tr,
+        subtitle: subtitleKey.tr,
         profile: profile,
         navigationItems: _navigationItems(),
         chatPanel: const AiChat(),
         onToggleTheme: controller.toggleBodyTheme,
         body: controller.selectedPage.value != null
             ? _SelectedPageFrame(
-                title: 'admin.pageTitle'.tr,
+                title: pageTitleKey.tr,
                 onBack: controller.exitSidebarContent,
                 child: controller.selectedPage.value!,
               )
             : _AdminHome(
                 controller: controller,
                 onOpenAgent: () => Get.toNamed(Routes.aiChat),
+                workspaceEyebrowKey: workspaceEyebrowKey,
+                summaryKey: summaryKey,
+                modeValueKey: modeValueKey,
+                coreEntriesTitleKey: coreEntriesTitleKey,
+                secondaryActionLabelKey: secondaryActionLabelKey,
+                businessRoute: businessRoute,
+                profileRoute: profileRoute,
+                settingsRoute: settingsRoute,
               ),
       );
     });
@@ -76,17 +109,17 @@ class AdminDashboardScreen extends GetView<DashboardController> {
       AgentDashboardNavItem(
         label: 'admin.nav.business'.tr,
         icon: Icons.schema_outlined,
-        onTap: () => controller.navigateToPage(Routes.adminBusinessProcessing),
+        onTap: () => controller.navigateToPage(businessRoute),
       ),
       AgentDashboardNavItem(
         label: 'common.profile'.tr,
         icon: Icons.account_circle_outlined,
-        onTap: () => controller.navigateToPage(Routes.adminPersonalPage),
+        onTap: () => controller.navigateToPage(profileRoute),
       ),
       AgentDashboardNavItem(
         label: 'common.settings'.tr,
         icon: Icons.tune_rounded,
-        onTap: () => controller.navigateToPage(Routes.adminSetting),
+        onTap: () => controller.navigateToPage(settingsRoute),
       ),
     ];
   }
@@ -96,10 +129,26 @@ class _AdminHome extends StatelessWidget {
   const _AdminHome({
     required this.controller,
     required this.onOpenAgent,
+    required this.workspaceEyebrowKey,
+    required this.summaryKey,
+    required this.modeValueKey,
+    required this.coreEntriesTitleKey,
+    required this.secondaryActionLabelKey,
+    required this.businessRoute,
+    required this.profileRoute,
+    required this.settingsRoute,
   });
 
   final DashboardController controller;
   final VoidCallback onOpenAgent;
+  final String workspaceEyebrowKey;
+  final String summaryKey;
+  final String modeValueKey;
+  final String coreEntriesTitleKey;
+  final String secondaryActionLabelKey;
+  final String businessRoute;
+  final String profileRoute;
+  final String settingsRoute;
 
   @override
   Widget build(BuildContext context) {
@@ -124,13 +173,13 @@ class _AdminHome extends StatelessWidget {
               _RevealIn(
                 delay: const Duration(milliseconds: 40),
                 child: _WorkspaceOverview(
-                  eyebrow: 'common.adminConsole'.tr,
+                  eyebrow: workspaceEyebrowKey.tr,
                   title: displayName,
-                  summary: 'admin.metric.modeDetail'.tr,
+                  summary: summaryKey.tr,
                   metrics: [
                     _OverviewMetric(
                       label: 'admin.metric.mode'.tr,
-                      value: 'admin.metric.modeValue'.tr,
+                      value: modeValueKey.tr,
                       accent: const Color(0xFF18846F),
                     ),
                     _OverviewMetric(
@@ -152,12 +201,12 @@ class _AdminHome extends StatelessWidget {
                     'admin.today.line3'.tr,
                   ],
                   primaryLabel: 'common.openAgent'.tr,
-                  secondaryLabel: 'admin.hero.secondary'.tr,
+                  secondaryLabel: secondaryActionLabelKey.tr,
                   onPrimaryPressed: onOpenAgent,
                   onSecondaryPressed: () => controller.navigateToPage(
                     canManageUsersAndLogs
                         ? Routes.userManagementPage
-                        : Routes.adminBusinessProcessing,
+                        : businessRoute,
                   ),
                 ),
               ),
@@ -165,8 +214,8 @@ class _AdminHome extends StatelessWidget {
               _RevealIn(
                 delay: const Duration(milliseconds: 120),
                 child: _SectionTitleBlock(
-                  eyebrow: 'common.adminConsole'.tr,
-                  title: 'admin.coreEntries'.tr,
+                  eyebrow: workspaceEyebrowKey.tr,
+                  title: coreEntriesTitleKey.tr,
                   description: 'admin.metric.agentDetail'.tr,
                 ),
               ),
@@ -202,22 +251,19 @@ class _AdminHome extends StatelessWidget {
                       index: canManageUsersAndLogs ? '04' : '02',
                       title: 'admin.card.business.title'.tr,
                       subtitle: 'admin.card.business.subtitle'.tr,
-                      onTap: () => controller
-                          .navigateToPage(Routes.adminBusinessProcessing),
+                      onTap: () => controller.navigateToPage(businessRoute),
                     ),
                     _DeckAction(
                       index: canManageUsersAndLogs ? '05' : '03',
                       title: 'admin.card.profile.title'.tr,
                       subtitle: 'admin.card.profile.subtitle'.tr,
-                      onTap: () =>
-                          controller.navigateToPage(Routes.adminPersonalPage),
+                      onTap: () => controller.navigateToPage(profileRoute),
                     ),
                     _DeckAction(
                       index: canManageUsersAndLogs ? '06' : '04',
                       title: 'admin.card.settings.title'.tr,
                       subtitle: 'admin.card.settings.subtitle'.tr,
-                      onTap: () =>
-                          controller.navigateToPage(Routes.adminSetting),
+                      onTap: () => controller.navigateToPage(settingsRoute),
                     ),
                   ],
                 ),
@@ -465,8 +511,9 @@ class _WorkspaceOverview extends StatelessWidget {
           );
           final side = _PriorityLane(
             queue: queue,
-            themeLabel:
-                theme.brightness == Brightness.dark ? 'common.dark' : 'common.light',
+            themeLabel: theme.brightness == Brightness.dark
+                ? 'common.dark'
+                : 'common.light',
           );
 
           if (stacked) {

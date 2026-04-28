@@ -1,6 +1,7 @@
 package com.tutict.finalassignmentbackend.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.tutict.finalassignmentbackend.config.statemachine.events.PaymentEvent;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -23,6 +24,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.security.authentication.AnonymousAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -143,7 +145,12 @@ public class PaymentRecordService {
         FineRecord fineRecord = requireFineRecord(paymentRecord == null ? null : paymentRecord.getFineId());
         normalizeCreateManagedFields(paymentRecord, fineRecord);
         validatePaymentRecord(paymentRecord, fineRecord);
-        paymentRecordMapper.insert(paymentRecord);
+        ensureNoDuplicatePendingSelfServicePayment(paymentRecord);
+        try {
+            paymentRecordMapper.insert(paymentRecord);
+        } catch (DuplicateKeyException ex) {
+            throw translatePaymentUniquenessViolation(ex);
+        }
         syncFinePaymentSummary(paymentRecord.getFineId());
         syncToIndexAfterCommit(paymentRecord);
         return paymentRecord;
@@ -186,6 +193,7 @@ public class PaymentRecordService {
         PaymentRecord existing = requireExistingPaymentRecord(paymentId);
         ensurePendingSelfServicePaymentForConfirmation(existing);
         ensureUniqueTransactionId(normalizedTransactionId, paymentId);
+        ensureConfirmationTransactionConsistency(existing, normalizedTransactionId);
 
         LocalDateTime confirmationTime = LocalDateTime.now();
         existing.setTransactionId(normalizedTransactionId);
@@ -193,7 +201,7 @@ public class PaymentRecordService {
         existing.setReceiptNumber(defaultIfBlank(existing.getReceiptNumber(), generateReferenceNumber("RCT")));
         existing.setPaymentTime(confirmationTime);
         existing.setUpdatedAt(confirmationTime);
-        updatePaymentByIdScoped(existing);
+        updatePaymentConfirmationDetailsScoped(existing, confirmationTime);
         syncToIndexAfterCommit(existing);
         return existing;
     }
@@ -217,6 +225,7 @@ public class PaymentRecordService {
         PaymentRecord existing = requireExistingPaymentRecord(paymentId);
         ensurePendingSelfServicePaymentForConfirmation(existing);
         ensureUniqueTransactionId(normalizedTransactionId, paymentId);
+        ensureConfirmationTransactionConsistency(existing, normalizedTransactionId);
 
         PaymentState newState = resolveTransitionedPaymentState(paymentId, existing, targetState);
         LocalDateTime confirmationTime = LocalDateTime.now();
@@ -224,7 +233,7 @@ public class PaymentRecordService {
         existing.setReceiptUrl(trimToNull(receiptUrl));
         existing.setReceiptNumber(defaultIfBlank(existing.getReceiptNumber(), generateReferenceNumber("RCT")));
         existing.setPaymentTime(confirmationTime);
-        return persistPaymentStatusUpdate(existing, newState, confirmationTime);
+        return persistSelfServiceConfirmation(existing, newState, confirmationTime);
     }
 
     @Transactional
@@ -771,6 +780,53 @@ public class PaymentRecordService {
         }
     }
 
+    private void ensureNoDuplicatePendingSelfServicePayment(PaymentRecord paymentRecord) {
+        if (!shouldCreateAsPendingSelfServicePayment(paymentRecord)
+                || resolvePaymentState(paymentRecord.getPaymentStatus()) != PaymentState.UNPAID) {
+            return;
+        }
+        String payerIdCard = trimToNull(paymentRecord.getPayerIdCard());
+        if (paymentRecord.getFineId() == null || payerIdCard == null) {
+            return;
+        }
+        QueryWrapper<PaymentRecord> wrapper = new QueryWrapper<>();
+        tenantScope(wrapper)
+                .eq("fine_id", paymentRecord.getFineId())
+                .eq("payer_id_card", payerIdCard)
+                .eq("payment_status", PaymentState.UNPAID.getCode())
+                .apply("UPPER(payment_channel) IN ('APP', 'USER_SELF_SERVICE')");
+        Long duplicateCount = paymentRecordMapper.selectCount(wrapper);
+        if (duplicateCount != null && duplicateCount > 0) {
+            throw new IllegalStateException("A pending self-service payment order already exists for this fine and payer");
+        }
+    }
+
+    private void ensureConfirmationTransactionConsistency(PaymentRecord existing, String normalizedTransactionId) {
+        if (existing == null || isBlank(existing.getTransactionId())) {
+            return;
+        }
+        if (!existing.getTransactionId().trim().equals(normalizedTransactionId)) {
+            throw new IllegalStateException("Transaction ID has already been set for this payment record");
+        }
+    }
+
+    private IllegalStateException translatePaymentUniquenessViolation(DuplicateKeyException ex) {
+        String message = ex.getMostSpecificCause() == null
+                ? ex.getMessage()
+                : ex.getMostSpecificCause().getMessage();
+        String normalizedMessage = message == null ? "" : message.toLowerCase();
+        if (normalizedMessage.contains("transaction")) {
+            return new IllegalStateException("Transaction ID is already used by another payment record", ex);
+        }
+        if (normalizedMessage.contains("pending_self_service")
+                || normalizedMessage.contains("active_pending_self_service")) {
+            return new IllegalStateException(
+                    "A pending self-service payment order already exists for this fine and payer",
+                    ex);
+        }
+        return new IllegalStateException("Payment record violates uniqueness constraints", ex);
+    }
+
     private void appendParam(StringBuilder builder, String key, Object value) {
         if (builder == null || value == null) {
             return;
@@ -1121,6 +1177,21 @@ public class PaymentRecordService {
         return existing;
     }
 
+    private PaymentRecord persistSelfServiceConfirmation(PaymentRecord existing,
+                                                         PaymentState newState,
+                                                         LocalDateTime updateTime) {
+        PaymentState effectiveState = newState != null ? newState : resolvePaymentState(existing == null
+                ? null
+                : existing.getPaymentStatus());
+        validatePaymentStateConsistency(existing, effectiveState);
+        existing.setPaymentStatus(effectiveState.getCode());
+        existing.setUpdatedAt(updateTime == null ? LocalDateTime.now() : updateTime);
+        updateSelfServiceConfirmationScoped(existing);
+        syncFinePaymentSummary(existing.getFineId());
+        syncToIndexAfterCommit(existing);
+        return existing;
+    }
+
     private FineRecord requireFineRecord(Long fineId) {
         requirePositive(fineId, "Fine ID");
         FineRecord fineRecord = fineRecordService.findById(fineId);
@@ -1381,9 +1452,14 @@ public class PaymentRecordService {
         if (paymentIds == null || paymentIds.isEmpty()) {
             return List.of();
         }
-        QueryWrapper<PaymentRecord> wrapper = new QueryWrapper<>();
-        tenantScope(wrapper).in("payment_id", paymentIds);
-        List<PaymentRecord> records = paymentRecordMapper.selectList(wrapper);
+        List<PaymentRecord> records;
+        if (databaseOnlyForTenantIsolation()) {
+            QueryWrapper<PaymentRecord> wrapper = new QueryWrapper<>();
+            tenantScope(wrapper).in("payment_id", paymentIds);
+            records = paymentRecordMapper.selectList(wrapper);
+        } else {
+            records = paymentRecordMapper.selectBatchIds(paymentIds);
+        }
         if (records == null || records.isEmpty()) {
             return List.of();
         }
@@ -1631,9 +1707,23 @@ public class PaymentRecordService {
         return tenantAwareSupport.applyTenantScope(wrapper);
     }
 
+    private <T> UpdateWrapper<T> tenantScope(UpdateWrapper<T> wrapper) {
+        if (wrapper == null || !databaseOnlyForTenantIsolation()) {
+            return wrapper;
+        }
+        String tenantId = tenantAwareSupport.currentTenantId();
+        if (!isBlank(tenantId)) {
+            wrapper.eq("tenant_id", tenantId.trim());
+        }
+        return wrapper;
+    }
+
     private PaymentRecord findPaymentByIdFromDatabase(Long paymentId) {
         if (paymentId == null) {
             return null;
+        }
+        if (!databaseOnlyForTenantIsolation()) {
+            return paymentRecordMapper.selectById(paymentId);
         }
         QueryWrapper<PaymentRecord> wrapper = new QueryWrapper<>();
         tenantScope(wrapper).eq("payment_id", paymentId).last("limit 1");
@@ -1650,6 +1740,61 @@ public class PaymentRecordService {
         QueryWrapper<PaymentRecord> wrapper = new QueryWrapper<>();
         tenantScope(wrapper).eq("payment_id", paymentRecord.getPaymentId());
         return paymentRecordMapper.update(paymentRecord, wrapper);
+    }
+
+    private void updatePaymentConfirmationDetailsScoped(PaymentRecord paymentRecord, LocalDateTime updateTime) {
+        if (paymentRecord == null || paymentRecord.getPaymentId() == null) {
+            return;
+        }
+        PaymentRecord update = new PaymentRecord();
+        update.setTransactionId(paymentRecord.getTransactionId());
+        update.setReceiptUrl(paymentRecord.getReceiptUrl());
+        update.setReceiptNumber(paymentRecord.getReceiptNumber());
+        update.setPaymentTime(paymentRecord.getPaymentTime());
+        update.setUpdatedAt(updateTime == null ? LocalDateTime.now() : updateTime);
+
+        UpdateWrapper<PaymentRecord> wrapper = new UpdateWrapper<>();
+        tenantScope(wrapper)
+                .eq("payment_id", paymentRecord.getPaymentId())
+                .eq("payment_status", PaymentState.UNPAID.getCode())
+                .isNull("transaction_id");
+        int updatedRows;
+        try {
+            updatedRows = paymentRecordMapper.update(update, wrapper);
+        } catch (DuplicateKeyException ex) {
+            throw translatePaymentUniquenessViolation(ex);
+        }
+        if (updatedRows <= 0) {
+            throw new IllegalStateException(
+                    "Only pending self-service payment orders without confirmation details can accept confirmation details");
+        }
+    }
+
+    private void updateSelfServiceConfirmationScoped(PaymentRecord paymentRecord) {
+        if (paymentRecord == null || paymentRecord.getPaymentId() == null) {
+            return;
+        }
+        PaymentRecord update = new PaymentRecord();
+        update.setTransactionId(paymentRecord.getTransactionId());
+        update.setReceiptUrl(paymentRecord.getReceiptUrl());
+        update.setReceiptNumber(paymentRecord.getReceiptNumber());
+        update.setPaymentTime(paymentRecord.getPaymentTime());
+        update.setPaymentStatus(paymentRecord.getPaymentStatus());
+        update.setUpdatedAt(paymentRecord.getUpdatedAt());
+
+        UpdateWrapper<PaymentRecord> wrapper = new UpdateWrapper<>();
+        tenantScope(wrapper)
+                .eq("payment_id", paymentRecord.getPaymentId())
+                .eq("payment_status", PaymentState.UNPAID.getCode());
+        int updatedRows;
+        try {
+            updatedRows = paymentRecordMapper.update(update, wrapper);
+        } catch (DuplicateKeyException ex) {
+            throw translatePaymentUniquenessViolation(ex);
+        }
+        if (updatedRows <= 0) {
+            throw new IllegalStateException("Only pending self-service payment orders can be confirmed");
+        }
     }
 
     private static TenantAwareSupport defaultTenantAwareSupport() {

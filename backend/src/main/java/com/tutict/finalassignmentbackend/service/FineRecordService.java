@@ -744,6 +744,9 @@ public class FineRecordService {
         if (fineId == null) {
             return null;
         }
+        if (!databaseOnlyForTenantIsolation()) {
+            return fineRecordMapper.selectById(fineId);
+        }
         QueryWrapper<FineRecord> wrapper = new QueryWrapper<>();
         tenantScope(wrapper).eq("fine_id", fineId).last("limit 1");
         return fineRecordMapper.selectOne(wrapper);

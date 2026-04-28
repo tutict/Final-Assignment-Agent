@@ -45,7 +45,11 @@ public class AuthenticationSnapshotService {
     }
 
     @Transactional(readOnly = true)
-    @Cacheable(cacheNames = CACHE_NAME, key = "#username", cacheManager = "caffeineCacheManager", unless = "#result == null")
+    @Cacheable(
+            cacheNames = CACHE_NAME,
+            key = "@tenantCacheKeySupport.scope('authSnapshot', #username)",
+            cacheManager = "caffeineCacheManager",
+            unless = "#result == null")
     public AuthenticationSnapshot findActiveSnapshotByUsername(String username) {
         String normalizedUsername = normalizeUsername(username);
         if (normalizedUsername == null) {

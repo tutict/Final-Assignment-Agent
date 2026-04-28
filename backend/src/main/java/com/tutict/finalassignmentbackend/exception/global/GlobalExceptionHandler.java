@@ -9,6 +9,7 @@ import org.apache.kafka.common.errors.ResourceNotFoundException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.validation.BindException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
@@ -40,6 +41,13 @@ public class GlobalExceptionHandler {
                                                                               HttpServletRequest request) {
         LOGGER.log(Level.WARNING, "Invalid request: {0}", ex.getMessage());
         return buildResponse(HttpStatus.BAD_REQUEST, safeMessage(ex.getMessage(), "Invalid request"), request, null);
+    }
+
+    @ExceptionHandler(IllegalStateException.class)
+    public ResponseEntity<Map<String, Object>> handleIllegalStateException(IllegalStateException ex,
+                                                                           HttpServletRequest request) {
+        LOGGER.log(Level.WARNING, "Invalid request state: {0}", ex.getMessage());
+        return buildResponse(HttpStatus.BAD_REQUEST, safeMessage(ex.getMessage(), "Invalid request state"), request, null);
     }
 
     @ExceptionHandler(UnauthorizedException.class)
@@ -113,6 +121,14 @@ public class GlobalExceptionHandler {
         LOGGER.log(Level.WARNING, "Missing request parameter: {0}", ex.getParameterName());
         return buildResponse(HttpStatus.BAD_REQUEST,
                 "Missing request parameter: " + ex.getParameterName(), request, null);
+    }
+
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<Map<String, Object>> handleHttpMessageNotReadableException(
+            HttpMessageNotReadableException ex,
+            HttpServletRequest request) {
+        LOGGER.log(Level.WARNING, "Request body is missing or unreadable: {0}", ex.getMessage());
+        return buildResponse(HttpStatus.BAD_REQUEST, "Request body is missing or unreadable", request, null);
     }
 
     @ExceptionHandler(Exception.class)

@@ -18,22 +18,15 @@ class _AiChatState extends State<AiChat> {
   late final List<Worker> _autoScrollWorkers;
   bool _autoScrollQueued = false;
 
-  static const _background = Color(0xFF0E1116);
-  static const _surface = Color(0xFF151A22);
-  static const _surfaceRaised = Color(0xFF1C2430);
-  static const _outline = Color(0xFF2A3444);
-  static const _muted = Color(0xFF91A0B4);
-  static const _text = Color(0xFFE6EDF6);
-  static const _accent = Color(0xFF63B3ED);
-  static const _accentSoft = Color(0xFF1C3146);
-
   @override
   void initState() {
     super.initState();
     _controller = Get.find<ChatController>();
     _autoScrollWorkers = [
       ever<List<ChatMessage>>(
-          _controller.messages, (_) => _scheduleAutoScroll()),
+        _controller.messages,
+        (_) => _scheduleAutoScroll(),
+      ),
       ever<List<String>>(
         _controller.searchResults,
         (_) => _scheduleAutoScroll(),
@@ -82,16 +75,19 @@ class _AiChatState extends State<AiChat> {
 
   @override
   Widget build(BuildContext context) {
+    final palette = _ChatPalette.of(context);
+
     return DecoratedBox(
-      decoration: const BoxDecoration(color: _background),
+      decoration: BoxDecoration(color: palette.background),
       child: SafeArea(
         child: Column(
           children: [
-            _Header(controller: _controller),
+            _Header(controller: _controller, palette: palette),
             Expanded(
               child: Obx(() {
                 if (_controller.messages.isEmpty) {
                   return _EmptyState(
+                    palette: palette,
                     suggestions: _controller.suggestions,
                     onSuggestionTap: _controller.sendMessage,
                   );
@@ -103,12 +99,17 @@ class _AiChatState extends State<AiChat> {
                   children: [
                     if (_controller.agentContext.value != null)
                       _ContextPanel(
+                        palette: palette,
                         contextInfo: _controller.agentContext.value!,
                       ),
                     if (_controller.searchResults.isNotEmpty)
-                      _SearchPanel(results: _controller.searchResults),
+                      _SearchPanel(
+                        palette: palette,
+                        results: _controller.searchResults,
+                      ),
                     ..._controller.messages.map(
                       (message) => _MessageBlock(
+                        palette: palette,
                         message: message,
                         onActionTap: _controller.executeAction,
                       ),
@@ -117,7 +118,7 @@ class _AiChatState extends State<AiChat> {
                 );
               }),
             ),
-            _Composer(controller: _controller),
+            _Composer(controller: _controller, palette: palette),
           ],
         ),
       ),
@@ -126,8 +127,12 @@ class _AiChatState extends State<AiChat> {
 }
 
 class _ContextPanel extends StatelessWidget {
-  const _ContextPanel({required this.contextInfo});
+  const _ContextPanel({
+    required this.palette,
+    required this.contextInfo,
+  });
 
+  final _ChatPalette palette;
   final AgentContextInfo contextInfo;
 
   @override
@@ -137,35 +142,37 @@ class _ContextPanel extends StatelessWidget {
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: contextInfo.privilegedOperator
-            ? const Color(0xFF183124)
-            : _AiChatState._surface,
+            ? palette.highlightSurface
+            : palette.surface,
         borderRadius: BorderRadius.circular(18),
         border: Border.all(
           color: contextInfo.privilegedOperator
-              ? const Color(0xFF2E7D57)
-              : _AiChatState._outline,
+              ? palette.highlightOutline
+              : palette.outline,
         ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'Agent Context',
+            'chat.contextTitle'.tr,
             style: TextStyle(
-              color: _AiChatState._muted,
+              color: palette.muted,
               fontSize: 12,
               fontWeight: FontWeight.w700,
             ),
           ),
           const SizedBox(height: 10),
           _ContextLine(
-            label: '当前身份',
-            value: contextInfo.operatorLabel ?? '未知',
+            palette: palette,
+            label: 'chat.context.operator'.tr,
+            value: contextInfo.operatorLabel ?? 'common.unknown'.tr,
           ),
           const SizedBox(height: 8),
           _ContextLine(
-            label: '访问范围',
-            value: contextInfo.accessScopeLabel ?? '未知',
+            palette: palette,
+            label: 'chat.context.scope'.tr,
+            value: contextInfo.accessScopeLabel ?? 'common.unknown'.tr,
           ),
         ],
       ),
@@ -174,8 +181,13 @@ class _ContextPanel extends StatelessWidget {
 }
 
 class _ContextLine extends StatelessWidget {
-  const _ContextLine({required this.label, required this.value});
+  const _ContextLine({
+    required this.palette,
+    required this.label,
+    required this.value,
+  });
 
+  final _ChatPalette palette;
   final String label;
   final String value;
 
@@ -186,16 +198,16 @@ class _ContextLine extends StatelessWidget {
         children: [
           TextSpan(
             text: '$label: ',
-            style: const TextStyle(
-              color: _AiChatState._muted,
+            style: TextStyle(
+              color: palette.muted,
               fontSize: 13,
               fontWeight: FontWeight.w700,
             ),
           ),
           TextSpan(
             text: value,
-            style: const TextStyle(
-              color: _AiChatState._text,
+            style: TextStyle(
+              color: palette.text,
               fontSize: 13,
               height: 1.45,
             ),
@@ -207,16 +219,20 @@ class _ContextLine extends StatelessWidget {
 }
 
 class _Header extends StatelessWidget {
-  const _Header({required this.controller});
+  const _Header({
+    required this.controller,
+    required this.palette,
+  });
 
   final ChatController controller;
+  final _ChatPalette palette;
 
   @override
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.fromLTRB(18, 18, 18, 14),
-      decoration: const BoxDecoration(
-        border: Border(bottom: BorderSide(color: _AiChatState._outline)),
+      decoration: BoxDecoration(
+        border: Border(bottom: BorderSide(color: palette.outline)),
       ),
       child: Column(
         children: [
@@ -226,14 +242,14 @@ class _Header extends StatelessWidget {
                 width: 34,
                 height: 34,
                 decoration: BoxDecoration(
-                  color: _AiChatState._accentSoft,
+                  color: palette.accentSoft,
                   borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: _AiChatState._outline),
+                  border: Border.all(color: palette.outline),
                 ),
-                child: const Icon(
+                child: Icon(
                   Icons.terminal_rounded,
                   size: 18,
-                  color: _AiChatState._accent,
+                  color: palette.accent,
                 ),
               ),
               const SizedBox(width: 12),
@@ -241,20 +257,19 @@ class _Header extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
-                      'traffic-agent',
+                    Text(
+                      'app.name'.tr,
                       style: TextStyle(
-                        color: _AiChatState._text,
+                        color: palette.text,
                         fontSize: 15,
                         fontWeight: FontWeight.w700,
-                        letterSpacing: 0.2,
                       ),
                     ),
-                    SizedBox(height: 2),
+                    const SizedBox(height: 2),
                     Text(
                       'chat.subtitle'.tr,
                       style: TextStyle(
-                        color: _AiChatState._muted,
+                        color: palette.muted,
                         fontSize: 12,
                       ),
                     ),
@@ -268,14 +283,16 @@ class _Header extends StatelessWidget {
                   ),
                   borderRadius: BorderRadius.circular(14),
                   child: Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 8,
+                    ),
                     decoration: BoxDecoration(
                       color: controller.webSearchEnabled.value
-                          ? _AiChatState._accentSoft
-                          : _AiChatState._surface,
+                          ? palette.accentSoft
+                          : palette.surface,
                       borderRadius: BorderRadius.circular(14),
-                      border: Border.all(color: _AiChatState._outline),
+                      border: Border.all(color: palette.outline),
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
@@ -286,8 +303,8 @@ class _Header extends StatelessWidget {
                               : Icons.language_outlined,
                           size: 14,
                           color: controller.webSearchEnabled.value
-                              ? _AiChatState._accent
-                              : _AiChatState._muted,
+                              ? palette.accent
+                              : palette.muted,
                         ),
                         const SizedBox(width: 6),
                         Text(
@@ -296,8 +313,8 @@ class _Header extends StatelessWidget {
                               : 'chat.webOff'.tr,
                           style: TextStyle(
                             color: controller.webSearchEnabled.value
-                                ? _AiChatState._text
-                                : _AiChatState._muted,
+                                ? palette.text
+                                : palette.muted,
                             fontSize: 12,
                             fontWeight: FontWeight.w600,
                           ),
@@ -319,6 +336,7 @@ class _Header extends StatelessWidget {
                 children: controller.availableSkills.isEmpty
                     ? [
                         _TinyPill(
+                          palette: palette,
                           label: 'chat.loadingSkills'.tr,
                           icon: Icons.sync_rounded,
                         ),
@@ -326,6 +344,7 @@ class _Header extends StatelessWidget {
                     : controller.availableSkills
                         .map(
                           (skill) => _TinyPill(
+                            palette: palette,
                             label: skill.name,
                             tooltip: skill.description,
                             icon: Icons.hub_outlined,
@@ -343,11 +362,13 @@ class _Header extends StatelessWidget {
 
 class _TinyPill extends StatelessWidget {
   const _TinyPill({
+    required this.palette,
     required this.label,
     required this.icon,
     this.tooltip,
   });
 
+  final _ChatPalette palette;
   final String label;
   final IconData icon;
   final String? tooltip;
@@ -357,19 +378,19 @@ class _TinyPill extends StatelessWidget {
     final child = Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
       decoration: BoxDecoration(
-        color: _AiChatState._surface,
+        color: palette.surface,
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: _AiChatState._outline),
+        border: Border.all(color: palette.outline),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 12, color: _AiChatState._muted),
+          Icon(icon, size: 12, color: palette.muted),
           const SizedBox(width: 6),
           Text(
             label,
-            style: const TextStyle(
-              color: _AiChatState._muted,
+            style: TextStyle(
+              color: palette.muted,
               fontSize: 11,
               fontWeight: FontWeight.w600,
             ),
@@ -384,8 +405,12 @@ class _TinyPill extends StatelessWidget {
 }
 
 class _SearchPanel extends StatelessWidget {
-  const _SearchPanel({required this.results});
+  const _SearchPanel({
+    required this.palette,
+    required this.results,
+  });
 
+  final _ChatPalette palette;
   final List<String> results;
 
   @override
@@ -394,9 +419,9 @@ class _SearchPanel extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 14),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: _AiChatState._surface,
+        color: palette.surface,
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: _AiChatState._outline),
+        border: Border.all(color: palette.outline),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -404,7 +429,7 @@ class _SearchPanel extends StatelessWidget {
           Text(
             'chat.webResults'.tr,
             style: TextStyle(
-              color: _AiChatState._muted,
+              color: palette.muted,
               fontSize: 12,
               fontWeight: FontWeight.w700,
             ),
@@ -415,8 +440,8 @@ class _SearchPanel extends StatelessWidget {
                   padding: const EdgeInsets.only(bottom: 8),
                   child: Text(
                     '> $result',
-                    style: const TextStyle(
-                      color: _AiChatState._text,
+                    style: TextStyle(
+                      color: palette.text,
                       fontSize: 13,
                       height: 1.45,
                     ),
@@ -431,10 +456,12 @@ class _SearchPanel extends StatelessWidget {
 
 class _MessageBlock extends StatelessWidget {
   const _MessageBlock({
+    required this.palette,
     required this.message,
     required this.onActionTap,
   });
 
+  final _ChatPalette palette;
   final ChatMessage message;
   final ValueChanged<ChatAction> onActionTap;
 
@@ -442,10 +469,10 @@ class _MessageBlock extends StatelessWidget {
   Widget build(BuildContext context) {
     final isUser = message.isUser;
     final background = message.isStatus
-        ? _AiChatState._surface
+        ? palette.surface
         : isUser
-            ? _AiChatState._accentSoft
-            : _AiChatState._surfaceRaised;
+            ? palette.accentSoft
+            : palette.surfaceRaised;
 
     final label = message.isStatus
         ? 'chat.status'
@@ -459,26 +486,24 @@ class _MessageBlock extends StatelessWidget {
       decoration: BoxDecoration(
         color: background,
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: _AiChatState._outline),
+        border: Border.all(color: palette.outline),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
             label.tr,
-            style: const TextStyle(
-              color: _AiChatState._muted,
+            style: TextStyle(
+              color: palette.muted,
               fontSize: 11,
               fontWeight: FontWeight.w700,
-              letterSpacing: 0.3,
             ),
           ),
           const SizedBox(height: 8),
           Text(
             message.text,
             style: TextStyle(
-              color:
-                  message.isStatus ? _AiChatState._muted : _AiChatState._text,
+              color: message.isStatus ? palette.muted : palette.text,
               fontSize: 14,
               height: 1.55,
             ),
@@ -493,9 +518,9 @@ class _MessageBlock extends StatelessWidget {
                     (action) => OutlinedButton.icon(
                       onPressed: () => onActionTap(action),
                       style: OutlinedButton.styleFrom(
-                        foregroundColor: _AiChatState._text,
-                        side: const BorderSide(color: _AiChatState._outline),
-                        backgroundColor: _AiChatState._background,
+                        foregroundColor: palette.text,
+                        side: BorderSide(color: palette.outline),
+                        backgroundColor: palette.background,
                       ),
                       icon: const Icon(
                         Icons.subdirectory_arrow_right_rounded,
@@ -517,10 +542,12 @@ class _MessageBlock extends StatelessWidget {
 
 class _EmptyState extends StatelessWidget {
   const _EmptyState({
+    required this.palette,
     required this.suggestions,
     required this.onSuggestionTap,
   });
 
+  final _ChatPalette palette;
   final List<String> suggestions;
   final ValueChanged<String> onSuggestionTap;
 
@@ -532,9 +559,9 @@ class _EmptyState extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.all(18),
           decoration: BoxDecoration(
-            color: _AiChatState._surface,
+            color: palette.surface,
             borderRadius: BorderRadius.circular(22),
-            border: Border.all(color: _AiChatState._outline),
+            border: Border.all(color: palette.outline),
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -543,7 +570,7 @@ class _EmptyState extends StatelessWidget {
               Text(
                 'chat.emptyTitle'.tr,
                 style: TextStyle(
-                  color: _AiChatState._text,
+                  color: palette.text,
                   fontSize: 18,
                   fontWeight: FontWeight.w700,
                 ),
@@ -552,7 +579,7 @@ class _EmptyState extends StatelessWidget {
               Text(
                 'chat.emptyBody'.tr,
                 style: TextStyle(
-                  color: _AiChatState._muted,
+                  color: palette.muted,
                   fontSize: 13,
                   height: 1.5,
                 ),
@@ -565,11 +592,11 @@ class _EmptyState extends StatelessWidget {
                     .map(
                       (item) => ActionChip(
                         onPressed: () => onSuggestionTap(item),
-                        backgroundColor: _AiChatState._accentSoft,
-                        side: const BorderSide(color: _AiChatState._outline),
+                        backgroundColor: palette.accentSoft,
+                        side: BorderSide(color: palette.outline),
                         label: Text(
                           item,
-                          style: const TextStyle(color: _AiChatState._text),
+                          style: TextStyle(color: palette.text),
                         ),
                       ),
                     )
@@ -584,25 +611,29 @@ class _EmptyState extends StatelessWidget {
 }
 
 class _Composer extends StatelessWidget {
-  const _Composer({required this.controller});
+  const _Composer({
+    required this.controller,
+    required this.palette,
+  });
 
   final ChatController controller;
+  final _ChatPalette palette;
 
   @override
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-      decoration: const BoxDecoration(
-        color: _AiChatState._background,
-        border: Border(top: BorderSide(color: _AiChatState._outline)),
+      decoration: BoxDecoration(
+        color: palette.background,
+        border: Border(top: BorderSide(color: palette.outline)),
       ),
       child: Column(
         children: [
           Container(
             decoration: BoxDecoration(
-              color: _AiChatState._surface,
+              color: palette.surface,
               borderRadius: BorderRadius.circular(18),
-              border: Border.all(color: _AiChatState._outline),
+              border: Border.all(color: palette.outline),
             ),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.end,
@@ -612,14 +643,14 @@ class _Composer extends StatelessWidget {
                     controller: controller.textController,
                     minLines: 1,
                     maxLines: 4,
-                    style: const TextStyle(
-                      color: _AiChatState._text,
+                    style: TextStyle(
+                      color: palette.text,
                       fontSize: 14,
                     ),
                     onSubmitted: (_) => controller.sendMessage(),
                     decoration: InputDecoration(
                       hintText: 'chat.inputHint'.tr,
-                      hintStyle: const TextStyle(color: _AiChatState._muted),
+                      hintStyle: TextStyle(color: palette.muted),
                       border: InputBorder.none,
                       contentPadding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
                     ),
@@ -633,8 +664,8 @@ class _Composer extends StatelessWidget {
                           ? null
                           : () => controller.sendMessage(),
                       style: IconButton.styleFrom(
-                        backgroundColor: _AiChatState._accent,
-                        foregroundColor: _AiChatState._background,
+                        backgroundColor: palette.accent,
+                        foregroundColor: palette.background,
                       ),
                       icon: controller.isSending.value
                           ? const SizedBox(
@@ -654,11 +685,72 @@ class _Composer extends StatelessWidget {
             alignment: Alignment.centerLeft,
             child: Text(
               'chat.footer'.tr,
-              style: TextStyle(color: _AiChatState._muted, fontSize: 11),
+              style: TextStyle(color: palette.muted, fontSize: 11),
             ),
           ),
         ],
       ),
+    );
+  }
+}
+
+class _ChatPalette {
+  const _ChatPalette({
+    required this.background,
+    required this.surface,
+    required this.surfaceRaised,
+    required this.outline,
+    required this.muted,
+    required this.text,
+    required this.accent,
+    required this.accentSoft,
+    required this.highlightSurface,
+    required this.highlightOutline,
+  });
+
+  final Color background;
+  final Color surface;
+  final Color surfaceRaised;
+  final Color outline;
+  final Color muted;
+  final Color text;
+  final Color accent;
+  final Color accentSoft;
+  final Color highlightSurface;
+  final Color highlightOutline;
+
+  static _ChatPalette of(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
+
+    return _ChatPalette(
+      background: isDark
+          ? Color.alphaBlend(
+              colorScheme.surfaceTint.withValues(alpha: 0.06),
+              colorScheme.surface,
+            )
+          : colorScheme.surfaceContainerLowest,
+      surface: isDark
+          ? colorScheme.surfaceContainerHigh.withValues(alpha: 0.92)
+          : colorScheme.surface,
+      surfaceRaised: isDark
+          ? colorScheme.surfaceContainerHighest.withValues(alpha: 0.96)
+          : colorScheme.surfaceContainerLow,
+      outline:
+          colorScheme.outlineVariant.withValues(alpha: isDark ? 0.72 : 0.6),
+      muted: colorScheme.onSurfaceVariant,
+      text: colorScheme.onSurface,
+      accent: colorScheme.primary,
+      accentSoft: colorScheme.primaryContainer.withValues(
+        alpha: isDark ? 0.42 : 0.82,
+      ),
+      highlightSurface: Color.alphaBlend(
+        colorScheme.primary.withValues(alpha: isDark ? 0.14 : 0.08),
+        isDark ? colorScheme.surfaceContainerHigh : colorScheme.surface,
+      ),
+      highlightOutline:
+          colorScheme.primary.withValues(alpha: isDark ? 0.48 : 0.3),
     );
   }
 }

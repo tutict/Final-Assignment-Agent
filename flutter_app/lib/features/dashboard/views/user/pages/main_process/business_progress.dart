@@ -76,7 +76,6 @@ class _BusinessProgressPageState extends State<BusinessProgressPage> {
         title: 'business.menu.title'.tr,
         pageType: DashboardPageType.user,
         onThemeToggle: controller.toggleBodyTheme,
-        bodyIsScrollable: true,
         backgroundColor: theme.scaffoldBackgroundColor,
         body: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -331,7 +330,8 @@ class _BusinessHero extends StatelessWidget {
 }
 
 class _HeroBadge extends StatelessWidget {
-  const _HeroBadge(this.label, {this.accent = Colors.white, this.filled = false});
+  const _HeroBadge(this.label,
+      {this.accent = Colors.white, this.filled = false});
 
   final String label;
   final Color accent;
@@ -370,8 +370,10 @@ class _HeroSignals extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final items = [
-      ('user.focus.profileStatus'.tr,
-          (profileReady ? 'business.menu.ready' : 'business.menu.statusReview').tr),
+      (
+        'user.focus.profileStatus'.tr,
+        (profileReady ? 'business.menu.ready' : 'business.menu.statusReview').tr
+      ),
       ('common.agent'.tr, 'common.online'.tr),
       ('common.workspace'.tr, 'business.menu.signal'.tr),
     ];
@@ -457,7 +459,9 @@ class _HeroTips extends StatelessWidget {
               borderRadius: BorderRadius.circular(18),
             ),
             child: Text(
-              profileReady ? 'business.menu.ready'.tr : 'business.menu.statusReview'.tr,
+              profileReady
+                  ? 'business.menu.ready'.tr
+                  : 'business.menu.statusReview'.tr,
               style: theme.textTheme.labelLarge?.copyWith(color: Colors.white),
             ),
           ),
@@ -562,23 +566,21 @@ class _BusinessActionDeck extends StatelessWidget {
         ),
       ),
       child: Column(
-        children: options
-            .asMap()
-            .entries
-            .map((entry) {
-              final option = entry.value;
-              return Column(
-                children: [
-                  _BusinessActionRow(option: option, onTap: () => onTap(option.route)),
-                  if (entry.key != options.length - 1)
-                    Divider(
-                      height: 1,
-                      color: theme.colorScheme.outlineVariant.withValues(alpha: 0.22),
-                    ),
-                ],
-              );
-            })
-            .toList(),
+        children: options.asMap().entries.map((entry) {
+          final option = entry.value;
+          return Column(
+            children: [
+              _BusinessActionRow(
+                  option: option, onTap: () => onTap(option.route)),
+              if (entry.key != options.length - 1)
+                Divider(
+                  height: 1,
+                  color:
+                      theme.colorScheme.outlineVariant.withValues(alpha: 0.22),
+                ),
+            ],
+          );
+        }).toList(),
       ),
     );
   }
@@ -630,20 +632,24 @@ class _BusinessActionRowState extends State<_BusinessActionRow> {
                   color: theme.colorScheme.primary.withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(14),
                 ),
-                child: Icon(widget.option.icon, color: theme.colorScheme.primary),
+                child:
+                    Icon(widget.option.icon, color: theme.colorScheme.primary),
               ),
               const SizedBox(width: 14),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(widget.option.titleKey.tr, style: theme.textTheme.titleMedium),
+                    Text(widget.option.titleKey.tr,
+                        style: theme.textTheme.titleMedium),
                     const SizedBox(height: 5),
-                    Text(widget.option.subtitleKey.tr, style: theme.textTheme.bodyMedium),
+                    Text(widget.option.subtitleKey.tr,
+                        style: theme.textTheme.bodyMedium),
                   ],
                 ),
               ),
-              Icon(Icons.arrow_outward_rounded, color: theme.colorScheme.primary),
+              Icon(Icons.arrow_outward_rounded,
+                  color: theme.colorScheme.primary),
             ],
           ),
         ),
@@ -697,7 +703,9 @@ class _InfoPanel extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 18),
-                Expanded(flex: 3, child: Text(row.value, style: theme.textTheme.bodyLarge)),
+                Expanded(
+                    flex: 3,
+                    child: Text(row.value, style: theme.textTheme.bodyLarge)),
               ],
             ),
             if (row != rows.last) const SizedBox(height: 14),
@@ -758,7 +766,8 @@ class _TipPanel extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(width: 10),
-                  Expanded(child: Text(item.tr, style: theme.textTheme.bodyLarge)),
+                  Expanded(
+                      child: Text(item.tr, style: theme.textTheme.bodyLarge)),
                 ],
               ),
             ),

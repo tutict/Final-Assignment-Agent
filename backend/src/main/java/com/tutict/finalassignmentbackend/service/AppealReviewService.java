@@ -105,6 +105,7 @@ public class AppealReviewService {
     @Transactional
     @CacheEvict(cacheNames = CACHE_NAME, allEntries = true)
     public AppealReview createReview(AppealReview appealReview) {
+        normalizeCreateSystemManagedFields(appealReview);
         validateAppealReview(appealReview, null);
         appealReviewMapper.insert(appealReview);
         applyReviewOutcome(null, appealReview);
@@ -240,8 +241,25 @@ public class AppealReviewService {
     }
 
     public long countByReviewLevel(String reviewLevel) {
-        return appealReviewSearchRepository.findByReviewLevel(reviewLevel, org.springframework.data.domain.PageRequest.of(0, 1))
-                .getTotalHits();
+        if (isBlank(reviewLevel)) {
+            return 0L;
+        }
+        try {
+            org.springframework.data.elasticsearch.core.SearchHits<AppealReviewDocument> hits =
+                    appealReviewSearchRepository.findByReviewLevel(
+                            reviewLevel,
+                            org.springframework.data.domain.PageRequest.of(0, 1));
+            if (hits != null && hits.getTotalHits() > 0) {
+                return hits.getTotalHits();
+            }
+        } catch (Exception ex) {
+            log.log(Level.WARNING, "Failed to count appeal reviews from Elasticsearch", ex);
+        }
+
+        QueryWrapper<AppealReview> wrapper = new QueryWrapper<>();
+        wrapper.eq("review_level", reviewLevel.trim());
+        Long count = appealReviewMapper.selectCount(wrapper);
+        return count == null ? 0L : count;
     }
 
     public boolean shouldSkipProcessing(String idempotencyKey) {
@@ -437,6 +455,23 @@ public class AppealReviewService {
         return org.springframework.data.domain.PageRequest.of(Math.max(page - 1, 0), Math.max(size, 1));
     }
 
+    private void normalizeCreateSystemManagedFields(AppealReview appealReview) {
+        if (appealReview == null) {
+            return;
+        }
+        appealReview.setReviewId(null);
+        appealReview.setTenantId(null);
+        appealReview.setOrganizationCode(null);
+        appealReview.setRegionCode(null);
+        appealReview.setDepartmentCode(null);
+        appealReview.setReviewTime(LocalDateTime.now());
+        appealReview.setReviewer(resolveOperatorName());
+        appealReview.setReviewerDept(resolveOperatorDepartment());
+        appealReview.setCreatedAt(null);
+        appealReview.setUpdatedAt(null);
+        appealReview.setDeletedAt(null);
+    }
+
     private void validateAppealReview(AppealReview appealReview, AppealReview existingReview) {
         Objects.requireNonNull(appealReview, "AppealReview must not be null");
         requirePositive(appealReview.getAppealId(), "Appeal ID");
@@ -533,6 +568,18 @@ public class AppealReviewService {
             return null;
         }
         return authentication.getName();
+    }
+
+    private String resolveOperatorDepartment() {
+        String operatorName = resolveOperatorName();
+        if (isBlank(operatorName)) {
+            return null;
+        }
+        SysUser user = sysUserService.findByUsername(operatorName);
+        if (user == null) {
+            return null;
+        }
+        return firstNonBlank(user.getDepartment(), user.getDepartmentCode());
     }
 
     private String resolveRequestMethod(String fallback) {
@@ -806,6 +853,18 @@ public class AppealReviewService {
 
     private boolean isAppealFinalized(AppealProcessState state) {
         return state == AppealProcessState.APPROVED || state == AppealProcessState.REJECTED;
+    }
+
+    private String firstNonBlank(String... values) {
+        if (values == null) {
+            return null;
+        }
+        for (String value : values) {
+            if (!isBlank(value)) {
+                return value.trim();
+            }
+        }
+        return null;
     }
 
     private boolean isReviewContentChanged(AppealReview existing, AppealReview incoming) {

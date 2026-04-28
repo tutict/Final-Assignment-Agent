@@ -32,6 +32,16 @@ bool hasManagementAccess(dynamic rawRoles) {
   ]);
 }
 
+String resolveWorkspaceRole(dynamic rawRoles) {
+  if (hasAnyRole(rawRoles, const ['SUPER_ADMIN', 'ADMIN'])) {
+    return 'ADMIN';
+  }
+  if (hasManagementAccess(rawRoles)) {
+    return 'MANAGER';
+  }
+  return 'USER';
+}
+
 String resolveStoredUserRole(dynamic rawRoles) {
-  return hasManagementAccess(rawRoles) ? 'ADMIN' : 'USER';
+  return resolveWorkspaceRole(rawRoles);
 }

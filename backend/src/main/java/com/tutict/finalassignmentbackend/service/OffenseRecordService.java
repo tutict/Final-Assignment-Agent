@@ -915,6 +915,9 @@ public class OffenseRecordService {
         if (offenseId == null) {
             return null;
         }
+        if (!databaseOnlyForTenantIsolation()) {
+            return offenseRecordMapper.selectById(offenseId);
+        }
         QueryWrapper<OffenseRecord> wrapper = new QueryWrapper<>();
         tenantScope(wrapper).eq("offense_id", offenseId).last("limit 1");
         return offenseRecordMapper.selectOne(wrapper);

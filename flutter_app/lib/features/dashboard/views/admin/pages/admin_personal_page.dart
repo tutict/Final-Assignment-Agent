@@ -16,7 +16,22 @@ String generateIdempotencyKey() =>
     DateTime.now().millisecondsSinceEpoch.toString();
 
 class AdminPersonalPage extends StatefulWidget {
-  const AdminPersonalPage({super.key});
+  const AdminPersonalPage({
+    super.key,
+    this.titleKey = 'admin.personal.title',
+    this.pageType = DashboardPageType.admin,
+    this.logoutTooltipKey = 'admin.personal.logoutTooltip',
+    this.logoutConfirmTitleKey = 'admin.personal.logoutConfirmTitle',
+    this.logoutConfirmBodyKey = 'admin.personal.logoutConfirmBody',
+    this.noDataKey = 'admin.personal.noData',
+  });
+
+  final String titleKey;
+  final DashboardPageType pageType;
+  final String logoutTooltipKey;
+  final String logoutConfirmTitleKey;
+  final String logoutConfirmBodyKey;
+  final String noDataKey;
 
   @override
   State<AdminPersonalPage> createState() => _AdminPersonalPageState();
@@ -251,8 +266,8 @@ class _AdminPersonalPageState extends State<AdminPersonalPage> {
 
   Future<void> _logout() async {
     final confirmed = await _showConfirmationDialog(
-      'admin.personal.logoutConfirmTitle'.tr,
-      'admin.personal.logoutConfirmBody'.tr,
+      widget.logoutConfirmTitleKey.tr,
+      widget.logoutConfirmBodyKey.tr,
     );
     if (!confirmed) return;
 
@@ -547,8 +562,8 @@ class _AdminPersonalPageState extends State<AdminPersonalPage> {
       final themeData = controller?.currentBodyTheme.value ?? ThemeData.light();
       return DashboardPageTemplate(
         theme: themeData,
-        title: 'admin.personal.title'.tr,
-        pageType: DashboardPageType.admin,
+        title: widget.titleKey.tr,
+        pageType: widget.pageType,
         bodyIsScrollable: true,
         padding: EdgeInsets.zero,
         onThemeToggle: controller?.toggleBodyTheme,
@@ -556,7 +571,7 @@ class _AdminPersonalPageState extends State<AdminPersonalPage> {
           DashboardPageBarAction(
             icon: Icons.logout,
             onPressed: _logout,
-            tooltip: 'admin.personal.logoutTooltip'.tr,
+            tooltip: widget.logoutTooltipKey.tr,
           ),
         ],
         body: _buildBody(themeData),
@@ -624,7 +639,7 @@ class _AdminPersonalPageState extends State<AdminPersonalPage> {
             children: [
               _buildListTile(
                 title: adminPersonalFieldLabel('name'),
-                subtitle: _driverInfo?.name ?? 'admin.personal.noData'.tr,
+                subtitle: _driverInfo?.name ?? widget.noDataKey.tr,
                 themeData: themeData,
                 onTap: () {
                   _nameController.text = _driverInfo?.name ?? '';
@@ -637,7 +652,7 @@ class _AdminPersonalPageState extends State<AdminPersonalPage> {
               ),
               _buildListTile(
                 title: adminPersonalFieldLabel('username'),
-                subtitle: user.username ?? 'admin.personal.noData'.tr,
+                subtitle: user.username ?? widget.noDataKey.tr,
                 themeData: themeData,
               ),
               _buildListTile(
@@ -650,7 +665,7 @@ class _AdminPersonalPageState extends State<AdminPersonalPage> {
                 title: adminPersonalFieldLabel('contactNumber'),
                 subtitle: _driverInfo?.contactNumber ??
                     user.contactNumber ??
-                    'admin.personal.noData'.tr,
+                    widget.noDataKey.tr,
                 themeData: themeData,
                 onTap: () {
                   _contactNumberController.text =
@@ -664,7 +679,7 @@ class _AdminPersonalPageState extends State<AdminPersonalPage> {
               ),
               _buildListTile(
                 title: adminPersonalFieldLabel('email'),
-                subtitle: user.email ?? 'admin.personal.noData'.tr,
+                subtitle: user.email ?? widget.noDataKey.tr,
                 themeData: themeData,
                 onTap: () {
                   _emailController.text = user.email ?? '';
@@ -684,7 +699,7 @@ class _AdminPersonalPageState extends State<AdminPersonalPage> {
                 title: adminPersonalFieldLabel('createdTime'),
                 subtitle: formatPersonalDateTime(
                   user.createdTime,
-                  emptyKey: 'admin.personal.noData',
+                  emptyKey: widget.noDataKey,
                 ),
                 themeData: themeData,
               ),
@@ -692,13 +707,13 @@ class _AdminPersonalPageState extends State<AdminPersonalPage> {
                 title: adminPersonalFieldLabel('modifiedTime'),
                 subtitle: formatPersonalDateTime(
                   user.modifiedTime,
-                  emptyKey: 'admin.personal.noData',
+                  emptyKey: widget.noDataKey,
                 ),
                 themeData: themeData,
               ),
               _buildListTile(
                 title: adminPersonalFieldLabel('remarks'),
-                subtitle: user.remarks ?? 'admin.personal.noData'.tr,
+                subtitle: user.remarks ?? widget.noDataKey.tr,
                 themeData: themeData,
                 onTap: () {
                   _remarksController.text = user.remarks ?? '';

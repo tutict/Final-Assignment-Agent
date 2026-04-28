@@ -14,6 +14,10 @@ import 'package:final_assignment_front/features/dashboard/views/admin/pages/side
 import 'package:final_assignment_front/features/dashboard/views/admin/pages/admin_business_processing.dart';
 import 'package:final_assignment_front/features/dashboard/views/admin/pages/sidebar_management/user_management_page.dart';
 import 'package:final_assignment_front/features/dashboard/views/admin/pages/traffic_violation_screen.dart';
+import 'package:final_assignment_front/features/dashboard/views/manager/manager_dashboard_screen.dart';
+import 'package:final_assignment_front/features/dashboard/views/manager/pages/manager_personal_page.dart';
+import 'package:final_assignment_front/features/dashboard/views/manager/pages/manager_setting.dart';
+import 'package:final_assignment_front/features/dashboard/views/manager/pages/sidebar_management/manager_business_processing.dart';
 import 'package:final_assignment_front/features/dashboard/views/shared/components/ai_chat.dart';
 import 'package:final_assignment_front/features/dashboard/views/shared/components/change_themes.dart';
 import 'package:final_assignment_front/features/dashboard/views/shared/components/map.dart';
@@ -46,6 +50,7 @@ class AppPages {
   static const initial = Routes.dashboard;
   static const login = Routes.login;
   static const userInitial = Routes.userDashboard;
+  static const managerInitial = Routes.managerDashboard;
   static const aiChat = Routes.aiChat;
   static const map = Routes.map;
   static const onlineProcessingProgress = Routes.onlineProcessingProgress;
@@ -115,6 +120,11 @@ class AppPages {
       binding: UserDashboardBinding(),
     ),
     GetPage(
+      name: Routes.managerDashboard,
+      page: () => const ManagerDashboardScreen(),
+      binding: DashboardBinding(),
+    ),
+    GetPage(
       name: RoutePaths.aiChat,
       page: () => const AiChat(),
     ),
@@ -160,7 +170,7 @@ class AppPages {
     ),
     GetPage(
       name: RoutePaths.managerPersonalPage,
-      page: () => const AdminPersonalPage(),
+      page: () => const ManagerPersonalPage(),
     ),
     GetPage(
       name: RoutePaths.adminSetting,
@@ -168,7 +178,7 @@ class AppPages {
     ),
     GetPage(
       name: RoutePaths.managerSetting,
-      page: () => const AdminSettingPage(),
+      page: () => const ManagerSetting(),
     ),
     GetPage(
       name: RoutePaths.offenseList,
@@ -181,10 +191,6 @@ class AppPages {
     GetPage(
       name: RoutePaths.fineInformation,
       page: () => const FineInformationPage(),
-    ),
-    GetPage(
-      name: RoutePaths.onlineProcessingProgress,
-      page: () => const OnlineProcessingProgress(),
     ),
     GetPage(
       name: RoutePaths.vehicleManagement,
@@ -204,7 +210,7 @@ class AppPages {
     ),
     GetPage(
       name: RoutePaths.managerBusinessProcessing,
-      page: () => const AdminBusinessProcessing(),
+      page: () => const ManagerBusinessProcessing(),
     ),
     GetPage(
       name: RoutePaths.accidentEvidencePage,

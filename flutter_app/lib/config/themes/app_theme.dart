@@ -652,4 +652,20 @@ class AppTheme {
         brightness: Brightness.dark,
         palette: MaterialThemeColors.dark,
       );
+
+  static ThemeData resolveDashboardTheme({
+    required String style,
+    required String mode,
+  }) {
+    final isDark = mode == 'Dark';
+
+    switch (style) {
+      case 'Material':
+        return isDark ? materialDarkTheme : materialLightTheme;
+      case 'Ionic':
+        return isDark ? ionicDarkTheme : ionicLightTheme;
+      default:
+        return isDark ? basicDark : basicLight;
+    }
+  }
 }

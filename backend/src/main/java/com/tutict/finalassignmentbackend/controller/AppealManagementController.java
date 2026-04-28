@@ -4,13 +4,19 @@ import com.tutict.finalassignmentbackend.config.statemachine.events.AppealAccept
 import com.tutict.finalassignmentbackend.config.statemachine.events.AppealProcessEvent;
 import com.tutict.finalassignmentbackend.entity.AppealRecord;
 import com.tutict.finalassignmentbackend.entity.AppealReview;
-import com.tutict.finalassignmentbackend.service.CurrentUserTrafficSupportService;
 import com.tutict.finalassignmentbackend.service.AppealRecordService;
 import com.tutict.finalassignmentbackend.service.AppealReviewService;
+import com.tutict.finalassignmentbackend.service.CurrentUserTrafficSupportService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.security.RolesAllowed;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Positive;
+import jakarta.validation.constraints.PositiveOrZero;
+import jakarta.validation.constraints.Size;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -25,7 +31,9 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.function.Supplier;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -58,44 +66,26 @@ public class AppealManagementController {
         try {
             return ResponseEntity.ok(currentUserTrafficSupportService.listCurrentUserAppeals(page, size));
         } catch (IllegalStateException ex) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
-        } catch (Exception ex) {
-            LOG.log(Level.WARNING, "List current user appeals failed", ex);
-            return ResponseEntity.status(resolveStatus(ex)).build();
+            return handleCurrentUserAppealState(ex);
         }
     }
 
     @PostMapping("/me")
     @RolesAllowed({"USER"})
     @Operation(summary = "Create Current User Appeal")
-    public ResponseEntity<AppealRecord> createCurrentUserAppeal(@RequestBody AppealRecord request,
-                                                                @RequestHeader(value = "Idempotency-Key", required = false)
-                                                                String idempotencyKey) {
-        boolean useIdempotency = hasKey(idempotencyKey);
+    public ResponseEntity<AppealRecord> createCurrentUserAppeal(
+            @Valid @RequestBody CurrentUserAppealCreateRequest request,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
+        AppealRecord draft = request.toAppealRecord();
         try {
-            if (useIdempotency) {
-                if (appealRecordService.shouldSkipProcessing(idempotencyKey)) {
-                    return ResponseEntity.status(HttpStatus.ALREADY_REPORTED).build();
-                }
-                appealRecordService.checkAndInsertIdempotency(idempotencyKey, request, "create");
-            }
-            AppealRecord saved = currentUserTrafficSupportService.createAppealForCurrentUser(request);
-            if (useIdempotency && saved.getAppealId() != null) {
-                appealRecordService.markHistorySuccess(idempotencyKey, saved.getAppealId());
-            }
-            return ResponseEntity.status(HttpStatus.CREATED).body(saved);
+            return executeIdempotentAppealAction(
+                    idempotencyKey,
+                    draft,
+                    "create",
+                    HttpStatus.CREATED,
+                    () -> currentUserTrafficSupportService.createAppealForCurrentUser(draft));
         } catch (IllegalStateException ex) {
-            if (useIdempotency) {
-                appealRecordService.markHistoryFailure(idempotencyKey, ex.getMessage());
-            }
-            LOG.log(Level.WARNING, "Create current user appeal rejected", ex);
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST).build();
-        } catch (Exception ex) {
-            if (useIdempotency) {
-                appealRecordService.markHistoryFailure(idempotencyKey, ex.getMessage());
-            }
-            LOG.log(Level.SEVERE, "Create current user appeal failed", ex);
-            return ResponseEntity.status(resolveStatus(ex)).build();
+            return handleCurrentUserAppealState(ex);
         }
     }
 
@@ -104,7 +94,7 @@ public class AppealManagementController {
     @Operation(summary = "Trigger Current User Appeal Acceptance Event")
     public ResponseEntity<AppealRecord> triggerCurrentUserAppealAcceptanceEvent(@PathVariable Long appealId,
                                                                                 @PathVariable AppealAcceptanceEvent event,
-                                                                                @RequestBody(required = false)
+                                                                                @Valid @RequestBody(required = false)
                                                                                 CurrentUserAppealSubmissionRequest request) {
         try {
             return ResponseEntity.ok(
@@ -117,7 +107,7 @@ public class AppealManagementController {
             return ResponseEntity.badRequest().build();
         } catch (IllegalStateException ex) {
             LOG.log(Level.WARNING, "Current user appeal acceptance transition failed", ex);
-            return ResponseEntity.status(HttpStatus.CONFLICT).build();
+            return handleCurrentUserAppealState(ex);
         } catch (Exception ex) {
             LOG.log(Level.SEVERE, "Current user appeal acceptance transition failed unexpectedly", ex);
             return ResponseEntity.status(resolveStatus(ex)).build();
@@ -137,7 +127,7 @@ public class AppealManagementController {
             return ResponseEntity.badRequest().build();
         } catch (IllegalStateException ex) {
             LOG.log(Level.WARNING, "Current user appeal process transition failed", ex);
-            return ResponseEntity.status(HttpStatus.CONFLICT).build();
+            return handleCurrentUserAppealState(ex);
         } catch (Exception ex) {
             LOG.log(Level.SEVERE, "Current user appeal process transition failed unexpectedly", ex);
             return ResponseEntity.status(resolveStatus(ex)).build();
@@ -146,30 +136,16 @@ public class AppealManagementController {
 
     @PostMapping
     @Operation(summary = "Create Appeal")
-    public ResponseEntity<AppealRecord> createAppeal(@RequestBody AppealRecord request,
-                                                     @RequestHeader(value = "Idempotency-Key", required = false)
-                                                     String idempotencyKey) {
-        boolean useIdempotency = hasKey(idempotencyKey);
-        try {
-            if (useIdempotency) {
-                if (appealRecordService.shouldSkipProcessing(idempotencyKey)) {
-                    LOG.log(Level.INFO, "Appeal create skipped by idempotency key {0}", idempotencyKey);
-                    return ResponseEntity.status(HttpStatus.ALREADY_REPORTED).build();
-                }
-                appealRecordService.checkAndInsertIdempotency(idempotencyKey, request, "create");
-            }
-            AppealRecord saved = appealRecordService.createAppeal(request);
-            if (useIdempotency && saved.getAppealId() != null) {
-                appealRecordService.markHistorySuccess(idempotencyKey, saved.getAppealId());
-            }
-            return ResponseEntity.status(HttpStatus.CREATED).body(saved);
-        } catch (Exception ex) {
-            if (useIdempotency) {
-                appealRecordService.markHistoryFailure(idempotencyKey, ex.getMessage());
-            }
-            LOG.log(Level.SEVERE, "Create appeal failed", ex);
-            return ResponseEntity.status(resolveStatus(ex)).build();
-        }
+    public ResponseEntity<AppealRecord> createAppeal(
+            @Valid @RequestBody CreateAppealRequest request,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
+        AppealRecord draft = request.toAppealRecord();
+        return executeIdempotentAppealAction(
+                idempotencyKey,
+                draft,
+                "create",
+                HttpStatus.CREATED,
+                () -> appealRecordService.createAppeal(draft));
     }
 
     @PutMapping("/{appealId}")
@@ -190,13 +166,8 @@ public class AppealManagementController {
     @GetMapping("/{appealId}")
     @Operation(summary = "Get Appeal")
     public ResponseEntity<AppealRecord> getAppeal(@PathVariable Long appealId) {
-        try {
-            AppealRecord record = appealRecordService.getAppealById(appealId);
-            return record == null ? ResponseEntity.notFound().build() : ResponseEntity.ok(record);
-        } catch (Exception ex) {
-            LOG.log(Level.WARNING, "Get appeal failed", ex);
-            return ResponseEntity.status(resolveStatus(ex)).build();
-        }
+        AppealRecord record = appealRecordService.getAppealById(appealId);
+        return record == null ? ResponseEntity.notFound().build() : ResponseEntity.ok(record);
     }
 
     @GetMapping
@@ -204,14 +175,9 @@ public class AppealManagementController {
     public ResponseEntity<List<AppealRecord>> listAppeals(@RequestParam(required = false) Long offenseId,
                                                           @RequestParam(defaultValue = "1") int page,
                                                           @RequestParam(defaultValue = "20") int size) {
-        try {
-            return ResponseEntity.ok(offenseId == null
-                    ? appealRecordService.listAppeals(page, size)
-                    : appealRecordService.findByOffenseId(offenseId, page, size));
-        } catch (Exception ex) {
-            LOG.log(Level.WARNING, "List appeals failed", ex);
-            return ResponseEntity.status(resolveStatus(ex)).build();
-        }
+        return ResponseEntity.ok(offenseId == null
+                ? appealRecordService.listAppeals(page, size)
+                : appealRecordService.findByOffenseId(offenseId, page, size));
     }
 
     @GetMapping("/search/number/prefix")
@@ -298,9 +264,10 @@ public class AppealManagementController {
     @PostMapping("/{appealId}/reviews")
     @Operation(summary = "Create Review")
     public ResponseEntity<AppealReview> createReview(@PathVariable Long appealId,
-                                                     @RequestBody AppealReview review,
+                                                     @Valid @RequestBody CreateAppealReviewRequest request,
                                                      @RequestHeader(value = "Idempotency-Key", required = false)
                                                      String idempotencyKey) {
+        AppealReview review = request.toAppealReview();
         boolean useIdempotency = hasKey(idempotencyKey);
         try {
             review.setAppealId(appealId);
@@ -414,8 +381,57 @@ public class AppealManagementController {
         }
     }
 
+    private ResponseEntity<AppealRecord> executeIdempotentAppealAction(String idempotencyKey,
+                                                                       AppealRecord draft,
+                                                                       String action,
+                                                                       HttpStatus successStatus,
+                                                                       Supplier<AppealRecord> operation) {
+        boolean useIdempotency = hasKey(idempotencyKey);
+        if (useIdempotency) {
+            if (appealRecordService.shouldSkipProcessing(idempotencyKey)) {
+                return ResponseEntity.status(HttpStatus.ALREADY_REPORTED).build();
+            }
+            appealRecordService.checkAndInsertIdempotency(idempotencyKey, draft, action);
+        }
+        try {
+            AppealRecord saved = operation.get();
+            if (useIdempotency && saved != null && saved.getAppealId() != null) {
+                appealRecordService.markHistorySuccess(idempotencyKey, saved.getAppealId());
+            }
+            return ResponseEntity.status(successStatus).body(saved);
+        } catch (RuntimeException ex) {
+            if (useIdempotency) {
+                appealRecordService.markHistoryFailure(idempotencyKey, ex.getMessage());
+            }
+            throw ex;
+        }
+    }
+
     private boolean hasKey(String value) {
         return value != null && !value.isBlank();
+    }
+
+    private <T> ResponseEntity<T> handleCurrentUserAppealState(IllegalStateException ex) {
+        String message = ex == null || ex.getMessage() == null
+                ? ""
+                : ex.getMessage().trim().toLowerCase(Locale.ROOT);
+        if (message.contains("appeal not found") || message.contains("offense not found")) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
+        }
+        if (message.contains("current user is not authenticated") || message.contains("current user not found")) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+        if (message.contains("does not belong to current user") || message.contains("outside the current user scope")) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
+        if (message.contains("complete your personal profile")
+                || message.contains("waiting for supplemental materials")
+                || message.contains("must be resubmitted")
+                || message.contains("not waiting for current user action")
+                || message.contains("state does not allow this event")) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).build();
+        }
+        throw ex;
     }
 
     private HttpStatus resolveStatus(Exception ex) {
@@ -424,9 +440,317 @@ public class AppealManagementController {
                 : HttpStatus.INTERNAL_SERVER_ERROR;
     }
 
-    public static class CurrentUserAppealSubmissionRequest {
+    public static class CurrentUserAppealCreateRequest {
+        @NotNull(message = "Offense ID is required")
+        @Positive(message = "Offense ID must be greater than zero")
+        private Long offenseId;
+
+        @NotBlank(message = "Appeal reason must not be blank")
+        @Size(max = 255, message = "Appeal reason must be at most 255 characters")
         private String appealReason;
+
+        @Size(max = 64, message = "Appeal type must be at most 64 characters")
+        private String appealType;
+
+        @Size(max = 65535, message = "Evidence description is too long")
         private String evidenceDescription;
+
+        @Size(max = 65535, message = "Evidence URLs payload is too long")
+        private String evidenceUrls;
+
+        public Long getOffenseId() {
+            return offenseId;
+        }
+
+        public void setOffenseId(Long offenseId) {
+            this.offenseId = offenseId;
+        }
+
+        public String getAppealReason() {
+            return appealReason;
+        }
+
+        public void setAppealReason(String appealReason) {
+            this.appealReason = appealReason;
+        }
+
+        public String getAppealType() {
+            return appealType;
+        }
+
+        public void setAppealType(String appealType) {
+            this.appealType = appealType;
+        }
+
+        public String getEvidenceDescription() {
+            return evidenceDescription;
+        }
+
+        public void setEvidenceDescription(String evidenceDescription) {
+            this.evidenceDescription = evidenceDescription;
+        }
+
+        public String getEvidenceUrls() {
+            return evidenceUrls;
+        }
+
+        public void setEvidenceUrls(String evidenceUrls) {
+            this.evidenceUrls = evidenceUrls;
+        }
+
+        public AppealRecord toAppealRecord() {
+            AppealRecord appealRecord = new AppealRecord();
+            appealRecord.setOffenseId(offenseId);
+            appealRecord.setAppealReason(appealReason);
+            appealRecord.setAppealType(appealType);
+            appealRecord.setEvidenceDescription(evidenceDescription);
+            appealRecord.setEvidenceUrls(evidenceUrls);
+            return appealRecord;
+        }
+    }
+
+    public static class CreateAppealReviewRequest {
+        @NotBlank(message = "Review level must not be blank")
+        @Size(max = 32, message = "Review level must be at most 32 characters")
+        private String reviewLevel;
+
+        @NotBlank(message = "Review result must not be blank")
+        @Size(max = 32, message = "Review result must be at most 32 characters")
+        private String reviewResult;
+
+        @Size(max = 65535, message = "Review opinion is too long")
+        private String reviewOpinion;
+
+        @Size(max = 64, message = "Suggested action must be at most 64 characters")
+        private String suggestedAction;
+
+        @PositiveOrZero(message = "Suggested fine amount must not be negative")
+        private java.math.BigDecimal suggestedFineAmount;
+
+        @PositiveOrZero(message = "Suggested points must not be negative")
+        private Integer suggestedPoints;
+
+        @Size(max = 255, message = "Remarks must be at most 255 characters")
+        private String remarks;
+
+        public String getReviewLevel() {
+            return reviewLevel;
+        }
+
+        public void setReviewLevel(String reviewLevel) {
+            this.reviewLevel = reviewLevel;
+        }
+
+        public String getReviewResult() {
+            return reviewResult;
+        }
+
+        public void setReviewResult(String reviewResult) {
+            this.reviewResult = reviewResult;
+        }
+
+        public String getReviewOpinion() {
+            return reviewOpinion;
+        }
+
+        public void setReviewOpinion(String reviewOpinion) {
+            this.reviewOpinion = reviewOpinion;
+        }
+
+        public String getSuggestedAction() {
+            return suggestedAction;
+        }
+
+        public void setSuggestedAction(String suggestedAction) {
+            this.suggestedAction = suggestedAction;
+        }
+
+        public java.math.BigDecimal getSuggestedFineAmount() {
+            return suggestedFineAmount;
+        }
+
+        public void setSuggestedFineAmount(java.math.BigDecimal suggestedFineAmount) {
+            this.suggestedFineAmount = suggestedFineAmount;
+        }
+
+        public Integer getSuggestedPoints() {
+            return suggestedPoints;
+        }
+
+        public void setSuggestedPoints(Integer suggestedPoints) {
+            this.suggestedPoints = suggestedPoints;
+        }
+
+        public String getRemarks() {
+            return remarks;
+        }
+
+        public void setRemarks(String remarks) {
+            this.remarks = remarks;
+        }
+
+        public AppealReview toAppealReview() {
+            AppealReview review = new AppealReview();
+            review.setReviewLevel(reviewLevel);
+            review.setReviewResult(reviewResult);
+            review.setReviewOpinion(reviewOpinion);
+            review.setSuggestedAction(suggestedAction);
+            review.setSuggestedFineAmount(suggestedFineAmount);
+            review.setSuggestedPoints(suggestedPoints);
+            review.setRemarks(remarks);
+            return review;
+        }
+    }
+
+    public static class CreateAppealRequest {
+        @NotNull(message = "Offense ID is required")
+        @Positive(message = "Offense ID must be greater than zero")
+        private Long offenseId;
+
+        @Size(max = 128, message = "Appellant name must be at most 128 characters")
+        private String appellantName;
+
+        @Size(max = 32, message = "Appellant ID card must be at most 32 characters")
+        private String appellantIdCard;
+
+        @Size(max = 64, message = "Appellant contact must be at most 64 characters")
+        private String appellantContact;
+
+        @Size(max = 128, message = "Appellant email must be at most 128 characters")
+        private String appellantEmail;
+
+        @Size(max = 255, message = "Appellant address must be at most 255 characters")
+        private String appellantAddress;
+
+        @Size(max = 64, message = "Appeal type must be at most 64 characters")
+        private String appealType;
+
+        @NotBlank(message = "Appeal reason must not be blank")
+        @Size(max = 255, message = "Appeal reason must be at most 255 characters")
+        private String appealReason;
+
+        @Size(max = 65535, message = "Evidence description is too long")
+        private String evidenceDescription;
+
+        @Size(max = 65535, message = "Evidence URLs payload is too long")
+        private String evidenceUrls;
+
+        @Size(max = 255, message = "Remarks must be at most 255 characters")
+        private String remarks;
+
+        public Long getOffenseId() {
+            return offenseId;
+        }
+
+        public void setOffenseId(Long offenseId) {
+            this.offenseId = offenseId;
+        }
+
+        public String getAppellantName() {
+            return appellantName;
+        }
+
+        public void setAppellantName(String appellantName) {
+            this.appellantName = appellantName;
+        }
+
+        public String getAppellantIdCard() {
+            return appellantIdCard;
+        }
+
+        public void setAppellantIdCard(String appellantIdCard) {
+            this.appellantIdCard = appellantIdCard;
+        }
+
+        public String getAppellantContact() {
+            return appellantContact;
+        }
+
+        public void setAppellantContact(String appellantContact) {
+            this.appellantContact = appellantContact;
+        }
+
+        public String getAppellantEmail() {
+            return appellantEmail;
+        }
+
+        public void setAppellantEmail(String appellantEmail) {
+            this.appellantEmail = appellantEmail;
+        }
+
+        public String getAppellantAddress() {
+            return appellantAddress;
+        }
+
+        public void setAppellantAddress(String appellantAddress) {
+            this.appellantAddress = appellantAddress;
+        }
+
+        public String getAppealType() {
+            return appealType;
+        }
+
+        public void setAppealType(String appealType) {
+            this.appealType = appealType;
+        }
+
+        public String getAppealReason() {
+            return appealReason;
+        }
+
+        public void setAppealReason(String appealReason) {
+            this.appealReason = appealReason;
+        }
+
+        public String getEvidenceDescription() {
+            return evidenceDescription;
+        }
+
+        public void setEvidenceDescription(String evidenceDescription) {
+            this.evidenceDescription = evidenceDescription;
+        }
+
+        public String getEvidenceUrls() {
+            return evidenceUrls;
+        }
+
+        public void setEvidenceUrls(String evidenceUrls) {
+            this.evidenceUrls = evidenceUrls;
+        }
+
+        public String getRemarks() {
+            return remarks;
+        }
+
+        public void setRemarks(String remarks) {
+            this.remarks = remarks;
+        }
+
+        public AppealRecord toAppealRecord() {
+            AppealRecord appealRecord = new AppealRecord();
+            appealRecord.setOffenseId(offenseId);
+            appealRecord.setAppellantName(appellantName);
+            appealRecord.setAppellantIdCard(appellantIdCard);
+            appealRecord.setAppellantContact(appellantContact);
+            appealRecord.setAppellantEmail(appellantEmail);
+            appealRecord.setAppellantAddress(appellantAddress);
+            appealRecord.setAppealType(appealType);
+            appealRecord.setAppealReason(appealReason);
+            appealRecord.setEvidenceDescription(evidenceDescription);
+            appealRecord.setEvidenceUrls(evidenceUrls);
+            appealRecord.setRemarks(remarks);
+            return appealRecord;
+        }
+    }
+
+    public static class CurrentUserAppealSubmissionRequest {
+        @Size(max = 255, message = "Appeal reason must be at most 255 characters")
+        private String appealReason;
+
+        @Size(max = 65535, message = "Evidence description is too long")
+        private String evidenceDescription;
+
+        @Size(max = 65535, message = "Evidence URLs payload is too long")
         private String evidenceUrls;
 
         public String getAppealReason() {

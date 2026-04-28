@@ -11,7 +11,14 @@ import 'package:get/get.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class AdminSettingPage extends StatefulWidget {
-  const AdminSettingPage({super.key});
+  const AdminSettingPage({
+    super.key,
+    this.titleKey = 'settings.title',
+    this.pageType = DashboardPageType.admin,
+  });
+
+  final String titleKey;
+  final DashboardPageType pageType;
 
   @override
   State<AdminSettingPage> createState() => _AdminSettingPageState();
@@ -623,8 +630,8 @@ class _AdminSettingPageState extends State<AdminSettingPage> {
 
       return DashboardPageTemplate(
         theme: theme,
-        title: 'settings.title'.tr,
-        pageType: DashboardPageType.admin,
+        title: widget.titleKey.tr,
+        pageType: widget.pageType,
         onRefresh: _loadRemoteSettings,
         onThemeToggle: controller.toggleBodyTheme,
         body: Padding(

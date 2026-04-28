@@ -14,7 +14,16 @@ import 'package:jwt_decoder/jwt_decoder.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class AdminBusinessProcessing extends StatefulWidget {
-  const AdminBusinessProcessing({super.key});
+  const AdminBusinessProcessing({
+    super.key,
+    this.titleKey = 'admin.business.title',
+    this.enterLabelKey = 'admin.business.enter',
+    this.pageType = DashboardPageType.admin,
+  });
+
+  final String titleKey;
+  final String enterLabelKey;
+  final DashboardPageType pageType;
 
   @override
   State<AdminBusinessProcessing> createState() =>
@@ -133,8 +142,8 @@ class _AdminBusinessProcessingState extends State<AdminBusinessProcessing> {
 
       return DashboardPageTemplate(
         theme: themeData,
-        title: 'admin.business.title'.tr,
-        pageType: DashboardPageType.admin,
+        title: widget.titleKey.tr,
+        pageType: widget.pageType,
         bodyIsScrollable: true,
         padding: EdgeInsets.zero,
         onThemeToggle: controller.toggleBodyTheme,
@@ -203,7 +212,7 @@ class _AdminBusinessProcessingState extends State<AdminBusinessProcessing> {
                                   ),
                                   const SizedBox(height: 4),
                                   Text(
-                                    'admin.business.enter'.tr,
+                                    widget.enterLabelKey.tr,
                                     style:
                                         themeData.textTheme.bodySmall?.copyWith(
                                       color: colorScheme.onSurfaceVariant,

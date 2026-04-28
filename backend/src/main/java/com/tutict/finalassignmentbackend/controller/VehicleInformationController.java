@@ -9,6 +9,11 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.security.RolesAllowed;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Positive;
+import jakarta.validation.constraints.Size;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -23,9 +28,9 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
-import java.util.logging.Level;
-import java.util.logging.Logger;
+import java.util.function.Supplier;
 
 @RestController
 @RequestMapping("/api/vehicles")
@@ -33,9 +38,6 @@ import java.util.logging.Logger;
 @SecurityRequirement(name = "bearerAuth")
 @RolesAllowed({"SUPER_ADMIN", "ADMIN", "TRAFFIC_POLICE"})
 public class VehicleInformationController {
-
-    private static final Logger LOG = Logger.getLogger(VehicleInformationController.class.getName());
-
     private final VehicleInformationService vehicleInformationService;
     private final DriverVehicleService driverVehicleService;
     private final CurrentUserTrafficSupportService currentUserTrafficSupportService;
@@ -57,25 +59,26 @@ public class VehicleInformationController {
         try {
             return ResponseEntity.ok(currentUserTrafficSupportService.listCurrentUserVehicles(page, size));
         } catch (IllegalStateException ex) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
-        } catch (Exception ex) {
-            LOG.log(Level.WARNING, "List current user vehicles failed", ex);
-            return ResponseEntity.status(resolveStatus(ex)).build();
+            return handleCurrentUserVehicleState(ex);
         }
     }
 
     @PostMapping("/me")
     @RolesAllowed({"SUPER_ADMIN", "ADMIN", "TRAFFIC_POLICE", "USER"})
     @Operation(summary = "Create Current User Vehicle")
-    public ResponseEntity<VehicleInformation> createCurrentUserVehicle(@RequestBody VehicleInformation request) {
+    public ResponseEntity<VehicleInformation> createCurrentUserVehicle(
+            @Valid @RequestBody VehicleMutationRequest request,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
+        VehicleInformation draft = toVehicleInformation(request);
         try {
-            return ResponseEntity.status(HttpStatus.CREATED)
-                    .body(currentUserTrafficSupportService.createVehicleForCurrentUser(request));
+            return executeIdempotentVehicleAction(
+                    idempotencyKey,
+                    draft,
+                    "create",
+                    HttpStatus.CREATED,
+                    () -> currentUserTrafficSupportService.createVehicleForCurrentUser(draft));
         } catch (IllegalStateException ex) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
-        } catch (Exception ex) {
-            LOG.log(Level.WARNING, "Create current user vehicle failed", ex);
-            return ResponseEntity.status(resolveStatus(ex)).build();
+            return handleCurrentUserVehicleState(ex);
         }
     }
 
@@ -83,14 +86,19 @@ public class VehicleInformationController {
     @RolesAllowed({"SUPER_ADMIN", "ADMIN", "TRAFFIC_POLICE", "USER"})
     @Operation(summary = "Update Current User Vehicle")
     public ResponseEntity<VehicleInformation> updateCurrentUserVehicle(@PathVariable Long vehicleId,
-                                                                       @RequestBody VehicleInformation request) {
+                                                                       @Valid @RequestBody VehicleMutationRequest request,
+                                                                       @RequestHeader(value = "Idempotency-Key",
+                                                                               required = false) String idempotencyKey) {
+        VehicleInformation draft = toVehicleInformation(request);
         try {
-            return ResponseEntity.ok(currentUserTrafficSupportService.updateVehicleForCurrentUser(vehicleId, request));
+            return executeIdempotentVehicleAction(
+                    idempotencyKey,
+                    draft,
+                    "update",
+                    HttpStatus.OK,
+                    () -> currentUserTrafficSupportService.updateVehicleForCurrentUser(vehicleId, draft));
         } catch (IllegalStateException ex) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
-        } catch (Exception ex) {
-            LOG.log(Level.WARNING, "Update current user vehicle failed", ex);
-            return ResponseEntity.status(resolveStatus(ex)).build();
+            return handleCurrentUserVehicleState(ex);
         }
     }
 
@@ -102,128 +110,75 @@ public class VehicleInformationController {
             currentUserTrafficSupportService.deleteVehicleForCurrentUser(vehicleId);
             return ResponseEntity.noContent().build();
         } catch (IllegalStateException ex) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
-        } catch (Exception ex) {
-            LOG.log(Level.WARNING, "Delete current user vehicle failed", ex);
-            return ResponseEntity.status(resolveStatus(ex)).build();
+            return handleCurrentUserVehicleState(ex);
         }
     }
 
     @PostMapping
     @Operation(summary = "Create Vehicle")
-    public ResponseEntity<VehicleInformation> createVehicle(@RequestBody VehicleInformation request,
+    public ResponseEntity<VehicleInformation> createVehicle(
+                                                            @Valid @RequestBody VehicleMutationRequest request,
                                                             @RequestHeader(value = "Idempotency-Key", required = false)
                                                             String idempotencyKey) {
-        boolean useKey = hasKey(idempotencyKey);
-        try {
-            if (useKey) {
-                if (vehicleInformationService.shouldSkipProcessing(idempotencyKey)) {
-                    return ResponseEntity.status(HttpStatus.ALREADY_REPORTED).build();
-                }
-                vehicleInformationService.checkAndInsertIdempotency(idempotencyKey, request, "create");
-            }
-            VehicleInformation saved = vehicleInformationService.createVehicleInformation(request);
-            if (useKey && saved.getVehicleId() != null) {
-                vehicleInformationService.markHistorySuccess(idempotencyKey, saved.getVehicleId());
-            }
-            return ResponseEntity.status(HttpStatus.CREATED).body(saved);
-        } catch (Exception ex) {
-            if (useKey) {
-                vehicleInformationService.markHistoryFailure(idempotencyKey, ex.getMessage());
-            }
-            LOG.log(Level.SEVERE, "Create vehicle failed", ex);
-            return ResponseEntity.status(resolveStatus(ex)).build();
-        }
+        VehicleInformation draft = toVehicleInformation(request);
+        return executeIdempotentVehicleAction(
+                idempotencyKey,
+                draft,
+                "create",
+                HttpStatus.CREATED,
+                () -> vehicleInformationService.createVehicleInformation(draft));
     }
 
     @PutMapping("/{vehicleId}")
     @Operation(summary = "Update Vehicle")
     public ResponseEntity<VehicleInformation> updateVehicle(@PathVariable Long vehicleId,
-                                                            @RequestBody VehicleInformation request,
+                                                            @Valid @RequestBody VehicleMutationRequest request,
                                                             @RequestHeader(value = "Idempotency-Key", required = false)
                                                             String idempotencyKey) {
-        boolean useKey = hasKey(idempotencyKey);
-        try {
-            request.setVehicleId(vehicleId);
-            if (useKey) {
-                if (vehicleInformationService.shouldSkipProcessing(idempotencyKey)) {
-                    return ResponseEntity.status(HttpStatus.ALREADY_REPORTED).build();
-                }
-                vehicleInformationService.checkAndInsertIdempotency(idempotencyKey, request, "update");
-            }
-            VehicleInformation updated = vehicleInformationService.updateVehicleInformation(request);
-            if (useKey && updated.getVehicleId() != null) {
-                vehicleInformationService.markHistorySuccess(idempotencyKey, updated.getVehicleId());
-            }
-            return ResponseEntity.ok(updated);
-        } catch (Exception ex) {
-            if (useKey) {
-                vehicleInformationService.markHistoryFailure(idempotencyKey, ex.getMessage());
-            }
-            LOG.log(Level.SEVERE, "Update vehicle failed", ex);
-            return ResponseEntity.status(resolveStatus(ex)).build();
-        }
+        VehicleInformation draft = toVehicleInformation(request);
+        draft.setVehicleId(vehicleId);
+        return executeIdempotentVehicleAction(
+                idempotencyKey,
+                draft,
+                "update",
+                HttpStatus.OK,
+                () -> vehicleInformationService.updateVehicleInformation(draft));
     }
 
     @DeleteMapping("/{vehicleId}")
     @Operation(summary = "Delete Vehicle")
     public ResponseEntity<Void> deleteVehicle(@PathVariable Long vehicleId) {
-        try {
-            vehicleInformationService.deleteVehicleInformation(vehicleId);
-            return ResponseEntity.noContent().build();
-        } catch (Exception ex) {
-            LOG.log(Level.WARNING, "Delete vehicle failed", ex);
-            return ResponseEntity.status(resolveStatus(ex)).build();
-        }
+        vehicleInformationService.deleteVehicleInformation(vehicleId);
+        return ResponseEntity.noContent().build();
     }
 
     @DeleteMapping("/license/{licensePlate}")
     @Operation(summary = "Delete Vehicle By License")
     public ResponseEntity<Void> deleteVehicleByLicense(@PathVariable String licensePlate) {
-        try {
-            vehicleInformationService.deleteVehicleInformationByLicensePlate(licensePlate);
-            return ResponseEntity.noContent().build();
-        } catch (Exception ex) {
-            LOG.log(Level.WARNING, "Delete vehicle by license failed", ex);
-            return ResponseEntity.status(resolveStatus(ex)).build();
-        }
+        vehicleInformationService.deleteVehicleInformationByLicensePlate(licensePlate);
+        return ResponseEntity.noContent().build();
     }
 
     @GetMapping("/{vehicleId}")
     @Operation(summary = "Get Vehicle")
     public ResponseEntity<VehicleInformation> getVehicle(@PathVariable Long vehicleId) {
-        try {
-            VehicleInformation vehicle = vehicleInformationService.getVehicleInformationById(vehicleId);
-            return vehicle == null ? ResponseEntity.notFound().build() : ResponseEntity.ok(vehicle);
-        } catch (Exception ex) {
-            LOG.log(Level.WARNING, "Get vehicle failed", ex);
-            return ResponseEntity.status(resolveStatus(ex)).build();
-        }
+        VehicleInformation vehicle = vehicleInformationService.getVehicleInformationById(vehicleId);
+        return vehicle == null ? ResponseEntity.notFound().build() : ResponseEntity.ok(vehicle);
     }
 
     @GetMapping
     @Operation(summary = "List Vehicles")
     public ResponseEntity<List<VehicleInformation>> listVehicles(@RequestParam(defaultValue = "1") int page,
                                                                  @RequestParam(defaultValue = "20") int size) {
-        try {
-            return ResponseEntity.ok(vehicleInformationService.listVehicles(page, size));
-        } catch (Exception ex) {
-            LOG.log(Level.WARNING, "List vehicles failed", ex);
-            return ResponseEntity.status(resolveStatus(ex)).build();
-        }
+        return ResponseEntity.ok(vehicleInformationService.listVehicles(page, size));
     }
 
     @GetMapping("/search/license")
     @Operation(summary = "Search By License")
     @RolesAllowed({"SUPER_ADMIN", "ADMIN", "TRAFFIC_POLICE", "FINANCE"})
     public ResponseEntity<VehicleInformation> searchByLicense(@RequestParam String licensePlate) {
-        try {
-            VehicleInformation vehicle = vehicleInformationService.getVehicleInformationByLicensePlate(licensePlate);
-            return vehicle == null ? ResponseEntity.notFound().build() : ResponseEntity.ok(vehicle);
-        } catch (Exception ex) {
-            LOG.log(Level.WARNING, "Search vehicle by license failed", ex);
-            return ResponseEntity.status(resolveStatus(ex)).build();
-        }
+        VehicleInformation vehicle = vehicleInformationService.getVehicleInformationByLicensePlate(licensePlate);
+        return vehicle == null ? ResponseEntity.notFound().build() : ResponseEntity.ok(vehicle);
     }
 
     @GetMapping("/search/owner")
@@ -231,12 +186,7 @@ public class VehicleInformationController {
     public ResponseEntity<List<VehicleInformation>> searchByOwnerIdCard(@RequestParam String idCard,
                                                                         @RequestParam(defaultValue = "1") int page,
                                                                         @RequestParam(defaultValue = "20") int size) {
-        try {
-            return ResponseEntity.ok(vehicleInformationService.searchByOwnerIdCard(idCard, page, size));
-        } catch (Exception ex) {
-            LOG.log(Level.WARNING, "Search vehicle by id card failed", ex);
-            return ResponseEntity.status(resolveStatus(ex)).build();
-        }
+        return ResponseEntity.ok(vehicleInformationService.searchByOwnerIdCard(idCard, page, size));
     }
 
     @GetMapping("/search/type")
@@ -244,12 +194,7 @@ public class VehicleInformationController {
     public ResponseEntity<List<VehicleInformation>> searchByType(@RequestParam String type,
                                                                  @RequestParam(defaultValue = "1") int page,
                                                                  @RequestParam(defaultValue = "20") int size) {
-        try {
-            return ResponseEntity.ok(vehicleInformationService.searchByVehicleType(type, page, size));
-        } catch (Exception ex) {
-            LOG.log(Level.WARNING, "Search vehicle by type failed", ex);
-            return ResponseEntity.status(resolveStatus(ex)).build();
-        }
+        return ResponseEntity.ok(vehicleInformationService.searchByVehicleType(type, page, size));
     }
 
     @GetMapping("/search/owner/name")
@@ -257,12 +202,7 @@ public class VehicleInformationController {
     public ResponseEntity<List<VehicleInformation>> searchByOwnerName(@RequestParam String ownerName,
                                                                       @RequestParam(defaultValue = "1") int page,
                                                                       @RequestParam(defaultValue = "20") int size) {
-        try {
-            return ResponseEntity.ok(vehicleInformationService.searchByOwnerName(ownerName, page, size));
-        } catch (Exception ex) {
-            LOG.log(Level.WARNING, "Search vehicle by owner name failed", ex);
-            return ResponseEntity.status(resolveStatus(ex)).build();
-        }
+        return ResponseEntity.ok(vehicleInformationService.searchByOwnerName(ownerName, page, size));
     }
 
     @GetMapping("/search/status")
@@ -270,12 +210,7 @@ public class VehicleInformationController {
     public ResponseEntity<List<VehicleInformation>> searchByStatus(@RequestParam String status,
                                                                    @RequestParam(defaultValue = "1") int page,
                                                                    @RequestParam(defaultValue = "20") int size) {
-        try {
-            return ResponseEntity.ok(vehicleInformationService.searchByStatus(status, page, size));
-        } catch (Exception ex) {
-            LOG.log(Level.WARNING, "Search vehicle by status failed", ex);
-            return ResponseEntity.status(resolveStatus(ex)).build();
-        }
+        return ResponseEntity.ok(vehicleInformationService.searchByStatus(status, page, size));
     }
 
     @GetMapping("/search/general")
@@ -283,41 +218,23 @@ public class VehicleInformationController {
     public ResponseEntity<List<VehicleInformation>> searchVehicles(@RequestParam String keywords,
                                                                    @RequestParam(defaultValue = "1") int page,
                                                                    @RequestParam(defaultValue = "20") int size) {
-        try {
-            return ResponseEntity.ok(vehicleInformationService.searchVehicles(keywords, page, size));
-        } catch (Exception ex) {
-            LOG.log(Level.WARNING, "General vehicle search failed", ex);
-            return ResponseEntity.status(resolveStatus(ex)).build();
-        }
+        return ResponseEntity.ok(vehicleInformationService.searchVehicles(keywords, page, size));
     }
 
     @PostMapping("/{vehicleId}/drivers")
     @Operation(summary = "Bind Driver")
     public ResponseEntity<DriverVehicle> bindDriver(@PathVariable Long vehicleId,
-                                                    @RequestBody DriverVehicle relation,
+                                                    @Valid @RequestBody CreateDriverBindingRequest request,
                                                     @RequestHeader(value = "Idempotency-Key", required = false)
                                                     String idempotencyKey) {
-        boolean useKey = hasKey(idempotencyKey);
-        try {
-            relation.setVehicleId(vehicleId);
-            if (useKey) {
-                if (driverVehicleService.shouldSkipProcessing(idempotencyKey)) {
-                    return ResponseEntity.status(HttpStatus.ALREADY_REPORTED).build();
-                }
-                driverVehicleService.checkAndInsertIdempotency(idempotencyKey, relation, "create");
-            }
-            DriverVehicle saved = driverVehicleService.createBinding(relation);
-            if (useKey && saved.getId() != null) {
-                driverVehicleService.markHistorySuccess(idempotencyKey, saved.getId());
-            }
-            return ResponseEntity.status(HttpStatus.CREATED).body(saved);
-        } catch (Exception ex) {
-            if (useKey) {
-                driverVehicleService.markHistoryFailure(idempotencyKey, ex.getMessage());
-            }
-            LOG.log(Level.SEVERE, "Create driver-vehicle binding failed", ex);
-            return ResponseEntity.status(resolveStatus(ex)).build();
-        }
+        DriverVehicle draft = toDriverVehicle(request);
+        draft.setVehicleId(vehicleId);
+        return executeIdempotentBindingAction(
+                idempotencyKey,
+                draft,
+                "create",
+                HttpStatus.CREATED,
+                () -> driverVehicleService.createBinding(draft));
     }
 
     @GetMapping("/{vehicleId}/drivers")
@@ -325,77 +242,44 @@ public class VehicleInformationController {
     public ResponseEntity<List<DriverVehicle>> listBindings(@PathVariable Long vehicleId,
                                                             @RequestParam(defaultValue = "1") int page,
                                                             @RequestParam(defaultValue = "20") int size) {
-        try {
-            return ResponseEntity.ok(driverVehicleService.findByVehicleId(vehicleId, page, size));
-        } catch (Exception ex) {
-            LOG.log(Level.WARNING, "List driver-vehicle binding failed", ex);
-            return ResponseEntity.status(resolveStatus(ex)).build();
-        }
+        return ResponseEntity.ok(driverVehicleService.findByVehicleId(vehicleId, page, size));
     }
 
     @DeleteMapping("/bindings/{bindingId}")
     @Operation(summary = "Delete Binding")
     public ResponseEntity<Void> deleteBinding(@PathVariable Long bindingId) {
-        try {
-            driverVehicleService.deleteBinding(bindingId);
-            return ResponseEntity.noContent().build();
-        } catch (Exception ex) {
-            LOG.log(Level.WARNING, "Delete driver-vehicle binding failed", ex);
-            return ResponseEntity.status(resolveStatus(ex)).build();
-        }
+        driverVehicleService.deleteBinding(bindingId);
+        return ResponseEntity.noContent().build();
     }
 
     @PutMapping("/bindings/{bindingId}")
     @Operation(summary = "Update Binding")
     public ResponseEntity<DriverVehicle> updateBinding(@PathVariable Long bindingId,
-                                                       @RequestBody DriverVehicle relation,
+                                                       @Valid @RequestBody UpdateDriverBindingRequest request,
                                                        @RequestHeader(value = "Idempotency-Key", required = false)
                                                        String idempotencyKey) {
-        boolean useKey = hasKey(idempotencyKey);
-        try {
-            relation.setId(bindingId);
-            if (useKey) {
-                if (driverVehicleService.shouldSkipProcessing(idempotencyKey)) {
-                    return ResponseEntity.status(HttpStatus.ALREADY_REPORTED).build();
-                }
-                driverVehicleService.checkAndInsertIdempotency(idempotencyKey, relation, "update");
-            }
-            DriverVehicle updated = driverVehicleService.updateBinding(relation);
-            if (useKey && updated.getId() != null) {
-                driverVehicleService.markHistorySuccess(idempotencyKey, updated.getId());
-            }
-            return ResponseEntity.ok(updated);
-        } catch (Exception ex) {
-            if (useKey) {
-                driverVehicleService.markHistoryFailure(idempotencyKey, ex.getMessage());
-            }
-            LOG.log(Level.SEVERE, "Update driver-vehicle binding failed", ex);
-            return ResponseEntity.status(resolveStatus(ex)).build();
-        }
+        DriverVehicle draft = toDriverVehicle(request);
+        draft.setId(bindingId);
+        return executeIdempotentBindingAction(
+                idempotencyKey,
+                draft,
+                "update",
+                HttpStatus.OK,
+                () -> driverVehicleService.updateBinding(draft));
     }
 
     @GetMapping("/bindings/{bindingId}")
     @Operation(summary = "Get Binding")
     public ResponseEntity<DriverVehicle> getBinding(@PathVariable Long bindingId) {
-        try {
-            DriverVehicle binding = driverVehicleService.findById(bindingId);
-            return binding == null ? ResponseEntity.notFound().build() : ResponseEntity.ok(binding);
-        } catch (Exception ex) {
-            LOG.log(Level.WARNING, "Get driver-vehicle binding failed", ex);
-            return ResponseEntity.status(resolveStatus(ex)).build();
-        }
+        DriverVehicle binding = driverVehicleService.findById(bindingId);
+        return binding == null ? ResponseEntity.notFound().build() : ResponseEntity.ok(binding);
     }
 
     @GetMapping("/bindings")
     @Operation(summary = "List Bindings Overview")
     public ResponseEntity<List<DriverVehicle>> listBindingsOverview(@RequestParam(defaultValue = "1") int page,
                                                                     @RequestParam(defaultValue = "20") int size) {
-        try {
-            return ResponseEntity.ok(driverVehicleService.findAll(page, size));
-        } catch (Exception ex) {
-            LOG.log(Level.WARNING, "List driver-vehicle bindings failed", ex);
-            return ResponseEntity.status(resolveStatus(ex)).build();
-        }
+        return ResponseEntity.ok(driverVehicleService.findAll(page, size));
     }
 
     @GetMapping("/drivers/{driverId}/vehicles")
@@ -403,23 +287,13 @@ public class VehicleInformationController {
     public ResponseEntity<List<DriverVehicle>> listByDriver(@PathVariable Long driverId,
                                                             @RequestParam(defaultValue = "1") int page,
                                                             @RequestParam(defaultValue = "20") int size) {
-        try {
-            return ResponseEntity.ok(driverVehicleService.findByDriverId(driverId, page, size));
-        } catch (Exception ex) {
-            LOG.log(Level.WARNING, "List driver bindings failed", ex);
-            return ResponseEntity.status(resolveStatus(ex)).build();
-        }
+        return ResponseEntity.ok(driverVehicleService.findByDriverId(driverId, page, size));
     }
 
     @GetMapping("/drivers/{driverId}/vehicles/primary")
     @Operation(summary = "Primary Binding")
     public ResponseEntity<List<DriverVehicle>> primaryBinding(@PathVariable Long driverId) {
-        try {
-            return ResponseEntity.ok(driverVehicleService.findPrimaryBinding(driverId));
-        } catch (Exception ex) {
-            LOG.log(Level.WARNING, "Get primary binding failed", ex);
-            return ResponseEntity.status(resolveStatus(ex)).build();
-        }
+        return ResponseEntity.ok(driverVehicleService.findPrimaryBinding(driverId));
     }
 
     @GetMapping("/bindings/search/relationship")
@@ -427,12 +301,7 @@ public class VehicleInformationController {
     public ResponseEntity<List<DriverVehicle>> searchByRelationship(@RequestParam String relationship,
                                                                     @RequestParam(defaultValue = "1") int page,
                                                                     @RequestParam(defaultValue = "20") int size) {
-        try {
-            return ResponseEntity.ok(driverVehicleService.searchByRelationship(relationship, page, size));
-        } catch (Exception ex) {
-            LOG.log(Level.WARNING, "Search bindings by relationship failed", ex);
-            return ResponseEntity.status(resolveStatus(ex)).build();
-        }
+        return ResponseEntity.ok(driverVehicleService.searchByRelationship(relationship, page, size));
     }
 
     @GetMapping("/me/autocomplete/plates")
@@ -443,10 +312,7 @@ public class VehicleInformationController {
         try {
             return ResponseEntity.ok(currentUserTrafficSupportService.getCurrentUserVehiclePlateSuggestions(prefix, size));
         } catch (IllegalStateException ex) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
-        } catch (Exception ex) {
-            LOG.log(Level.WARNING, "Fetch current user plate autocomplete failed", ex);
-            return ResponseEntity.status(resolveStatus(ex)).build();
+            return handleCurrentUserVehicleState(ex);
         }
     }
 
@@ -458,10 +324,7 @@ public class VehicleInformationController {
         try {
             return ResponseEntity.ok(currentUserTrafficSupportService.getCurrentUserVehicleTypeSuggestions(prefix, size));
         } catch (IllegalStateException ex) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
-        } catch (Exception ex) {
-            LOG.log(Level.WARNING, "Fetch current user vehicle type autocomplete failed", ex);
-            return ResponseEntity.status(resolveStatus(ex)).build();
+            return handleCurrentUserVehicleState(ex);
         }
     }
 
@@ -470,12 +333,7 @@ public class VehicleInformationController {
     @RolesAllowed({"SUPER_ADMIN", "ADMIN", "TRAFFIC_POLICE", "FINANCE"})
     public ResponseEntity<List<String>> globalPlateSuggestions(@RequestParam String prefix,
                                                                @RequestParam(defaultValue = "10") int size) {
-        try {
-            return ResponseEntity.ok(vehicleInformationService.getVehicleInformationByLicensePlateGlobally(prefix, size));
-        } catch (Exception ex) {
-            LOG.log(Level.WARNING, "Fetch global plate suggestions failed", ex);
-            return ResponseEntity.status(resolveStatus(ex)).build();
-        }
+        return ResponseEntity.ok(vehicleInformationService.getVehicleInformationByLicensePlateGlobally(prefix, size));
     }
 
     @GetMapping("/autocomplete/plates")
@@ -483,12 +341,7 @@ public class VehicleInformationController {
     public ResponseEntity<List<String>> plateAutocomplete(@RequestParam String prefix,
                                                           @RequestParam(defaultValue = "10") int size,
                                                           @RequestParam String idCard) {
-        try {
-            return ResponseEntity.ok(vehicleInformationService.getLicensePlateAutocompleteSuggestions(prefix, size, idCard));
-        } catch (Exception ex) {
-            LOG.log(Level.WARNING, "Fetch plate autocomplete failed", ex);
-            return ResponseEntity.status(resolveStatus(ex)).build();
-        }
+        return ResponseEntity.ok(vehicleInformationService.getLicensePlateAutocompleteSuggestions(prefix, size, idCard));
     }
 
     @GetMapping("/autocomplete/types")
@@ -496,46 +349,414 @@ public class VehicleInformationController {
     public ResponseEntity<List<String>> vehicleTypeAutocomplete(@RequestParam String idCard,
                                                                 @RequestParam String prefix,
                                                                 @RequestParam(defaultValue = "10") int size) {
-        try {
-            return ResponseEntity.ok(vehicleInformationService.getVehicleTypeAutocompleteSuggestions(idCard, prefix, size));
-        } catch (Exception ex) {
-            LOG.log(Level.WARNING, "Fetch vehicle type autocomplete failed", ex);
-            return ResponseEntity.status(resolveStatus(ex)).build();
-        }
+        return ResponseEntity.ok(vehicleInformationService.getVehicleTypeAutocompleteSuggestions(idCard, prefix, size));
     }
 
     @GetMapping("/autocomplete/types/global")
     @Operation(summary = "Vehicle Type Autocomplete Global")
     public ResponseEntity<List<String>> vehicleTypeAutocompleteGlobal(@RequestParam String prefix,
                                                                       @RequestParam(defaultValue = "10") int size) {
-        try {
-            return ResponseEntity.ok(vehicleInformationService.getVehicleTypesByPrefixGlobally(prefix, size));
-        } catch (Exception ex) {
-            LOG.log(Level.WARNING, "Fetch global vehicle type autocomplete failed", ex);
-            return ResponseEntity.status(resolveStatus(ex)).build();
-        }
+        return ResponseEntity.ok(vehicleInformationService.getVehicleTypesByPrefixGlobally(prefix, size));
     }
 
     @GetMapping("/exists/{licensePlate}")
     @RolesAllowed({"SUPER_ADMIN", "ADMIN", "TRAFFIC_POLICE", "USER"})
     @Operation(summary = "License Exists")
     public ResponseEntity<Map<String, Boolean>> licenseExists(@PathVariable String licensePlate) {
-        try {
-            boolean exists = vehicleInformationService.isLicensePlateExists(licensePlate);
-            return ResponseEntity.ok(Map.of("exists", exists));
-        } catch (Exception ex) {
-            LOG.log(Level.WARNING, "License plate existence check failed", ex);
-            return ResponseEntity.status(resolveStatus(ex)).build();
-        }
+        boolean exists = vehicleInformationService.isLicensePlateExists(licensePlate);
+        return ResponseEntity.ok(Map.of("exists", exists));
     }
 
     private boolean hasKey(String value) {
         return value != null && !value.isBlank();
     }
 
-    private HttpStatus resolveStatus(Exception ex) {
-        return (ex instanceof IllegalArgumentException || ex instanceof IllegalStateException)
-                ? HttpStatus.BAD_REQUEST
-                : HttpStatus.INTERNAL_SERVER_ERROR;
+    private <T> ResponseEntity<T> handleCurrentUserVehicleState(IllegalStateException ex) {
+        String message = ex == null || ex.getMessage() == null
+                ? ""
+                : ex.getMessage().trim().toLowerCase(Locale.ROOT);
+        if (message.contains("vehicle not found")) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
+        }
+        if (message.contains("current user is not authenticated")
+                || message.contains("current user not found")) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+        if (message.contains("does not belong to current user")
+                || message.contains("outside the current user scope")) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
+        if (message.contains("profile has no id card number")) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).build();
+        }
+        throw ex;
+    }
+
+    private ResponseEntity<VehicleInformation> executeIdempotentVehicleAction(String idempotencyKey,
+                                                                              VehicleInformation draft,
+                                                                              String action,
+                                                                              HttpStatus successStatus,
+                                                                              Supplier<VehicleInformation> operation) {
+        boolean useKey = hasKey(idempotencyKey);
+        if (useKey) {
+            if (vehicleInformationService.shouldSkipProcessing(idempotencyKey)) {
+                return ResponseEntity.status(HttpStatus.ALREADY_REPORTED).build();
+            }
+            vehicleInformationService.checkAndInsertIdempotency(idempotencyKey, draft, action);
+        }
+        try {
+            VehicleInformation saved = operation.get();
+            if (useKey && saved != null && saved.getVehicleId() != null) {
+                vehicleInformationService.markHistorySuccess(idempotencyKey, saved.getVehicleId());
+            }
+            return ResponseEntity.status(successStatus).body(saved);
+        } catch (RuntimeException ex) {
+            if (useKey) {
+                vehicleInformationService.markHistoryFailure(idempotencyKey, ex.getMessage());
+            }
+            throw ex;
+        }
+    }
+
+    private ResponseEntity<DriverVehicle> executeIdempotentBindingAction(String idempotencyKey,
+                                                                         DriverVehicle draft,
+                                                                         String action,
+                                                                         HttpStatus successStatus,
+                                                                         Supplier<DriverVehicle> operation) {
+        boolean useKey = hasKey(idempotencyKey);
+        if (useKey) {
+            if (driverVehicleService.shouldSkipProcessing(idempotencyKey)) {
+                return ResponseEntity.status(HttpStatus.ALREADY_REPORTED).build();
+            }
+            driverVehicleService.checkAndInsertIdempotency(idempotencyKey, draft, action);
+        }
+        try {
+            DriverVehicle saved = operation.get();
+            if (useKey && saved != null && saved.getId() != null) {
+                driverVehicleService.markHistorySuccess(idempotencyKey, saved.getId());
+            }
+            return ResponseEntity.status(successStatus).body(saved);
+        } catch (RuntimeException ex) {
+            if (useKey) {
+                driverVehicleService.markHistoryFailure(idempotencyKey, ex.getMessage());
+            }
+            throw ex;
+        }
+    }
+
+    private VehicleInformation toVehicleInformation(VehicleMutationRequest request) {
+        VehicleInformation vehicleInformation = new VehicleInformation();
+        vehicleInformation.setLicensePlate(request.getLicensePlate());
+        vehicleInformation.setPlateColor(request.getPlateColor());
+        vehicleInformation.setVehicleType(request.getVehicleType());
+        vehicleInformation.setBrand(request.getBrand());
+        vehicleInformation.setModel(request.getModel());
+        vehicleInformation.setVehicleColor(request.getVehicleColor());
+        vehicleInformation.setEngineNumber(request.getEngineNumber());
+        vehicleInformation.setFrameNumber(request.getFrameNumber());
+        vehicleInformation.setOwnerName(request.getOwnerName());
+        vehicleInformation.setOwnerIdCard(request.getOwnerIdCard());
+        vehicleInformation.setOwnerContact(request.getOwnerContact());
+        vehicleInformation.setOwnerAddress(request.getOwnerAddress());
+        vehicleInformation.setFirstRegistrationDate(request.getFirstRegistrationDate());
+        vehicleInformation.setRegistrationDate(request.getRegistrationDate());
+        vehicleInformation.setIssuingAuthority(request.getIssuingAuthority());
+        vehicleInformation.setStatus(request.getStatus());
+        vehicleInformation.setInspectionExpiryDate(request.getInspectionExpiryDate());
+        vehicleInformation.setInsuranceExpiryDate(request.getInsuranceExpiryDate());
+        vehicleInformation.setRemarks(request.getRemarks());
+        return vehicleInformation;
+    }
+
+    private DriverVehicle toDriverVehicle(DriverBindingRequest request) {
+        DriverVehicle driverVehicle = new DriverVehicle();
+        driverVehicle.setDriverId(request.getDriverId());
+        driverVehicle.setVehicleId(request.getVehicleId());
+        driverVehicle.setRelationship(request.getRelationship());
+        driverVehicle.setIsPrimary(request.getIsPrimary());
+        driverVehicle.setBindDate(request.getBindDate());
+        driverVehicle.setUnbindDate(request.getUnbindDate());
+        driverVehicle.setStatus(request.getStatus());
+        driverVehicle.setRemarks(request.getRemarks());
+        return driverVehicle;
+    }
+
+    public static class VehicleMutationRequest {
+        @NotBlank(message = "License plate must not be blank")
+        @Size(max = 32, message = "License plate must be at most 32 characters")
+        private String licensePlate;
+        @Size(max = 32, message = "Plate color must be at most 32 characters")
+        private String plateColor;
+        @Size(max = 64, message = "Vehicle type must be at most 64 characters")
+        private String vehicleType;
+        @Size(max = 64, message = "Brand must be at most 64 characters")
+        private String brand;
+        @Size(max = 64, message = "Model must be at most 64 characters")
+        private String model;
+        @Size(max = 32, message = "Vehicle color must be at most 32 characters")
+        private String vehicleColor;
+        @Size(max = 64, message = "Engine number must be at most 64 characters")
+        private String engineNumber;
+        @Size(max = 64, message = "Frame number must be at most 64 characters")
+        private String frameNumber;
+        @Size(max = 128, message = "Owner name must be at most 128 characters")
+        private String ownerName;
+        @Size(max = 32, message = "Owner ID card must be at most 32 characters")
+        private String ownerIdCard;
+        @Size(max = 64, message = "Owner contact must be at most 64 characters")
+        private String ownerContact;
+        @Size(max = 255, message = "Owner address must be at most 255 characters")
+        private String ownerAddress;
+        private java.time.LocalDate firstRegistrationDate;
+        private java.time.LocalDate registrationDate;
+        @Size(max = 128, message = "Issuing authority must be at most 128 characters")
+        private String issuingAuthority;
+        @Size(max = 32, message = "Status must be at most 32 characters")
+        private String status;
+        private java.time.LocalDate inspectionExpiryDate;
+        private java.time.LocalDate insuranceExpiryDate;
+        @Size(max = 255, message = "Remarks must be at most 255 characters")
+        private String remarks;
+
+        public String getLicensePlate() {
+            return licensePlate;
+        }
+
+        public void setLicensePlate(String licensePlate) {
+            this.licensePlate = licensePlate;
+        }
+
+        public String getPlateColor() {
+            return plateColor;
+        }
+
+        public void setPlateColor(String plateColor) {
+            this.plateColor = plateColor;
+        }
+
+        public String getVehicleType() {
+            return vehicleType;
+        }
+
+        public void setVehicleType(String vehicleType) {
+            this.vehicleType = vehicleType;
+        }
+
+        public String getBrand() {
+            return brand;
+        }
+
+        public void setBrand(String brand) {
+            this.brand = brand;
+        }
+
+        public String getModel() {
+            return model;
+        }
+
+        public void setModel(String model) {
+            this.model = model;
+        }
+
+        public String getVehicleColor() {
+            return vehicleColor;
+        }
+
+        public void setVehicleColor(String vehicleColor) {
+            this.vehicleColor = vehicleColor;
+        }
+
+        public String getEngineNumber() {
+            return engineNumber;
+        }
+
+        public void setEngineNumber(String engineNumber) {
+            this.engineNumber = engineNumber;
+        }
+
+        public String getFrameNumber() {
+            return frameNumber;
+        }
+
+        public void setFrameNumber(String frameNumber) {
+            this.frameNumber = frameNumber;
+        }
+
+        public String getOwnerName() {
+            return ownerName;
+        }
+
+        public void setOwnerName(String ownerName) {
+            this.ownerName = ownerName;
+        }
+
+        public String getOwnerIdCard() {
+            return ownerIdCard;
+        }
+
+        public void setOwnerIdCard(String ownerIdCard) {
+            this.ownerIdCard = ownerIdCard;
+        }
+
+        public String getOwnerContact() {
+            return ownerContact;
+        }
+
+        public void setOwnerContact(String ownerContact) {
+            this.ownerContact = ownerContact;
+        }
+
+        public String getOwnerAddress() {
+            return ownerAddress;
+        }
+
+        public void setOwnerAddress(String ownerAddress) {
+            this.ownerAddress = ownerAddress;
+        }
+
+        public java.time.LocalDate getFirstRegistrationDate() {
+            return firstRegistrationDate;
+        }
+
+        public void setFirstRegistrationDate(java.time.LocalDate firstRegistrationDate) {
+            this.firstRegistrationDate = firstRegistrationDate;
+        }
+
+        public java.time.LocalDate getRegistrationDate() {
+            return registrationDate;
+        }
+
+        public void setRegistrationDate(java.time.LocalDate registrationDate) {
+            this.registrationDate = registrationDate;
+        }
+
+        public String getIssuingAuthority() {
+            return issuingAuthority;
+        }
+
+        public void setIssuingAuthority(String issuingAuthority) {
+            this.issuingAuthority = issuingAuthority;
+        }
+
+        public String getStatus() {
+            return status;
+        }
+
+        public void setStatus(String status) {
+            this.status = status;
+        }
+
+        public java.time.LocalDate getInspectionExpiryDate() {
+            return inspectionExpiryDate;
+        }
+
+        public void setInspectionExpiryDate(java.time.LocalDate inspectionExpiryDate) {
+            this.inspectionExpiryDate = inspectionExpiryDate;
+        }
+
+        public java.time.LocalDate getInsuranceExpiryDate() {
+            return insuranceExpiryDate;
+        }
+
+        public void setInsuranceExpiryDate(java.time.LocalDate insuranceExpiryDate) {
+            this.insuranceExpiryDate = insuranceExpiryDate;
+        }
+
+        public String getRemarks() {
+            return remarks;
+        }
+
+        public void setRemarks(String remarks) {
+            this.remarks = remarks;
+        }
+    }
+
+    public abstract static class DriverBindingRequest {
+        @NotNull(message = "Driver ID is required")
+        @Positive(message = "Driver ID must be greater than zero")
+        private Long driverId;
+        private Long vehicleId;
+        private String relationship;
+        private Boolean isPrimary;
+        private java.time.LocalDate bindDate;
+        private java.time.LocalDate unbindDate;
+        private String status;
+        private String remarks;
+
+        public Long getDriverId() {
+            return driverId;
+        }
+
+        public void setDriverId(Long driverId) {
+            this.driverId = driverId;
+        }
+
+        public Long getVehicleId() {
+            return vehicleId;
+        }
+
+        public void setVehicleId(Long vehicleId) {
+            this.vehicleId = vehicleId;
+        }
+
+        public String getRelationship() {
+            return relationship;
+        }
+
+        public void setRelationship(String relationship) {
+            this.relationship = relationship;
+        }
+
+        public Boolean getIsPrimary() {
+            return isPrimary;
+        }
+
+        public void setIsPrimary(Boolean isPrimary) {
+            this.isPrimary = isPrimary;
+        }
+
+        public java.time.LocalDate getBindDate() {
+            return bindDate;
+        }
+
+        public void setBindDate(java.time.LocalDate bindDate) {
+            this.bindDate = bindDate;
+        }
+
+        public java.time.LocalDate getUnbindDate() {
+            return unbindDate;
+        }
+
+        public void setUnbindDate(java.time.LocalDate unbindDate) {
+            this.unbindDate = unbindDate;
+        }
+
+        public String getStatus() {
+            return status;
+        }
+
+        public void setStatus(String status) {
+            this.status = status;
+        }
+
+        public String getRemarks() {
+            return remarks;
+        }
+
+        public void setRemarks(String remarks) {
+            this.remarks = remarks;
+        }
+    }
+
+    public static class CreateDriverBindingRequest extends DriverBindingRequest {
+    }
+
+    public static class UpdateDriverBindingRequest extends DriverBindingRequest {
+        @Override
+        @NotNull(message = "Vehicle ID is required")
+        @Positive(message = "Vehicle ID must be greater than zero")
+        public Long getVehicleId() {
+            return super.getVehicleId();
+        }
     }
 }

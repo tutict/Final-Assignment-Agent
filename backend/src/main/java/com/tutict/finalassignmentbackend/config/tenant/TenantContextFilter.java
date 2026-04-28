@@ -40,7 +40,18 @@ public class TenantContextFilter extends OncePerRequestFilter {
                                     @NotNull HttpServletResponse response,
                                     @NotNull FilterChain filterChain) throws ServletException, IOException {
         try {
-            TenantRequestContext resolved = resolveContext(request);
+            TenantRequestContext resolved;
+            try {
+                resolved = resolveContext(request);
+            } catch (IllegalStateException ex) {
+                response.setStatus(HttpStatus.FORBIDDEN.value());
+                response.setContentType("application/json;charset=UTF-8");
+                response.getWriter().write(("""
+                        {"message":"%s","status":403}
+                        """).formatted(sanitizeForJson(ex.getMessage())));
+                return;
+            }
+
             if (resolved != null) {
                 TenantContextHolder.set(resolved);
             }
@@ -66,6 +77,26 @@ public class TenantContextFilter extends OncePerRequestFilter {
         String headerRegionCode = normalize(request.getHeader(tenantIsolationProperties.getRegionCodeHeader()));
         String headerDepartmentCode = normalize(request.getHeader(tenantIsolationProperties.getDepartmentCodeHeader()));
 
+        String token = getJwtFromRequest(request);
+        if (StringUtils.hasText(token) && tokenProvider.validateToken(token) && tokenProvider.isAccessToken(token)) {
+            String tokenTenantId = normalize(tokenProvider.getTenantId(token));
+            if (StringUtils.hasText(tokenTenantId)) {
+                TenantRequestContext tokenContext = new TenantRequestContext(
+                        tokenTenantId,
+                        normalize(tokenProvider.getOrganizationCode(token)),
+                        normalize(tokenProvider.getRegionCode(token)),
+                        normalize(tokenProvider.getDepartmentCode(token)),
+                        TenantRequestContext.Source.TOKEN
+                );
+                validateHeaderOverrides(tokenContext,
+                        headerTenantId,
+                        headerOrganizationCode,
+                        headerRegionCode,
+                        headerDepartmentCode);
+                return tokenContext;
+            }
+        }
+
         if (StringUtils.hasText(headerTenantId)) {
             return new TenantRequestContext(
                     headerTenantId,
@@ -76,21 +107,37 @@ public class TenantContextFilter extends OncePerRequestFilter {
             );
         }
 
-        String token = getJwtFromRequest(request);
-        if (StringUtils.hasText(token) && tokenProvider.validateToken(token) && tokenProvider.isAccessToken(token)) {
-            String tokenTenantId = normalize(tokenProvider.getTenantId(token));
-            if (StringUtils.hasText(tokenTenantId)) {
-                return new TenantRequestContext(
-                        tokenTenantId,
-                        normalize(tokenProvider.getOrganizationCode(token)),
-                        normalize(tokenProvider.getRegionCode(token)),
-                        normalize(tokenProvider.getDepartmentCode(token)),
-                        TenantRequestContext.Source.TOKEN
-                );
-            }
-        }
-
         return null;
+    }
+
+    private void validateHeaderOverrides(TenantRequestContext tokenContext,
+                                         String headerTenantId,
+                                         String headerOrganizationCode,
+                                         String headerRegionCode,
+                                         String headerDepartmentCode) {
+        if (tokenContext == null) {
+            return;
+        }
+        ensureNoConflict("tenant",
+                tokenContext.tenantId(),
+                headerTenantId);
+        ensureNoConflict("organization",
+                tokenContext.organizationCode(),
+                headerOrganizationCode);
+        ensureNoConflict("region",
+                tokenContext.regionCode(),
+                headerRegionCode);
+        ensureNoConflict("department",
+                tokenContext.departmentCode(),
+                headerDepartmentCode);
+    }
+
+    private void ensureNoConflict(String dimension, String tokenValue, String headerValue) {
+        if (StringUtils.hasText(headerValue)
+                && StringUtils.hasText(tokenValue)
+                && !tokenValue.equals(headerValue)) {
+            throw new IllegalStateException("Tenant context header does not match authenticated " + dimension + " scope");
+        }
     }
 
     private boolean requiresTenantContext(HttpServletRequest request) {
@@ -116,5 +163,12 @@ public class TenantContextFilter extends OncePerRequestFilter {
 
     private String normalize(String value) {
         return StringUtils.hasText(value) ? value.trim() : null;
+    }
+
+    private String sanitizeForJson(String value) {
+        if (!StringUtils.hasText(value)) {
+            return "Forbidden";
+        }
+        return value.replace("\\", "\\\\").replace("\"", "\\\"");
     }
 }

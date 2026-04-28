@@ -5,6 +5,9 @@ import 'package:final_assignment_front/features/dashboard/views/admin/pages/prog
 import 'package:final_assignment_front/features/dashboard/views/admin/pages/sidebar_management/log_management.dart';
 import 'package:final_assignment_front/features/dashboard/views/admin/pages/admin_business_processing.dart';
 import 'package:final_assignment_front/features/dashboard/views/admin/pages/sidebar_management/user_management_page.dart';
+import 'package:final_assignment_front/features/dashboard/views/manager/pages/manager_personal_page.dart';
+import 'package:final_assignment_front/features/dashboard/views/manager/pages/manager_setting.dart';
+import 'package:final_assignment_front/features/dashboard/views/manager/pages/sidebar_management/manager_business_processing.dart';
 import 'package:final_assignment_front/features/dashboard/views/shared/components/ai_chat.dart';
 import 'package:final_assignment_front/features/dashboard/views/shared/components/change_themes.dart';
 import 'package:final_assignment_front/features/dashboard/views/shared/components/map.dart';
@@ -47,14 +50,17 @@ Widget? resolveDashboardPage(String routeName) {
     case Routes.changeThemes:
       return const ChangeThemes();
     case Routes.adminSetting:
-    case Routes.managerSetting:
       return const AdminSettingPage();
+    case Routes.managerSetting:
+      return const ManagerSetting();
     case Routes.adminPersonalPage:
-    case Routes.managerPersonalPage:
       return const AdminPersonalPage();
+    case Routes.managerPersonalPage:
+      return const ManagerPersonalPage();
     case Routes.adminBusinessProcessing:
-    case Routes.managerBusinessProcessing:
       return const AdminBusinessProcessing();
+    case Routes.managerBusinessProcessing:
+      return const ManagerBusinessProcessing();
     case Routes.accidentEvidencePage:
       return const AccidentEvidencePage();
     case Routes.accidentVideoQuickPage:

@@ -239,59 +239,9 @@ class UserDashboardController extends GetxController {
   }
 
   void _applyTheme() {
-    String theme = selectedStyle.value;
-    ThemeData baseTheme;
-    if (theme == 'Material') {
-      baseTheme = currentTheme.value == 'Light'
-          ? AppTheme.materialLightTheme
-          : AppTheme.materialDarkTheme;
-    } else if (theme == 'Ionic') {
-      baseTheme = currentTheme.value == 'Light'
-          ? AppTheme.ionicLightTheme
-          : AppTheme.ionicDarkTheme;
-    } else {
-      baseTheme = currentTheme.value == 'Light'
-          ? AppTheme.basicLight
-          : AppTheme.basicDark;
-    }
-
-    String? fontFamily;
-
-    currentBodyTheme.value = baseTheme.copyWith(
-      textTheme: baseTheme.textTheme.copyWith(
-        labelLarge: baseTheme.textTheme.labelLarge?.copyWith(
-          fontFamily: fontFamily,
-          fontSize: 16.0,
-          fontWeight: FontWeight.normal,
-          color: baseTheme.colorScheme.onPrimary,
-        ),
-        bodyLarge: baseTheme.textTheme.bodyLarge?.copyWith(
-          fontFamily: fontFamily,
-          fontSize: 16.0,
-          color: baseTheme.colorScheme.onSurface,
-        ),
-        bodyMedium: baseTheme.textTheme.bodyMedium?.copyWith(
-          fontFamily: fontFamily,
-          fontSize: 14.0,
-          color: baseTheme.colorScheme.onSurface.withValues(alpha: 0.7),
-        ),
-      ),
-      elevatedButtonTheme: ElevatedButtonThemeData(
-        style: ElevatedButton.styleFrom(
-          backgroundColor: baseTheme.colorScheme.primary,
-          foregroundColor: baseTheme.colorScheme.onPrimary,
-          elevation: 2,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16.0),
-          ),
-          textStyle: TextStyle(
-            fontFamily: fontFamily,
-            fontSize: 16.0,
-            fontWeight: FontWeight.normal,
-            color: baseTheme.colorScheme.onPrimary,
-          ),
-        ),
-      ),
+    currentBodyTheme.value = AppTheme.resolveDashboardTheme(
+      style: selectedStyle.value,
+      mode: currentTheme.value,
     );
 
     Get.changeTheme(currentBodyTheme.value);

@@ -83,6 +83,17 @@ class _LoginScreenState extends State<LoginScreen> with ValidatorMixin {
   ThemeData get _pageTheme =>
       _isDarkMode ? AppTheme.basicDark : AppTheme.basicLight;
 
+  String get _landingRoute {
+    switch (_userRole) {
+      case 'ADMIN':
+        return Routes.dashboard;
+      case 'MANAGER':
+        return Routes.managerDashboard;
+      default:
+        return Routes.userDashboard;
+    }
+  }
+
   void setMode(_AuthMode mode) {
     setState(() => _mode = mode);
   }
@@ -149,9 +160,7 @@ class _LoginScreenState extends State<LoginScreen> with ValidatorMixin {
     );
     if (mounted) setState(() => _isSubmitting = false);
     if (error == null) {
-      Get.offAllNamed(
-        _userRole == 'ADMIN' ? Routes.dashboard : Routes.userDashboard,
-      );
+      Get.offAllNamed(_landingRoute);
       return;
     }
     _showMessage(error, isError: true);
@@ -183,9 +192,7 @@ class _LoginScreenState extends State<LoginScreen> with ValidatorMixin {
     );
     if (mounted) setState(() => _isSubmitting = false);
     if (error == null) {
-      Get.offAllNamed(
-        _userRole == 'ADMIN' ? Routes.dashboard : Routes.userDashboard,
-      );
+      Get.offAllNamed(_landingRoute);
       return;
     }
     _showMessage(error, isError: true);
@@ -203,7 +210,7 @@ class _LoginScreenState extends State<LoginScreen> with ValidatorMixin {
       final jwtToken = result['jwtToken'];
       final decodedJwt = _decodeJwt(jwtToken);
       final roleCodes = normalizeRoleCodes(decodedJwt['roles']);
-      _userRole = resolveStoredUserRole(roleCodes);
+      _userRole = resolveWorkspaceRole(roleCodes);
 
       final prefs = await SharedPreferences.getInstance();
       await AuthTokenStore.instance.setJwtToken(jwtToken);
@@ -556,10 +563,12 @@ class _LoginScreenState extends State<LoginScreen> with ValidatorMixin {
                               flex: 6,
                               child: _RevealIn(
                                 delay: const Duration(milliseconds: 80),
-                                child: _BrandPanel(
-                                  theme: theme,
-                                  darkMode: _isDarkMode,
-                                  compact: true,
+                                child: SingleChildScrollView(
+                                  child: _BrandPanel(
+                                    theme: theme,
+                                    darkMode: _isDarkMode,
+                                    compact: true,
+                                  ),
                                 ),
                               ),
                             ),
@@ -651,8 +660,7 @@ class _LoginScreenState extends State<LoginScreen> with ValidatorMixin {
                                 constraints:
                                     const BoxConstraints(maxWidth: 520),
                                 child: _RevealIn(
-                                  delay:
-                                      const Duration(milliseconds: 180),
+                                  delay: const Duration(milliseconds: 180),
                                   child: _AuthPanel(state: this, theme: theme),
                                 ),
                               ),
@@ -1233,6 +1241,7 @@ class _BrandHero extends StatelessWidget {
                   maxWidth: compact ? double.infinity : 560,
                 ),
                 child: Column(
+                  mainAxisSize: compact ? MainAxisSize.min : MainAxisSize.max,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     _RevealIn(
@@ -1314,7 +1323,10 @@ class _BrandHero extends StatelessWidget {
                         ),
                       ),
                     ),
-                    const Spacer(),
+                    if (compact)
+                      SizedBox(height: narrow ? 20 : 28)
+                    else
+                      const Spacer(),
                     _RevealIn(
                       delay: const Duration(milliseconds: 320),
                       child: const _HeroSignalBand(),
@@ -1660,8 +1672,7 @@ class _LoginBackdrop extends StatelessWidget {
                 end: Alignment.bottomRight,
                 colors: [
                   theme.scaffoldBackgroundColor,
-                  theme.colorScheme.surfaceContainer
-                      .withValues(alpha: 0.82),
+                  theme.colorScheme.surfaceContainer.withValues(alpha: 0.82),
                   theme.scaffoldBackgroundColor,
                 ],
               ),
@@ -1689,8 +1700,7 @@ class _LoginBackdrop extends StatelessWidget {
             duration: const Duration(milliseconds: 5800),
             child: _Blob(
               size: 260,
-              color: theme.colorScheme.primaryContainer
-                  .withValues(alpha: 0.18),
+              color: theme.colorScheme.primaryContainer.withValues(alpha: 0.18),
             ),
           ),
         ),

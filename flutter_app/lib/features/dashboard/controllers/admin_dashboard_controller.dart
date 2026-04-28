@@ -147,10 +147,10 @@ class DashboardController extends GetxController {
       email: email,
     );
     debugPrint('DashboardController updated - Name: $name, Email: $email');
-    _saveUserToPrefs(name, email, 'ADMIN');
+    _saveUserToPrefs(name, email);
   }
 
-  Future<void> _saveUserToPrefs(String name, String email, String role) async {
+  Future<void> _saveUserToPrefs(String name, String email) async {
     final prefs = await SharedPreferences.getInstance();
     if (name.isNotEmpty) {
       await prefs.setString('displayName', name);
@@ -158,7 +158,11 @@ class DashboardController extends GetxController {
     if (email.isNotEmpty) {
       await prefs.setString('userEmail', email);
     }
-    await prefs.setString('userRole', role);
+    final existingRole = prefs.getString('userRole');
+    final resolvedRole = existingRole ?? resolveStoredUserRole(currentRoles);
+    if (resolvedRole.isNotEmpty) {
+      await prefs.setString('userRole', resolvedRole);
+    }
   }
 
   Profile get currentProfile =>
@@ -184,55 +188,9 @@ class DashboardController extends GetxController {
   void toggleChat() => isChatExpanded.value = !isChatExpanded.value;
 
   void _applyTheme() {
-    final theme = selectedStyle.value;
-    final ThemeData baseTheme = theme == 'Material'
-        ? (currentTheme.value == 'Light'
-            ? AppTheme.materialLightTheme
-            : AppTheme.materialDarkTheme)
-        : (theme == 'Ionic'
-            ? (currentTheme.value == 'Light'
-                ? AppTheme.ionicLightTheme
-                : AppTheme.ionicDarkTheme)
-            : (currentTheme.value == 'Light'
-                ? AppTheme.basicLight
-                : AppTheme.basicDark));
-
-    String? fontFamily;
-
-    currentBodyTheme.value = baseTheme.copyWith(
-      textTheme: baseTheme.textTheme.copyWith(
-        labelLarge: baseTheme.textTheme.labelLarge?.copyWith(
-          fontFamily: fontFamily,
-          fontSize: 16.0,
-          fontWeight: FontWeight.normal,
-          color: baseTheme.colorScheme.onPrimary,
-        ),
-        bodyLarge: baseTheme.textTheme.bodyLarge?.copyWith(
-          fontFamily: fontFamily,
-          fontSize: 16.0,
-          color: baseTheme.colorScheme.onSurface,
-        ),
-        bodyMedium: baseTheme.textTheme.bodyMedium?.copyWith(
-          fontFamily: fontFamily,
-          fontSize: 14.0,
-          color: baseTheme.colorScheme.onSurface.withValues(alpha: 0.7),
-        ),
-      ),
-      elevatedButtonTheme: ElevatedButtonThemeData(
-        style: ElevatedButton.styleFrom(
-          backgroundColor: baseTheme.colorScheme.primary,
-          foregroundColor: baseTheme.colorScheme.onPrimary,
-          elevation: 2,
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16.0)),
-          textStyle: TextStyle(
-            fontFamily: fontFamily,
-            fontSize: 16.0,
-            fontWeight: FontWeight.normal,
-            color: baseTheme.colorScheme.onPrimary,
-          ),
-        ),
-      ),
+    currentBodyTheme.value = AppTheme.resolveDashboardTheme(
+      style: selectedStyle.value,
+      mode: currentTheme.value,
     );
 
     Get.changeTheme(currentBodyTheme.value);
